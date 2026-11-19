@@ -22,6 +22,7 @@
 
         <button id="settings-button" class="nav-button settings-button" type="button" data-view="settings">
           <i data-lucide="settings"></i><span data-text="settings">Settings</span>
+          <span class="settings-permission-dot" id="settings-permission-dot" aria-hidden="true" hidden></span>
         </button>
       </aside>
 
@@ -213,7 +214,7 @@
         </div>
         <div data-module-view="settings" hidden>
           <h1 data-text="settings" tabindex="-1">Settings</h1>
-          <div class="settings-preferences">
+          <div class="settings-preferences" id="settings-preferences">
             <div class="settings-group">
               <p class="control-label" id="language-label"><i data-lucide="globe"></i><span data-text="language">Language</span></p>
               <div class="segments" role="group" aria-labelledby="language-label">
@@ -232,12 +233,31 @@
                 <span class="segment-indicator" aria-hidden="true"></span>
               </div>
             </div>
+            <div class="settings-presentation" id="settings-presentation" hidden>
+              <div class="presentation-control">
+                <div class="permission-heading-title">
+                  <label for="hide-while-sharing">
+                    <i data-lucide="eye-off"></i><span data-text="hideWhileSharing">Hide Lazy Worker while sharing</span>
+                  </label>
+                  <button class="permission-warning" type="button" data-permission-warning="hideWhileSharing" data-label="showPermissionWarning"
+                    aria-label="Show Accessibility warning" aria-controls="permission-notice" aria-expanded="false" hidden>
+                    <i data-lucide="triangle-alert"></i>
+                  </button>
+                </div>
+                <span class="switch">
+                  <input id="hide-while-sharing" type="checkbox" switch role="switch" aria-describedby="sharing-description accessibility-status" disabled />
+                  <span aria-hidden="true"></span>
+                </span>
+              </div>
+              <p id="sharing-description" data-text="sharingPrivacyDescription">Hides the panel and menu bar icon during detected screen shares. Requires Accessibility permission.</p>
+            </div>
             <section class="settings-permissions" aria-labelledby="permissions-heading">
               <div class="permissions-heading">
                 <span class="permission-symbol" aria-hidden="true"><i data-lucide="lock-keyhole"></i></span>
                 <div>
                   <div class="permission-heading-title">
                     <h2 id="permissions-heading" data-text="accessibility">Accessibility</h2>
+                    <span class="permission-status-badge" id="settings-permission-state" data-text="accessibilityPending" hidden>Permission pending</span>
                     <div>
                       <button class="help-button permission-help-button" type="button" data-help-button data-label="accessibilityHelp"
                         aria-label="Help with Accessibility" aria-expanded="false" aria-controls="accessibility-help">
@@ -263,6 +283,10 @@
                     </div>
                   </div>
                   <p id="accessibility-status" role="status"></p>
+                  <ul id="permission-features" class="permission-features" hidden>
+                    <li><i data-lucide="activity"></i><span data-text="activity">Activity</span></li>
+                    <li><i data-lucide="eye-off"></i><span data-text="hideWhileSharingShort">Hide while sharing</span></li>
+                  </ul>
                 </div>
               </div>
               <button class="accessibility-button" id="settings-accessibility" type="button" disabled>
@@ -272,23 +296,37 @@
           </div>
         </div>
       </main>
-      <div id="operation-progress" class="operation-progress" role="status" aria-atomic="true">
-        <span data-progress-label></span>
-        <span class="operation-progress-counter" data-progress-counter></span>
-        <span class="operation-progress-track" aria-hidden="true"><span data-progress-fill></span></span>
+      <div class="notification-stack">
+        <div id="operation-progress" class="operation-progress" role="status" aria-atomic="true">
+          <span data-progress-label></span>
+          <span class="operation-progress-counter" data-progress-counter></span>
+          <span class="operation-progress-track" aria-hidden="true"><span data-progress-fill></span></span>
+        </div>
+        <div id="notice-region" class="notice" role="region" aria-labelledby="notice-title" aria-hidden="true" inert>
+          <span class="notice-symbol" aria-hidden="true">
+            <i data-lucide="info"></i><i data-lucide="triangle-alert"></i>
+          </span>
+          <div>
+            <p id="notice-title" class="notice-title"></p>
+            <p id="notice-description" class="notice-description"></p>
+            <button class="accessibility-button" id="notice-accessibility" type="button" hidden>
+              <i data-lucide="lock-keyhole" aria-hidden="true"></i><span data-text="openAccessibility">Open Accessibility settings</span>
+            </button>
+          </div>
+          <button class="notice-dismiss" id="notice-dismiss" type="button" data-label="dismissNotice" aria-label="Dismiss notification">
+            <i data-lucide="x" aria-hidden="true"></i>
+          </button>
+        </div>
       </div>
-      <div id="notice-region" class="notice" aria-hidden="true" inert>
-        <span class="notice-symbol" aria-hidden="true">
-          <i data-lucide="info"></i><i data-lucide="triangle-alert"></i>
-        </span>
-        <div class="notice-copy">
-          <p id="notice-title" class="notice-title"></p>
-          <p id="notice-description" class="notice-description"></p>
-          <button class="accessibility-button" id="notice-accessibility" type="button" hidden>
+      <div id="permission-notice" class="notice permission-notice" role="region" aria-labelledby="permission-notice-title" aria-hidden="true" inert>
+        <div>
+          <p id="permission-notice-title" class="notice-title"></p>
+          <p class="notice-description" data-text="permissionWarning">Allow Lazy Worker in Accessibility to use this feature.</p>
+          <button class="accessibility-button" id="permission-notice-accessibility" type="button">
             <i data-lucide="lock-keyhole" aria-hidden="true"></i><span data-text="openAccessibility">Open Accessibility settings</span>
           </button>
         </div>
-        <button class="notice-dismiss" id="notice-dismiss" type="button" data-label="dismissNotice" aria-label="Dismiss notification">
+        <button class="notice-dismiss" id="permission-notice-dismiss" type="button" data-label="dismissNotice" aria-label="Dismiss notice">
           <i data-lucide="x" aria-hidden="true"></i>
         </button>
       </div>
@@ -321,6 +359,10 @@
             <h1 tabindex="-1"></h1>
             <div class="module-status">
               <span class="status" data-tool-status data-mode="off" role="status">Off</span>
+              <button class="permission-warning" type="button" data-permission-warning="activity" data-label="showPermissionWarning"
+                aria-label="Show Accessibility warning" aria-controls="permission-notice" aria-expanded="false" hidden>
+                <i data-lucide="triangle-alert"></i>
+              </button>
               <span class="session-timer" data-tool-timer role="timer" aria-hidden="true">00:00:00</span>
             </div>
           </div>

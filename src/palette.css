@@ -18,6 +18,11 @@
   --accent-hover: #4d6276;
   --accent-ink: #fff;
   --control-accent: #9a5946;
+  --pending-color: #824a37;
+  --pending-border: rgba(130, 74, 55, .30);
+  --pending-panel: rgba(130, 74, 55, .055);
+  --pending-badge: rgba(130, 74, 55, .08);
+  --pending-icon: rgba(130, 74, 55, .12);
   --launch: #f03a2a;
   --launch-ink: #191410;
   --selected: #cccac2;
@@ -49,6 +54,11 @@
   --accent-hover: #eee7d8;
   --accent-ink: #222b33;
   --control-accent: #dfa08c;
+  --pending-color: #edb78a;
+  --pending-border: rgba(233, 169, 118, .30);
+  --pending-panel: rgba(233, 165, 115, .055);
+  --pending-badge: rgba(233, 169, 118, .08);
+  --pending-icon: rgba(233, 169, 118, .12);
   --launch: #c17d6d;
   --launch-ink: #191410;
   --selected: #555653;

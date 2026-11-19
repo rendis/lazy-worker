@@ -7,6 +7,8 @@ mod preferences;
 #[cfg(target_os = "macos")]
 mod panel;
 #[cfg(target_os = "macos")]
+mod presentation;
+#[cfg(target_os = "macos")]
 mod tray;
 
 use activity::Activity;
@@ -112,12 +114,24 @@ fn get_system_language() -> Option<preferences::Language> {
 
 #[tauri::command]
 fn save_preferences(
+    app: tauri::AppHandle,
     controller: State<'_, Controller>,
     mut preferences: Preferences,
 ) -> Result<(), &'static str> {
     let mut tools = controller.lock().map_err(|_| "saveFailed")?;
     preferences.caffeinate = tools.activity.preferences().caffeinate;
-    tools.activity.save_preferences(preferences)
+    #[cfg(target_os = "macos")]
+    let presentation_changed =
+        preferences.hide_while_sharing != tools.activity.preferences().hide_while_sharing;
+    tools.activity.save_preferences(preferences)?;
+    drop(tools);
+    #[cfg(target_os = "macos")]
+    if presentation_changed {
+        presentation::refresh(&app);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
+    Ok(())
 }
 
 #[tauri::command]
@@ -188,6 +202,8 @@ fn main() {
             let tray_app = {
                 panel::install(app)?;
                 tray::install(app)?;
+                app.manage(Mutex::new(presentation::Presentation::default()));
+                presentation::refresh(app.handle());
                 app.handle().clone()
             };
             thread::spawn(move || loop {
@@ -202,7 +218,10 @@ fn main() {
                 tools.caffeinate.status();
                 drop(tools);
                 #[cfg(target_os = "macos")]
-                tray::refresh(&tray_app);
+                {
+                    tray::refresh(&tray_app);
+                    presentation::refresh(&tray_app);
+                }
             });
             Ok(())
         })
@@ -227,6 +246,8 @@ fn main() {
     };
     app.run(|app, event| match event {
         RunEvent::Exit => {
+            #[cfg(target_os = "macos")]
+            presentation::stop(app);
             let controller = app.state::<Controller>();
             if let Ok(mut tools) = controller.lock() {
                 tools.set_active(ToolId::Activity, false);

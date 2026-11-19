@@ -3,6 +3,7 @@ use std::{env, fs, path::PathBuf, process::Command};
 fn main() {
     println!("cargo:rerun-if-changed=native/main.swift");
     println!("cargo:rerun-if-changed=native/IdleGate.swift");
+    println!("cargo:rerun-if-changed=native/Presentation.swift");
 
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
         let target = env::var("TARGET").expect("Cargo target not set");
@@ -20,7 +21,12 @@ fn main() {
             .args(["swiftc", "-O", "-target", &deployment_target])
             .arg("-module-cache-path")
             .arg(module_cache)
-            .args(["native/main.swift", "native/IdleGate.swift", "-o"])
+            .args([
+                "native/main.swift",
+                "native/IdleGate.swift",
+                "native/Presentation.swift",
+                "-o",
+            ])
             .arg(binaries.join(format!("activity-helper-{target}")))
             .status()
             .expect("Could not run swiftc");

@@ -8,9 +8,14 @@ func respond(_ message: String) {
     fflush(stdout)
 }
 
-if CommandLine.arguments.dropFirst().first == "--accessibility-status" {
+switch CommandLine.arguments.dropFirst().first {
+case "--accessibility-status":
     respond(AXIsProcessTrusted() ? "granted" : "required")
     exit(EXIT_SUCCESS)
+case "--monitor-presentation":
+    monitorPresentation()
+default:
+    break
 }
 
 let hidService = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOHIDSystem"))

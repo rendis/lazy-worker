@@ -300,6 +300,20 @@ fn windup_icon() -> tauri::Result<Image<'static>> {
     Ok(Image::new_owned(rgba, frame.width, frame.height))
 }
 
+pub fn set_visible(app: &AppHandle, visible: bool) -> tauri::Result<()> {
+    let tray = app
+        .tray_by_id(TRAY_ID)
+        .ok_or_else(|| io::Error::other("Missing status item"))?;
+    tray.with_inner_tray_icon(move |tray| {
+        let item = tray
+            .ns_status_item()
+            .ok_or_else(|| io::Error::other("Missing native status item"))?;
+        // Use the existing status item so its activity badge survives hiding.
+        item.setVisible(visible);
+        Ok(())
+    })?
+}
+
 fn set_activity_dot(tray: &TrayIcon, active: bool) -> tauri::Result<()> {
     tray.with_inner_tray_icon(move |tray| {
         let mtm = MainThreadMarker::new().expect("Status item update must run on the main thread");

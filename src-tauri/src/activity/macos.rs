@@ -5,7 +5,7 @@ use std::{
 
 pub const SUPPORTED: bool = true;
 
-fn helper_command() -> io::Result<Command> {
+pub(crate) fn helper_command() -> io::Result<Command> {
     let executable = std::env::current_exe()?.with_file_name("activity-helper");
     Ok(Command::new(executable))
 }

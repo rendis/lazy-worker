@@ -1,7 +1,7 @@
 import "./style.css";
 import {
   Activity, ArrowRight, Check, ChevronRight, Coffee, Contrast, createIcons,
-  Database, ExternalLink, Globe, Info, Laptop, LayoutGrid, LockKeyhole, Monitor, Moon, Power,
+  Database, ExternalLink, EyeOff, Globe, Info, Laptop, LayoutGrid, LockKeyhole, Monitor, Moon, Power,
   Settings, Square, Sun, TriangleAlert, UserRound, X,
 } from "lucide";
 import { mountCaffeinateForm } from "./caffeinate-form";
@@ -22,7 +22,7 @@ const updateToolOrder = mountTools();
 createIcons({
   icons: {
     Activity, ArrowRight, Check, ChevronRight, Coffee, Contrast, Database,
-    ExternalLink, Globe, Info, Laptop, LayoutGrid, LockKeyhole, Monitor, Moon, Power, Settings,
+    ExternalLink, EyeOff, Globe, Info, Laptop, LayoutGrid, LockKeyhole, Monitor, Moon, Power, Settings,
     Square, Sun, TriangleAlert, UserRound, X,
   },
   attrs: { "aria-hidden": "true", "stroke-width": 1.75 },
@@ -52,19 +52,34 @@ const languageButtons = document.querySelectorAll<HTMLButtonElement>("[data-lang
 const themeButtons = document.querySelectorAll<HTMLButtonElement>("[data-theme-choice]");
 const translated = document.querySelectorAll<HTMLElement>("[data-text]");
 const accessibleLabels = document.querySelectorAll<HTMLElement>("[data-label]");
+const main = document.querySelector("main")!;
 const noticeRegion = element("notice-region");
 const noticeTitle = element("notice-title");
 const noticeDescription = element("notice-description");
 const noticeAnnouncement = element("notice-announcement");
 const noticeAccessibility = element<HTMLButtonElement>("notice-accessibility");
 const noticeDismiss = element<HTMLButtonElement>("notice-dismiss");
+const permissionRegion = element("permission-notice");
+const permissionTitle = element("permission-notice-title");
+const permissionAccessibility = element<HTMLButtonElement>("permission-notice-accessibility");
+const permissionDismiss = element<HTMLButtonElement>("permission-notice-dismiss");
 const accessibilityStatus = element("accessibility-status");
 const settingsAccessibility = element<HTMLButtonElement>("settings-accessibility");
+const settingsButton = element<HTMLButtonElement>("settings-button");
+const settingsPreferences = element("settings-preferences");
+const settingsPermissionDot = element("settings-permission-dot");
+const settingsPermissionState = element("settings-permission-state");
+const permissionFeatures = element("permission-features");
+const hideWhileSharing = element<HTMLInputElement>("hide-while-sharing");
+const permissionWarnings = document.querySelectorAll<HTMLButtonElement>("[data-permission-warning]");
+const activityWarning = document.querySelector<HTMLButtonElement>('[data-permission-warning="activity"]')!;
+const sharingWarning = document.querySelector<HTMLButtonElement>('[data-permission-warning="hideWhileSharing"]')!;
+element("settings-presentation").hidden = !desktop.showPresentationPrivacy;
 
 type ActivityMode = "duration" | "schedule";
 type FeedbackTarget = ToolId | "tools" | "settings";
 type FeedbackLine = { message: Message; tool?: ToolId };
-type PreferenceChoice = "duration" | "language" | "theme";
+type PreferenceChoice = "duration" | "language" | "theme" | "hideWhileSharing";
 type PreferenceChange = { key: PreferenceChoice | ToolId; apply: (current: Preferences) => Preferences };
 const accessibilityLabels: Record<ActivityAccessibility, Message> = {
   granted: "accessibilityGranted",
@@ -95,6 +110,8 @@ let accessibility: ActivityAccessibility | undefined;
 let accessibilityRefresh: Promise<void> | undefined;
 let accessibilityOpening = false;
 let accessibilityRequestIssue: FeedbackTarget | undefined;
+let permissionNotice: { trigger: HTMLButtonElement; pinned: boolean } | undefined;
+let permissionNoticeDismissal: number | undefined;
 let activityResultRevision = 0;
 let activityPermissionErrorRetired = false;
 
@@ -144,14 +161,35 @@ function toolError(tool: ToolId): Message | undefined {
   if (ready && !supported) return tool === "activity" ? "unsupported" : "caffeinateUnsupported";
 }
 
+function needsAccessibility(): boolean {
+  return desktop.macApp && (accessibility === "required" || accessibility === "unavailable");
+}
+
+function setNoticeOpen(region: HTMLElement, open: boolean): void {
+  region.toggleAttribute("data-open", open);
+  region.toggleAttribute("inert", !open);
+  setAttribute(region, "aria-hidden", String(!open));
+}
+
 function renderFeedback(): void {
   const unsupported = accessibility === "unsupported";
+  const permissionPending = desktop.macApp && accessibility === "required";
+  settingsPreferences.toggleAttribute("data-permission-pending", permissionPending);
+  settingsPermissionDot.hidden = !permissionPending;
+  settingsPermissionState.hidden = !permissionPending;
+  permissionFeatures.hidden = !permissionPending;
+  if (permissionPending) setAttribute(settingsButton, "aria-describedby", settingsPermissionState.id);
+  else settingsButton.removeAttribute("aria-describedby");
+  hideWhileSharing.checked = preferences.hideWhileSharing && (!desktop.macApp || accessibility === "granted");
+  setDisabled(hideWhileSharing, !loaded || (desktop.macApp &&
+    (accessibility === undefined || unsupported || accessibilityOpening)));
   setText(accessibilityStatus, translate(accessibility ? accessibilityLabels[accessibility] : "accessibilityChecking"));
   setDisabled(settingsAccessibility, accessibility === undefined || unsupported);
   setAttribute(settingsAccessibility, "aria-disabled", String(accessibilityOpening || settingsAccessibility.disabled));
   setAttribute(noticeAccessibility, "aria-disabled", String(accessibilityOpening));
 
   const view = activeView();
+  renderPermissionNotice(view);
   const target = view.dataset.moduleView as FeedbackTarget;
   const explicit = feedback[target];
   const applying = workerAction?.running && workerAction.target === target;
@@ -167,7 +205,7 @@ function renderFeedback(): void {
   if (dismissedFeedback[target] !== key) delete dismissedFeedback[target];
   if (open) {
     const description = lines.map(({ message, tool }) =>
-      tool ? `${translate(tool)} — ${translate(message)}` : translate(message)).join("\n");
+      tool && tool !== title ? `${translate(tool)} — ${translate(message)}` : translate(message)).join("\n");
     const titleText = translate(title);
     const canOpenAccessibility = !unsupported && lines.some(({ message }) =>
       message === "permissionRequired" || message === "accessibilityRequestFailed");
@@ -184,9 +222,93 @@ function renderFeedback(): void {
     setText(noticeAnnouncement, "");
     visibleNotice = undefined;
   }
-  noticeRegion.toggleAttribute("data-open", open);
-  noticeRegion.toggleAttribute("inert", !open);
-  setAttribute(noticeRegion, "aria-hidden", String(!open));
+  setNoticeOpen(noticeRegion, open);
+}
+
+function renderPermissionNotice(view = activeView()): void {
+  const missingPermission = needsAccessibility();
+  if (!missingPermission || permissionNotice?.trigger.closest("[data-module-view]") !== view) {
+    permissionNotice = undefined;
+  }
+  const trigger = permissionNotice?.trigger;
+  if (trigger) {
+    setText(permissionTitle, translate(trigger.dataset.permissionWarning as Message));
+  } else if (permissionRegion.contains(document.activeElement)) {
+    view.querySelector("h1")?.focus({ preventScroll: true });
+  }
+  setNoticeOpen(permissionRegion, Boolean(trigger));
+  setAttribute(permissionAccessibility, "aria-disabled", String(accessibilityOpening));
+  for (const button of permissionWarnings) {
+    button.hidden = !missingPermission;
+    setAttribute(button, "aria-expanded", String(trigger === button));
+  }
+  positionPermissionNotice();
+}
+
+function positionPermissionNotice(): void {
+  const anchor = permissionNotice?.trigger;
+  if (!anchor) return;
+  const bounds = anchor.getBoundingClientRect();
+  const viewport = document.documentElement;
+  const gutter = 8;
+  const gap = 6;
+  const topEdge = Math.max(0, main.getBoundingClientRect().top);
+  if (bounds.bottom <= topEdge || bounds.top >= viewport.clientHeight) {
+    dismissPermissionNotice();
+    return;
+  }
+
+  const below = viewport.clientHeight - bounds.bottom - gap - gutter;
+  const above = bounds.top - gap - topEdge - gutter;
+  const height = permissionRegion.scrollHeight + permissionRegion.offsetHeight - permissionRegion.clientHeight;
+  const placeBelow = height <= below || below >= above;
+  const available = Math.max(0, placeBelow ? below : above);
+  const top = placeBelow ? bounds.bottom + gap : bounds.top - gap - Math.min(height, available);
+  const left = Math.max(gutter, Math.min(bounds.left, viewport.clientWidth - permissionRegion.offsetWidth - gutter));
+  permissionRegion.style.setProperty("--anchor-top", `${top}px`);
+  permissionRegion.style.setProperty("--anchor-left", `${left}px`);
+  permissionRegion.style.setProperty("--anchor-height", `${available}px`);
+}
+
+function showPermissionNotice(trigger: HTMLButtonElement, pinned = false): void {
+  if (!needsAccessibility()) return;
+  window.clearTimeout(permissionNoticeDismissal);
+  if (permissionNotice?.trigger === trigger && !pinned) {
+    positionPermissionNotice();
+    return;
+  }
+  permissionNotice = { trigger, pinned };
+  renderPermissionNotice();
+  if (pinned && permissionNotice) permissionAccessibility.focus({ preventScroll: true });
+}
+
+function schedulePermissionNoticeDismissal(): void {
+  window.clearTimeout(permissionNoticeDismissal);
+  permissionNoticeDismissal = window.setTimeout(() => {
+    const notice = permissionNotice;
+    if (!notice || notice.pinned ||
+        notice.trigger.matches(":hover, :focus") || permissionRegion.matches(":hover, :focus-within")) return;
+    dismissPermissionNotice();
+  }, 300);
+}
+
+function dismissPermissionNotice(restoreFocus = false): void {
+  const trigger = permissionNotice?.trigger;
+  if (!trigger) return;
+  if (permissionRegion.contains(document.activeElement)) {
+    if (restoreFocus) trigger.focus({ preventScroll: true });
+    else (document.activeElement as HTMLElement).blur();
+  }
+  window.clearTimeout(permissionNoticeDismissal);
+  permissionNotice = undefined;
+  renderPermissionNotice();
+}
+
+function dismissNotice(): void {
+  if (!visibleNotice) return;
+  const { target, key } = visibleNotice;
+  dismissedFeedback[target] = key;
+  renderFeedback();
 }
 
 function renderStatus(): void {
@@ -366,7 +488,7 @@ function refreshAccessibility(): Promise<void> {
 const permissionChecks = [
   {
     refresh: refreshAccessibility,
-    pending: () => accessibility === "required" ||
+    pending: () => accessibility === "required" || (desktop.macApp && activeView().dataset.moduleView === "settings") ||
       (statuses.activity.error === "permissionRequired" && !activityPermissionErrorRetired),
   },
 ];
@@ -635,6 +757,10 @@ powerButtons.forEach(button => button.addEventListener("click", () => {
   const id = button.dataset.toolPower as ToolId;
   const active = statuses[id].mode === "off";
   const target = button.closest('[data-module-view="tools"]') ? "tools" : id;
+  if (target === "activity" && active && needsAccessibility()) {
+    showPermissionNotice(activityWarning, true);
+    return;
+  }
   updateWorker(target, async requested => {
     if (id === "activity" && active && requested.duration !== savedPreferences.duration) throw "saveFailed";
     if (target === "tools") {
@@ -681,6 +807,14 @@ languageButtons.forEach(button => button.addEventListener("click", () => {
 themeButtons.forEach(button => button.addEventListener("click", () => {
   updateChoice("settings", "theme", button.dataset.themeChoice as Theme);
 }));
+hideWhileSharing.addEventListener("change", () => {
+  if (hideWhileSharing.checked && desktop.macApp && accessibility !== "granted") {
+    hideWhileSharing.checked = false;
+    showPermissionNotice(sharingWarning, true);
+    return;
+  }
+  updateChoice("settings", "hideWhileSharing", hideWhileSharing.checked);
+});
 modeChoices.forEach(option => option.addEventListener("change", () => {
   if (!option.checked) return;
   selectActivityMode(option.value as ActivityMode);
@@ -692,11 +826,43 @@ scheduleForm.addEventListener("submit", event => {
   saveSchedule(true);
 });
 caffeinate.onChange(queueCaffeinateAutosave);
-noticeDismiss.addEventListener("click", () => {
-  if (!visibleNotice) return;
-  dismissedFeedback[visibleNotice.target] = visibleNotice.key;
-  renderFeedback();
+for (const button of permissionWarnings) {
+  button.addEventListener("pointerenter", event => {
+    if (event.pointerType !== "touch") showPermissionNotice(button);
+  });
+  button.addEventListener("focus", () => showPermissionNotice(button));
+  button.addEventListener("click", () => showPermissionNotice(button, true));
+  button.addEventListener("pointerleave", schedulePermissionNoticeDismissal);
+  button.addEventListener("blur", schedulePermissionNoticeDismissal);
+  button.addEventListener("keydown", event => {
+    if (event.key !== "Tab" || event.shiftKey || button.getAttribute("aria-expanded") !== "true") return;
+    event.preventDefault();
+    permissionAccessibility.focus({ preventScroll: true });
+  });
+}
+permissionRegion.addEventListener("pointerenter", () => window.clearTimeout(permissionNoticeDismissal));
+permissionRegion.addEventListener("pointerleave", schedulePermissionNoticeDismissal);
+permissionRegion.addEventListener("focusout", schedulePermissionNoticeDismissal);
+window.addEventListener("resize", positionPermissionNotice);
+window.addEventListener("scroll", positionPermissionNotice, { capture: true, passive: true });
+function dismissPermissionNoticeOutside(event: Event): void {
+  const trigger = permissionNotice?.trigger;
+  const target = event.target;
+  if (trigger && target instanceof Node && !trigger.contains(target) && !permissionRegion.contains(target)) {
+    dismissPermissionNotice();
+  }
+}
+document.addEventListener("click", dismissPermissionNoticeOutside, true);
+document.addEventListener("focusin", dismissPermissionNoticeOutside);
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape") dismissPermissionNotice(true);
 });
+permissionDismiss.addEventListener("click", () => dismissPermissionNotice(true));
+permissionAccessibility.addEventListener("click", () => {
+  dismissPermissionNotice(true);
+  void openAccessibility(activeView().dataset.moduleView as FeedbackTarget);
+});
+noticeDismiss.addEventListener("click", dismissNotice);
 noticeAccessibility.addEventListener("click", () => {
   if (visibleNotice) void openAccessibility(visibleNotice.target);
 });

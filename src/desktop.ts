@@ -19,6 +19,7 @@ export type Preferences = {
   schedule: { enabled: boolean; start: string; end: string };
   quickStart: Record<ToolId, boolean>;
   caffeinate: CaffeinateSettings;
+  hideWhileSharing: boolean;
 };
 export type Status = {
   mode: "off" | "manual" | "scheduled";
@@ -36,6 +37,7 @@ export const defaults: Preferences = {
   duration: "minutes15",
   schedule: { enabled: false, start: "09:00", end: "17:00" },
   quickStart: { activity: false, caffeinate: false },
+  hideWhileSharing: true,
   caffeinate: {
     mode: "untilStopped",
     flags: { i: true, d: false, m: false, s: false, u: false },
@@ -60,6 +62,7 @@ type PreviewSession = {
   caffeinate?: CaffeinateSettings;
 };
 const native = isTauri();
+const macApp = native && navigator.userAgent.includes("Macintosh");
 const previewKey = "lazy-worker-preview-preferences";
 const previewSessions = new Map<ToolId, PreviewSession>();
 const previewErrors = new Map<ToolId, string>();
@@ -167,7 +170,9 @@ function updatePreviewCaffeinateSession(settings: CaffeinateSettings): void {
 }
 
 export const desktop = {
-  showWindowTitlebar: !native || navigator.userAgent.includes("Macintosh"),
+  macApp,
+  showWindowTitlebar: !native || macApp,
+  showPresentationPrivacy: !native || macApp,
   async getPreferences(): Promise<Preferences> {
     return native ? invoke("get_preferences") : loadPreviewPreferences();
   },

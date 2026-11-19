@@ -14,6 +14,8 @@ mod platform;
 #[path = "unsupported.rs"]
 mod platform;
 
+#[cfg(target_os = "macos")]
+pub(crate) use platform::helper_command;
 use platform::Worker;
 pub use platform::{accessibility_status, request_accessibility};
 

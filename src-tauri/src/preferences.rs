@@ -113,7 +113,7 @@ pub struct QuickStart {
     pub caffeinate: bool,
 }
 
-#[derive(Clone, Default, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Preferences {
     pub language: Language,
@@ -122,6 +122,21 @@ pub struct Preferences {
     pub schedule: Schedule,
     pub quick_start: QuickStart,
     pub caffeinate: CaffeinateSettings,
+    pub hide_while_sharing: bool,
+}
+
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            language: Language::default(),
+            theme: Theme::default(),
+            duration: ManualDuration::default(),
+            schedule: Schedule::default(),
+            quick_start: QuickStart::default(),
+            caffeinate: CaffeinateSettings::default(),
+            hide_while_sharing: true,
+        }
+    }
 }
 
 pub fn load(path: &Path) -> Result<Preferences, Box<dyn std::error::Error>> {
@@ -160,6 +175,21 @@ mod tests {
         let explicit_language: Preferences = serde_json::from_str(r#"{"language":"es"}"#).unwrap();
         assert!(matches!(explicit_language.theme, Theme::System));
         assert!(matches!(explicit_language.language, Language::Es));
+    }
+
+    #[test]
+    fn sharing_privacy_defaults_on_and_preserves_an_opt_out() {
+        assert!(Preferences::default().hide_while_sharing);
+        let previous: Preferences = serde_json::from_str(r#"{"language":"es"}"#).unwrap();
+        assert!(previous.hide_while_sharing);
+
+        let disabled: Preferences = serde_json::from_str(r#"{"hideWhileSharing":false}"#).unwrap();
+        let saved = serde_json::to_string(&disabled).unwrap();
+        assert!(
+            !serde_json::from_str::<Preferences>(&saved)
+                .unwrap()
+                .hide_while_sharing
+        );
     }
 
     #[test]

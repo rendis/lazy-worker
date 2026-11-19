@@ -116,7 +116,7 @@ function mountTool(tool: (typeof tools)[number], navigation: HTMLElement, catalo
 
   const header = instantiate("tool-header-template");
   const heading = header.querySelector("h1")!;
-  const power = header.querySelector("button")!;
+  const power = header.querySelector<HTMLButtonElement>("[data-tool-power]")!;
   const status = header.querySelector<HTMLElement>("[data-tool-status]")!;
   const timer = header.querySelector<HTMLElement>("[data-tool-timer]")!;
   const headerSwitchLabel = header.querySelector<HTMLElement>(".quick-switch-label")!;
@@ -132,6 +132,8 @@ function mountTool(tool: (typeof tools)[number], navigation: HTMLElement, catalo
   if (tool.id === "activity") {
     power.id = "power";
     status.id = "status";
+  } else {
+    header.querySelector("[data-permission-warning]")?.remove();
   }
   header.querySelector<HTMLElement>(".tool-icon")!.dataset.lucide = tool.icon;
   label(heading, tool.title);
