@@ -9,7 +9,11 @@ mod panel;
 #[cfg(target_os = "macos")]
 mod presentation;
 #[cfg(target_os = "macos")]
+mod single_instance;
+#[cfg(target_os = "macos")]
 mod tray;
+#[cfg(target_os = "macos")]
+mod updates;
 
 use activity::Activity;
 use caffeinate::{Caffeinate, CaffeinateSettings, RunningProcess};
@@ -186,7 +190,12 @@ fn set_tool_active(
 }
 
 fn main() {
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .plugin(single_instance::plugin())
+        .plugin(tauri_plugin_updater::Builder::new().build());
+    let app = builder
         .setup(|app| {
             let directory = app.path().app_config_dir()?;
             fs::create_dir_all(&directory)?;
@@ -204,6 +213,7 @@ fn main() {
                 tray::install(app)?;
                 app.manage(Mutex::new(presentation::Presentation::default()));
                 presentation::refresh(app.handle());
+                updates::start(app.handle());
                 app.handle().clone()
             };
             thread::spawn(move || loop {
@@ -221,6 +231,7 @@ fn main() {
                 {
                     tray::refresh(&tray_app);
                     presentation::refresh(&tray_app);
+                    single_instance::reopen_if_requested(&tray_app);
                 }
             });
             Ok(())
@@ -234,7 +245,11 @@ fn main() {
             get_statuses,
             get_activity_accessibility,
             request_activity_accessibility,
-            set_tool_active
+            set_tool_active,
+            #[cfg(target_os = "macos")]
+            updates::get_available_update,
+            #[cfg(target_os = "macos")]
+            updates::restart_to_update
         ])
         .build(tauri::generate_context!())
         .expect("Could not build Lazy Worker");

@@ -294,10 +294,24 @@
                 <i data-lucide="external-link" aria-hidden="true"></i><span data-text="openAccessibility">Open Accessibility settings</span>
               </button>
             </section>
+            <section class="settings-update" id="settings-update" aria-labelledby="settings-update-title" hidden>
+              <h2 id="settings-update-title" data-text="updates">Updates</h2>
+              <p id="settings-update-description" class="notice-description"></p>
+              <button class="accessibility-button" id="settings-update-restart" type="button" data-text="restartToUpdate" aria-describedby="settings-update-description">Restart to update</button>
+            </section>
           </div>
         </div>
       </main>
       <div class="notification-stack">
+        <div id="update-notice" class="notice" aria-hidden="true" inert>
+          <span class="notice-symbol" aria-hidden="true"><i data-lucide="info"></i></span>
+          <div>
+            <p class="notice-title" data-text="updates">Updates</p>
+            <p id="update-description" class="notice-description"></p>
+            <button class="accessibility-button" id="update-restart" type="button" data-text="restartToUpdate" aria-describedby="update-description">Restart to update</button>
+            <button class="accessibility-button" id="update-later" type="button" data-text="updateLater">Later</button>
+          </div>
+        </div>
         <div id="operation-progress" class="operation-progress" role="status" aria-atomic="true">
           <span data-progress-label></span>
           <span class="operation-progress-counter" data-progress-counter></span>
@@ -332,6 +346,7 @@
         </button>
       </div>
       <span class="visually-hidden" id="notice-announcement" role="status" aria-atomic="true"></span>
+      <span class="visually-hidden" id="update-announcement" role="status" aria-atomic="true"></span>
     </div>
 
     <template id="tool-nav-template">

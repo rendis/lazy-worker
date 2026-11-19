@@ -4,7 +4,7 @@ Lazy Worker is a desktop toolbox with Activity and Caffeinate. The app opens in 
 
 ## macOS menu bar
 
-Use the wind-up key in the menu bar to open the panel, start the selected tools, or start and stop individual tools. A terracotta dot appears beside the key while at least one tool is running. Menu actions use saved settings. Close the panel to leave Lazy Worker running in the menu bar. Choose **Quit** from the menu to exit and release its active sessions.
+Use the wind-up key in the menu bar to open the panel, start the selected tools, or start and stop individual tools. A terracotta dot appears beside the key while at least one tool is running. Menu actions use saved settings. Close the panel to leave Lazy Worker running in the menu bar. Opening Lazy Worker again brings back the existing panel. Choose **Quit** from the menu to exit and release its active sessions.
 
 **Settings → Hide Lazy Worker while sharing** defaults to on once Accessibility is granted. Without permission, the switch stays off and shows a warning when selected. Choose **Open Accessibility settings** in the warning to grant access. Lazy Worker hides the menu bar icon and panel when it detects screen sharing, including window sharing. It restores the icon when the share ends or the picker is canceled. The panel returns if it was open. Running tools continue during the share. Detection depends on the app and macOS version, and some apps only expose a signal after sharing starts.
 
@@ -42,7 +42,7 @@ Run the checks with `npm run build` and `cargo test --manifest-path src-tauri/Ca
 
 ## Build for macOS
 
-The Intel compatibility target is macOS Monterey 12.7.6 on the test Mac. The bundle and Swift helper declare macOS 12.0 as their deployment floor.
+The app bundle and Swift helper target macOS 12.0 (Monterey) and later on Intel and Apple silicon.
 
 ```sh
 rustup target add x86_64-apple-darwin
@@ -55,6 +55,12 @@ Local macOS builds use an ad-hoc signature for testing. Distribution requires it
 
 macOS may keep an Accessibility entry enabled after an ad-hoc update even when it no longer matches the installed app. If Activity reports a permission error while Lazy Worker is enabled, select its entry in Accessibility and click **−**. Click **+**, choose `/Applications/Lazy Worker.app`, and enable it again. Use a stable signing identity for builds that need their permission to survive updates. Test the packaged build on the actual Intel Mac before claiming Monterey support for a release.
 
+### macOS updates
+
+Lazy Worker checks GitHub Releases at launch and every four hours. A new version appears in the menu and in the panel. Choose **Later** to keep working and find the update again in Settings. **Restart to update** downloads and verifies the package, then replaces and restarts Lazy Worker. Restarting ends active sessions.
+
+The public key and GitHub Releases endpoint are in `src-tauri/tauri.macos.conf.json`. After notarizing and stapling both app bundles, package each as a ZIP for manual installation and as an `.app.tar.gz` for the updater. Sign each updater archive with `tauri signer sign --app-version <version>`. Keep the Tauri private key outside the repository and use the same key for every update. Publish `latest.json` in the same release with `darwin-aarch64` and `darwin-x86_64` entries pointing to the corresponding archives and containing their `.sig` contents. See the [Tauri updater guide](https://v2.tauri.app/plugin/updater/).
+
 ## Add Windows support
 
 Build the project on Windows using the [Windows development prerequisites](https://v2.tauri.app/start/prerequisites/#windows). The shared UI, scheduling rules, and preferences already have a platform boundary. The Activity and Caffeinate controls display an unavailable state on Windows until Windows adapters are added.
@@ -65,3 +71,7 @@ Implement the Windows worker alongside `src-tauri/src/activity/macos.rs` and sel
 
 - [Initial Activity light concept](docs/design/light-concept.png)
 - [Initial Settings dark concept](docs/design/dark-settings-concept.png)
+
+## License
+
+Lazy Worker is available under the [MIT License](LICENSE).

@@ -39,6 +39,7 @@ struct ToolState {
 struct MenuState {
     spanish: bool,
     can_start_selected: bool,
+    update_available: bool,
     activity: ToolState,
     caffeinate: ToolState,
 }
@@ -71,6 +72,7 @@ impl MenuState {
                 || (preferences.quick_start.caffeinate
                     && caffeinate.supported
                     && !caffeinate.active),
+            update_available: crate::updates::has_update(app),
             activity,
             caffeinate,
         })
@@ -116,7 +118,11 @@ impl MenuState {
             format!("{action}{suffix}")
         };
         Labels {
-            open,
+            open: match (self.spanish, self.update_available) {
+                (true, true) => "Abrir panel (actualización disponible)",
+                (false, true) => "Open Panel (Update Available)",
+                _ => open,
+            },
             start_selected,
             quit,
             activity: tool_label(self.activity, start_activity, stop_activity),
@@ -149,8 +155,10 @@ impl Controls {
             return Ok(());
         }
         let labels = state.labels();
-        if rendered.spanish != state.spanish {
+        if rendered.spanish != state.spanish || rendered.update_available != state.update_available {
             self.open.set_text(labels.open)?;
+        }
+        if rendered.spanish != state.spanish {
             self.start_selected.set_text(labels.start_selected)?;
             self.quit.set_text(labels.quit)?;
         }

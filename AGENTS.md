@@ -2,6 +2,7 @@
 
 - Write code, comments, and documentation in English. Keep English and Spanish webview strings together in `src/messages.ts`. Localize the native menu in `src-tauri/src/tray.rs`.
 - Hide the macOS panel on close and keep workers running until explicitly stopped or the app quits.
+- Acquire the macOS instance lock before app setup. Route repeat launches through the shared panel show path.
 - Keep the macOS menu icon legible in the system menu bar appearance and reserve space for its activity badge in both states.
 - Hide the existing `NSStatusItem` during a presentation so its activity badge survives restoration.
 - Keep the native panel fixed-size in the Tauri window configuration. Keep desktop scrolling inside `<main>` so the sidebar stays fixed.
@@ -22,8 +23,10 @@
 - Use `npm run build` and `cargo test --manifest-path src-tauri/Cargo.toml` for changes to the shared app. Use the Intel bundle command in the README for changes to macOS integration.
 - Verify the packaged helper and Accessibility permission on Monterey before reporting hardware compatibility. Verify presence in the target app separately from process status.
 
-## macOS release handoff
+## macOS releases
 
-- For signing, Accessibility after an update, or release automation, follow [issue #1](https://github.com/rendis/lazy-worker/issues/1). The Apple Developer portal offered Developer ID Application. Start the signing request on the Mac selected for release signing. Certificate issuance and the updater are pending.
-- The current local builds use ad-hoc signatures. If Accessibility fails after reinstall, compare the installed app's CDHash with the requirement in the macOS TCC log. Keep the app and Activity helper signing identities stable across releases. Keep private signing keys outside the repository.
-- Keep source and release packages private during testing. Open the public download channel when the app is ready to ship.
+- For signing, Accessibility after an update, or release automation, follow [issue #1](https://github.com/rendis/lazy-worker/issues/1). Describe test platforms by architecture and macOS version.
+- Set `APPLE_SIGNING_IDENTITY` to the Developer ID Application identity for release builds. Verify the app and its Activity helper against that certificate in both architecture bundles.
+- Require the Tauri updater to verify the signed version. Call `request_restart` after installing so `RunEvent::Exit` releases active tools.
+- Local builds default to ad-hoc signing. If Accessibility fails after reinstall, compare the installed app's CDHash with the requirement in the macOS TCC log. Keep the app and Activity helper signing identities stable across releases. Keep private signing keys outside the repository.
+- Archive the stapled app for the Tauri updater and bind its signature to the release version before publishing `latest.json`.

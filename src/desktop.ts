@@ -1,4 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Language } from "./messages";
 import type { ToolId } from "./modules";
@@ -213,6 +214,15 @@ export const desktop = {
   },
   async requestActivityAccessibility(): Promise<void> {
     if (native) return invoke("request_activity_accessibility");
+  },
+  async getAvailableUpdate(): Promise<string | null> {
+    return macApp ? invoke("get_available_update") : null;
+  },
+  async onAvailableUpdate(refresh: () => void): Promise<void> {
+    if (macApp) await listen("available-update-changed", refresh);
+  },
+  async restartToUpdate(version: string): Promise<void> {
+    if (macApp) await invoke("restart_to_update", { version });
   },
   onFocus(refresh: () => void): void {
     if (native) {

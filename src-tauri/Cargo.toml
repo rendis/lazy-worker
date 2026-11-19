@@ -1,8 +1,9 @@
 [package]
 name = "lazy-worker"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Small desktop utilities for everyday work"
+license = "MIT"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -19,3 +20,4 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAp
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSArray", "NSEnumerator", "NSGeometry", "NSLocale", "NSString"] }
 png = "0.18"
 tauri = { version = "~2.12.7", features = ["tray-icon"] }
+tauri-plugin-updater = "2.14.1"

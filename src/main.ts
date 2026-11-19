@@ -12,6 +12,7 @@ import {
 import { messages, type Language, type Message } from "./messages";
 import { mountTools, tools, updateQuickStartMode, updateToolStatus, type ToolId } from "./modules";
 import { mountOperationProgress } from "./operation-progress";
+import { mountUpdateNotice } from "./update-notice";
 
 function element<T extends HTMLElement = HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
@@ -171,6 +172,16 @@ function setNoticeOpen(region: HTMLElement, open: boolean): void {
   region.toggleAttribute("inert", !open);
   setAttribute(region, "aria-hidden", String(!open));
 }
+
+const updates = mountUpdateNotice({
+  translate,
+  setNoticeOpen,
+  beforeRestart: () => {
+    flushCaffeinateAutosave();
+    return queue;
+  },
+  moveFocus: () => activeView().querySelector("h1")?.focus({ preventScroll: true }),
+});
 
 function renderFeedback(): void {
   const unsupported = accessibility === "unsupported";
@@ -451,6 +462,7 @@ function renderPreferences(previous?: Preferences): void {
     activityPower.removeAttribute("aria-labelledby");
     setAttribute(activityPower, "aria-label", translate("activitySession"));
     progress.renderLabel();
+    updates.render();
     renderStatus();
   } else {
     renderControls();
@@ -659,30 +671,34 @@ async function applyCaffeinateSettings(settings: CaffeinateSettings): Promise<vo
 function queueCaffeinateAutosave(): void {
   if (!ready || !loaded) return;
   cancelCaffeinateAutosave();
+  caffeinateSaveDelay = window.setTimeout(flushCaffeinateAutosave, 700);
+}
+
+function flushCaffeinateAutosave(): void {
+  if (caffeinateSaveDelay === undefined) return;
+  window.clearTimeout(caffeinateSaveDelay);
+  caffeinateSaveDelay = undefined;
   const edit = caffeinateEditRevision;
-  caffeinateSaveDelay = window.setTimeout(() => {
-    caffeinateSaveDelay = undefined;
-    queue = queue.then(async () => {
-      if (edit !== caffeinateEditRevision) return;
-      clearFeedback("caffeinate");
-      delete dismissedFeedback.caffeinate;
-      try {
-        const settings = caffeinate.settingsForSave(savedPreferences.caffeinate);
-        await progress.run([{
-          label: () => translate("applyingChanges"),
-          run: () => applyCaffeinateSettings(settings),
-        }]);
-      } catch (error) {
-        const incomplete = error === "caffeinateInvalidPid" || error === "caffeinateInvalidDuration";
-        if (edit === caffeinateEditRevision && !incomplete) {
-          feedback.caffeinate = errorMessage(error, "saveFailed");
-        }
-      } finally {
-        renderPendingPreferences();
-        renderStatus();
+  queue = queue.then(async () => {
+    if (edit !== caffeinateEditRevision) return;
+    clearFeedback("caffeinate");
+    delete dismissedFeedback.caffeinate;
+    try {
+      const settings = caffeinate.settingsForSave(savedPreferences.caffeinate);
+      await progress.run([{
+        label: () => translate("applyingChanges"),
+        run: () => applyCaffeinateSettings(settings),
+      }]);
+    } catch (error) {
+      const incomplete = error === "caffeinateInvalidPid" || error === "caffeinateInvalidDuration";
+      if (edit === caffeinateEditRevision && !incomplete) {
+        feedback.caffeinate = errorMessage(error, "saveFailed");
       }
-    });
-  }, 700);
+    } finally {
+      renderPendingPreferences();
+      renderStatus();
+    }
+  });
 }
 
 function toolActionLabel(id: ToolId, active: boolean): string {
@@ -892,6 +908,7 @@ window.addEventListener("languagechange", () => { void refreshSystemLanguage(); 
 desktop.onFocus(() => {
   refreshPermissions();
   void refreshSystemLanguage();
+  void updates.refresh();
 });
 
 async function initialize(): Promise<void> {
@@ -912,6 +929,7 @@ async function initialize(): Promise<void> {
     feedback.tools = "saveFailed";
   }
   renderPreferences();
+  void updates.start();
   await refreshStatus();
   refreshPermissions();
   window.setInterval(() => { void refreshStatus(); }, 1000);
