@@ -40,7 +40,7 @@ Run the checks with `npm run build` and `cargo test --manifest-path src-tauri/Ca
 
 ## Build for macOS
 
-The Intel compatibility target is macOS Monterey 12.7.6 on the test Mac. The bundle and Swift helper declare macOS 12.0 as their deployment floor.
+The app bundle and Swift helper target macOS 12.0 (Monterey) and later on Intel and Apple silicon.
 
 ```sh
 rustup target add x86_64-apple-darwin

@@ -17,8 +17,7 @@
 - Use `npm run build` and `cargo test --manifest-path src-tauri/Cargo.toml` for changes to the shared app. Use the Intel bundle command in the README for changes to macOS integration.
 - Verify the packaged helper and Accessibility permission on Monterey before reporting hardware compatibility. Verify presence in the target app separately from process status.
 
-## macOS release handoff
+## macOS releases
 
-- For signing, Accessibility after an update, or release automation, follow [issue #1](https://github.com/rendis/lazy-worker/issues/1). The Apple Developer portal offered Developer ID Application. Start the signing request on the Mac selected for release signing. Certificate issuance and the updater are pending.
+- For signing, Accessibility after an update, or release automation, follow [issue #1](https://github.com/rendis/lazy-worker/issues/1). Describe test platforms by architecture and macOS version.
 - The current local builds use ad-hoc signatures. If Accessibility fails after reinstall, compare the installed app's CDHash with the requirement in the macOS TCC log. Keep the app and Activity helper signing identities stable across releases. Keep private signing keys outside the repository.
-- Keep source and release packages private during testing. Open the public download channel when the app is ready to ship.
