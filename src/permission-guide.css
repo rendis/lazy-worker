@@ -1,0 +1,48 @@
+.permissions-heading { position: relative; }
+.permission-heading-title { display: flex; align-items: center; gap: 3px; }
+.permission-help-button.help-button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+}
+.permission-help-button .lucide { width: 15px; height: 15px; }
+.permission-guide.help-panel {
+  top: auto;
+  bottom: calc(100% + 6px);
+  width: min(336px, 100%);
+  padding: 12px 14px;
+}
+.permission-guide ol { margin: 0; padding-inline-start: 17px; }
+.permission-guide li + li { margin-top: 5px; }
+.permission-example {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-block: 6px;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--glass);
+  color: var(--text);
+}
+.permission-example strong { flex: 1; }
+.permission-example-switch {
+  display: flex;
+  flex: none;
+  justify-content: flex-end;
+  align-items: center;
+  width: 26px;
+  height: 15px;
+  padding: 2px;
+  border-radius: 10px;
+  background: var(--accent);
+}
+.permission-example-switch::after {
+  content: "";
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--accent-ink);
+}

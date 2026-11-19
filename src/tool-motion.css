@@ -1,0 +1,13 @@
+.status[data-tool-status] {
+  transition: color .2s ease-out, background-color .2s ease-out;
+}
+
+.tool-status-content { display: inline-grid; }
+.tool-status-content > span { grid-area: 1 / 1; }
+.tool-status-previous, .tool-status-reserve { visibility: hidden; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-row, .tool-status-current { transform: none !important; }
+  .tool-status-current { opacity: 1 !important; }
+  .tool-status-previous { visibility: hidden !important; }
+}

@@ -1,0 +1,748 @@
+import "./style.css";
+import {
+  Activity, ArrowRight, Check, ChevronRight, Coffee, Contrast, createIcons,
+  Database, ExternalLink, Globe, Info, Laptop, LayoutGrid, LockKeyhole, Monitor, Moon, Power,
+  Settings, Square, Sun, TriangleAlert, UserRound, X,
+} from "lucide";
+import { mountCaffeinateForm } from "./caffeinate-form";
+import {
+  defaults, desktop, offStatus, type ActivityAccessibility, type CaffeinateSettings, type Duration, type Preferences,
+  type Statuses, type Theme,
+} from "./desktop";
+import { messages, type Language, type Message } from "./messages";
+import { mountTools, tools, updateQuickStartMode, updateToolStatus, type ToolId } from "./modules";
+import { mountOperationProgress } from "./operation-progress";
+
+function element<T extends HTMLElement = HTMLElement>(id: string): T {
+  return document.getElementById(id) as T;
+}
+
+element("window-titlebar").hidden = !desktop.showWindowTitlebar;
+const updateToolOrder = mountTools();
+createIcons({
+  icons: {
+    Activity, ArrowRight, Check, ChevronRight, Coffee, Contrast, Database,
+    ExternalLink, Globe, Info, Laptop, LayoutGrid, LockKeyhole, Monitor, Moon, Power, Settings,
+    Square, Sun, TriangleAlert, UserRound, X,
+  },
+  attrs: { "aria-hidden": "true", "stroke-width": 1.75 },
+});
+
+const caffeinate = mountCaffeinateForm();
+const progress = mountOperationProgress(element("operation-progress"));
+const activityModes = element("activity-modes");
+const modeChoices = activityModes.querySelectorAll<HTMLInputElement>('input[name="activity-mode"]');
+const activityDuration = element("activity-duration");
+const activityPower = element<HTMLButtonElement>("power");
+const scheduleForm = element<HTMLFormElement>("schedule-form");
+const scheduleSave = element<HTMLButtonElement>("schedule-save");
+const scheduleSaveLabel = element("schedule-save-label");
+const scheduleDisable = element<HTMLButtonElement>("schedule-disable");
+const scheduleState = element("schedule-state");
+const start = element<HTMLInputElement>("start");
+const end = element<HTMLInputElement>("end");
+const startSelected = element<HTMLButtonElement>("start-selected");
+const stopSelected = element<HTMLButtonElement>("stop-selected");
+const sessionTimers = document.querySelectorAll<HTMLElement>("[data-tool-timer]");
+const statusLabels = document.querySelectorAll<HTMLElement>("[data-tool-status]");
+const powerButtons = document.querySelectorAll<HTMLButtonElement>("[data-tool-power]");
+const includeSwitches = document.querySelectorAll<HTMLInputElement>("[data-tool-include]");
+const durationButtons = document.querySelectorAll<HTMLButtonElement>("[data-duration]");
+const languageButtons = document.querySelectorAll<HTMLButtonElement>("[data-language]");
+const themeButtons = document.querySelectorAll<HTMLButtonElement>("[data-theme-choice]");
+const translated = document.querySelectorAll<HTMLElement>("[data-text]");
+const accessibleLabels = document.querySelectorAll<HTMLElement>("[data-label]");
+const noticeRegion = element("notice-region");
+const noticeTitle = element("notice-title");
+const noticeDescription = element("notice-description");
+const noticeAnnouncement = element("notice-announcement");
+const noticeAccessibility = element<HTMLButtonElement>("notice-accessibility");
+const noticeDismiss = element<HTMLButtonElement>("notice-dismiss");
+const accessibilityStatus = element("accessibility-status");
+const settingsAccessibility = element<HTMLButtonElement>("settings-accessibility");
+
+type ActivityMode = "duration" | "schedule";
+type FeedbackTarget = ToolId | "tools" | "settings";
+type FeedbackLine = { message: Message; tool?: ToolId };
+type PreferenceChoice = "duration" | "language" | "theme";
+type PreferenceChange = { key: PreferenceChoice | ToolId; apply: (current: Preferences) => Preferences };
+const accessibilityLabels: Record<ActivityAccessibility, Message> = {
+  granted: "accessibilityGranted",
+  required: "accessibilityRequired",
+  unsupported: "accessibilityUnsupported",
+  unavailable: "accessibilityUnavailable",
+};
+
+let savedPreferences = defaults;
+let preferences = savedPreferences;
+let activityMode: ActivityMode = "duration";
+const systemAppearance = window.matchMedia("(prefers-color-scheme: dark)");
+let systemLanguage: Language = "en";
+let renderedLanguage: Language | undefined;
+const pendingPreferences: PreferenceChange[] = [];
+let queue = Promise.resolve();
+let statuses: Statuses = { activity: offStatus, caffeinate: offStatus };
+let workerAction: { target: FeedbackTarget; running: boolean; keepQuickStartLayout: boolean } | undefined;
+let ready = false;
+let loaded = false;
+let statusRevision = 0;
+let toolFailures: FeedbackLine[] = [];
+let toolFailureTitle: Message = "selectedStartFailed";
+const feedback: Partial<Record<FeedbackTarget, Message>> = {};
+const dismissedFeedback: Partial<Record<FeedbackTarget, string>> = {};
+let visibleNotice: { target: FeedbackTarget; key: string } | undefined;
+let accessibility: ActivityAccessibility | undefined;
+let accessibilityRefresh: Promise<void> | undefined;
+let accessibilityOpening = false;
+let accessibilityRequestIssue: FeedbackTarget | undefined;
+let activityResultRevision = 0;
+let activityPermissionErrorRetired = false;
+
+let caffeinateSaveDelay: number | undefined;
+let caffeinateEditRevision = 0;
+let caffeinateSaving = false;
+
+function preferredLanguage(): Language {
+  return preferences.language === "system" ? systemLanguage : preferences.language;
+}
+
+function translate(key: Message): string {
+  return messages[preferredLanguage()][key];
+}
+
+function errorMessage(error: unknown, fallback: Message): Message {
+  return typeof error === "string" && Object.prototype.hasOwnProperty.call(messages.en, error)
+    ? error as Message : fallback;
+}
+
+function formatTime(seconds: number): string {
+  return [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60]
+    .map(part => String(part).padStart(2, "0")).join(":");
+}
+
+function setText(node: HTMLElement, text: string): void {
+  if (node.textContent !== text) node.textContent = text;
+}
+
+function setAttribute(node: HTMLElement, name: string, value: string): void {
+  if (node.getAttribute(name) !== value) node.setAttribute(name, value);
+}
+
+function setDisabled(control: HTMLButtonElement | HTMLInputElement, disabled: boolean): void {
+  if (control.disabled !== disabled) control.disabled = disabled;
+}
+
+function activeView(): HTMLElement {
+  return document.querySelector<HTMLElement>("[data-module-view]:not([hidden])")!;
+}
+
+function toolError(tool: ToolId): Message | undefined {
+  const { error, supported } = statuses[tool];
+  if (error && !(tool === "activity" && error === "permissionRequired" && activityPermissionErrorRetired)) {
+    return errorMessage(error, tool === "activity" ? "workerUnavailable" : "caffeinateStartFailed");
+  }
+  if (ready && !supported) return tool === "activity" ? "unsupported" : "caffeinateUnsupported";
+}
+
+function renderFeedback(): void {
+  const unsupported = accessibility === "unsupported";
+  setText(accessibilityStatus, translate(accessibility ? accessibilityLabels[accessibility] : "accessibilityChecking"));
+  setDisabled(settingsAccessibility, accessibility === undefined || unsupported);
+  setAttribute(settingsAccessibility, "aria-disabled", String(accessibilityOpening || settingsAccessibility.disabled));
+  setAttribute(noticeAccessibility, "aria-disabled", String(accessibilityOpening));
+
+  const view = activeView();
+  const target = view.dataset.moduleView as FeedbackTarget;
+  const explicit = feedback[target];
+  const applying = workerAction?.running && workerAction.target === target;
+  const message = applying ? undefined
+    : explicit ?? (target === "activity" || target === "caffeinate" ? toolError(target) : undefined);
+  const toolActionFailure = !applying && target === "tools" && !explicit && toolFailures.length > 0;
+  const lines: FeedbackLine[] = toolActionFailure ? [...toolFailures] : message ? [{ message }] : [];
+  if (accessibilityRequestIssue === target) lines.push({ message: "accessibilityRequestFailed" });
+
+  const title = toolActionFailure ? toolFailureTitle : lines.length && !message ? "accessibility" : target;
+  const key = JSON.stringify([title, lines]);
+  const open = lines.length > 0 && dismissedFeedback[target] !== key;
+  if (dismissedFeedback[target] !== key) delete dismissedFeedback[target];
+  if (open) {
+    const description = lines.map(({ message, tool }) =>
+      tool ? `${translate(tool)} — ${translate(message)}` : translate(message)).join("\n");
+    const titleText = translate(title);
+    const canOpenAccessibility = !unsupported && lines.some(({ message }) =>
+      message === "permissionRequired" || message === "accessibilityRequestFailed");
+    const informational = lines.every(({ message }) => message === "saved");
+    if (!canOpenAccessibility && document.activeElement === noticeAccessibility) view.querySelector("h1")?.focus();
+    noticeAccessibility.toggleAttribute("hidden", !canOpenAccessibility);
+    setAttribute(noticeRegion, "data-tone", informational ? "info" : "error");
+    setText(noticeTitle, titleText);
+    setText(noticeDescription, description);
+    setText(noticeAnnouncement, `${titleText}. ${description}`);
+    visibleNotice = { target, key };
+  } else {
+    if (noticeRegion.contains(document.activeElement)) view.querySelector("h1")?.focus();
+    setText(noticeAnnouncement, "");
+    visibleNotice = undefined;
+  }
+  noticeRegion.toggleAttribute("data-open", open);
+  noticeRegion.toggleAttribute("inert", !open);
+  setAttribute(noticeRegion, "aria-hidden", String(!open));
+}
+
+function renderStatus(): void {
+  for (const label of statusLabels) {
+    const { mode } = statuses[label.dataset.toolStatus as ToolId];
+    updateToolStatus(label, mode, translate(mode));
+  }
+  for (const timer of sessionTimers) {
+    const tool = timer.dataset.toolTimer as ToolId;
+    const status = statuses[tool];
+    const remaining = tool === "activity" ? status.secondsLeft : null;
+    const seconds = remaining ?? status.elapsedSeconds;
+    if (seconds !== null) {
+      const display = formatTime(seconds);
+      const label = translate(remaining === null ? "elapsedTime" : "remainingTime");
+      setText(timer, display);
+      setAttribute(timer, "aria-label", label + " " + display);
+      setAttribute(timer, "title", label);
+    }
+    timer.toggleAttribute("data-visible", seconds !== null);
+    setAttribute(timer, "aria-hidden", String(seconds === null));
+  }
+  renderControls();
+  renderFeedback();
+}
+
+function canChangeTool(id: ToolId, active: boolean): boolean {
+  const current = statuses[id];
+  return current.supported && (current.mode === "off") === active;
+}
+
+function selectActivityMode(mode: ActivityMode): void {
+  activityMode = mode;
+  activityModes.dataset.selection = mode;
+  for (const option of modeChoices) option.checked = option.value === mode;
+  for (const [panel, active] of [[activityDuration, mode === "duration"], [scheduleForm, mode === "schedule"]] as const) {
+    panel.toggleAttribute("data-active", active);
+    panel.toggleAttribute("inert", !active);
+    setAttribute(panel, "aria-hidden", String(!active));
+  }
+  if (mode === "schedule") {
+    setAttribute(activityPower, "aria-describedby", "schedule-description");
+  } else {
+    activityPower.removeAttribute("aria-describedby");
+  }
+}
+
+function renderActivityControls(unavailable: boolean, pending: string): void {
+  const disabled = unavailable || !statuses.activity.supported;
+  for (const option of modeChoices) setDisabled(option, disabled);
+  for (const button of durationButtons) setDisabled(button, disabled || activityMode !== "duration");
+
+  const scheduleUnavailable = disabled || activityMode !== "schedule";
+  const { enabled } = preferences.schedule;
+  for (const field of [start, end, scheduleSave]) setDisabled(field, scheduleUnavailable);
+  if (!enabled && !scheduleUnavailable && document.activeElement === scheduleDisable) scheduleSave.focus();
+  setDisabled(scheduleDisable, scheduleUnavailable || !enabled);
+  setAttribute(scheduleDisable, "aria-hidden", String(!enabled));
+  setAttribute(scheduleSave, "aria-disabled", pending);
+  setAttribute(scheduleDisable, "aria-disabled", pending);
+  setText(scheduleSaveLabel, translate(enabled ? "scheduleApply" : "scheduleEnable"));
+  scheduleState.toggleAttribute("data-enabled", enabled);
+  const state = !enabled ? "scheduleOff" : statuses.activity.mode === "off" ? "scheduleWaiting" : "scheduleOn";
+  setText(scheduleState, translate(state));
+}
+
+function renderControls(): void {
+  const unavailable = !loaded || !ready;
+  const pending = String(workerAction !== undefined);
+  for (const power of powerButtons) {
+    const current = statuses[power.dataset.toolPower as ToolId];
+    setDisabled(power, unavailable || !current.supported);
+    setAttribute(power, "aria-disabled", pending);
+    setAttribute(power, "aria-checked", String(current.mode !== "off"));
+  }
+  for (const toggle of includeSwitches) {
+    const tool = toggle.dataset.toolInclude as ToolId;
+    setDisabled(toggle, unavailable || !statuses[tool].supported);
+    if (toggle.checked !== preferences.quickStart[tool]) toggle.checked = preferences.quickStart[tool];
+  }
+  updateToolOrder(preferences.quickStart);
+  if (!workerAction?.keepQuickStartLayout) {
+    const canStartSelected = !unavailable && tools.some(({ id }) => preferences.quickStart[id] && canChangeTool(id, true));
+    const canStopSelected = !unavailable && tools.some(({ id }) => preferences.quickStart[id] && canChangeTool(id, false));
+    if (canStartSelected) setDisabled(startSelected, false);
+    if (canStopSelected) setDisabled(stopSelected, false);
+    updateQuickStartMode(canStopSelected ? (canStartSelected ? "mixed" : "stop") : "start");
+    setDisabled(startSelected, !canStartSelected);
+    setDisabled(stopSelected, !canStopSelected);
+  }
+  setAttribute(startSelected, "aria-disabled", pending);
+  setAttribute(stopSelected, "aria-disabled", pending);
+
+  renderActivityControls(unavailable, pending);
+  for (const button of [...languageButtons, ...themeButtons]) setDisabled(button, !loaded);
+  caffeinate.setDisabled(unavailable || !statuses.caffeinate.supported);
+}
+
+function renderTheme(animate: boolean): void {
+  const theme = preferences.theme === "system"
+    ? (systemAppearance.matches ? "dark" : "light")
+    : preferences.theme;
+  if (document.documentElement.dataset.theme === theme) return;
+  if (animate) document.documentElement.setAttribute("data-theme-transition", "");
+  document.documentElement.dataset.theme = theme;
+}
+
+function renderPreferences(previous?: Preferences): void {
+  if (previous?.theme !== preferences.theme) {
+    desktop.setTheme(preferences.theme);
+    for (const button of themeButtons) {
+      setAttribute(button, "aria-pressed", String(button.dataset.themeChoice === preferences.theme));
+    }
+  }
+  renderTheme(previous !== undefined);
+  if (previous?.duration !== preferences.duration) {
+    for (const button of durationButtons) {
+      setAttribute(button, "aria-pressed", String(button.dataset.duration === preferences.duration));
+    }
+  }
+  if (previous?.language !== preferences.language) {
+    for (const button of languageButtons) {
+      setAttribute(button, "aria-pressed", String(button.dataset.language === preferences.language));
+    }
+  }
+  const language = preferredLanguage();
+  if (renderedLanguage !== language) {
+    renderedLanguage = language;
+    document.documentElement.lang = language;
+    translated.forEach(node => setText(node, translate(node.dataset.text as Message)));
+    accessibleLabels.forEach(node => setAttribute(node, "aria-label", translate(node.dataset.label as Message)));
+    setAttribute(element("tool-navigation"), "aria-label", translate("tools"));
+    activityPower.removeAttribute("aria-labelledby");
+    setAttribute(activityPower, "aria-label", translate("activitySession"));
+    progress.renderLabel();
+    renderStatus();
+  } else {
+    renderControls();
+    renderFeedback();
+  }
+}
+
+function renderPendingPreferences(): void {
+  const previous = preferences;
+  preferences = pendingPreferences.reduce((current, change) => change.apply(current), savedPreferences);
+  renderPreferences(previous);
+}
+
+function setStatuses(current: Statuses, activityAttempted = false): void {
+  if (activityAttempted) ++activityResultRevision;
+  if (activityAttempted || current.activity.error !== "permissionRequired") {
+    activityPermissionErrorRetired = false;
+  }
+  statuses = current;
+}
+
+function refreshAccessibility(): Promise<void> {
+  if (accessibilityRefresh) return accessibilityRefresh;
+  const revision = activityResultRevision;
+  accessibilityRefresh = desktop.getActivityAccessibility()
+    .catch(() => "unavailable" as const)
+    .then(current => {
+      accessibility = current;
+      if (current === "granted" && revision === activityResultRevision) {
+        activityPermissionErrorRetired = statuses.activity.error === "permissionRequired";
+        if (feedback.activity === "permissionRequired") delete feedback.activity;
+        toolFailures = toolFailures.filter(({ tool, message }) =>
+          tool !== "activity" || message !== "permissionRequired");
+        accessibilityRequestIssue = undefined;
+      }
+      renderFeedback();
+    })
+    .finally(() => { accessibilityRefresh = undefined; });
+  return accessibilityRefresh;
+}
+
+const permissionChecks = [
+  {
+    refresh: refreshAccessibility,
+    pending: () => accessibility === "required" ||
+      (statuses.activity.error === "permissionRequired" && !activityPermissionErrorRetired),
+  },
+];
+
+function refreshPermissions(pendingOnly = false): void {
+  for (const permission of permissionChecks) {
+    if (!pendingOnly || permission.pending()) void permission.refresh();
+  }
+}
+
+async function openAccessibility(target: FeedbackTarget): Promise<void> {
+  if (accessibilityOpening || accessibility === "unsupported") return;
+  accessibilityOpening = true;
+  renderFeedback();
+  try {
+    await desktop.requestActivityAccessibility();
+    accessibilityRequestIssue = undefined;
+    refreshPermissions();
+  } catch {
+    accessibilityRequestIssue = target;
+    delete dismissedFeedback[target];
+  } finally {
+    accessibilityOpening = false;
+    renderFeedback();
+  }
+}
+
+async function refreshStatus(): Promise<void> {
+  if (workerAction?.running || caffeinateSaving) return;
+  const revision = ++statusRevision;
+  try {
+    const current = await desktop.getStatuses();
+    if (revision !== statusRevision) return;
+    setStatuses(current);
+    if (!ready && feedback.tools === "workerUnavailable") delete feedback.tools;
+    ready = true;
+  } catch {
+    if (revision !== statusRevision) return;
+    ready = false;
+    feedback.tools = "workerUnavailable";
+  }
+  renderStatus();
+}
+
+function clearFeedback(target: FeedbackTarget): void {
+  delete feedback[target];
+  if (target === "tools") toolFailures = [];
+  if (target === accessibilityRequestIssue) accessibilityRequestIssue = undefined;
+}
+
+async function save(next: Preferences): Promise<void> {
+  await desktop.savePreferences(next);
+  savedPreferences = next;
+}
+
+function updatePreference(target: FeedbackTarget, change: PreferenceChange): void {
+  clearFeedback(target);
+  pendingPreferences.push(change);
+  renderPendingPreferences();
+  queue = queue.then(async () => {
+    try {
+      await save(change.apply(savedPreferences));
+    } catch (error) {
+      if (!pendingPreferences.some(pending => pending !== change && pending.key === change.key)) {
+        feedback[target] = errorMessage(error, "saveFailed");
+        delete dismissedFeedback[target];
+      }
+    } finally {
+      pendingPreferences.shift();
+      renderPendingPreferences();
+    }
+  });
+}
+
+function updateChoice<Key extends PreferenceChoice>(
+  target: FeedbackTarget, key: Key, value: Preferences[Key],
+): void {
+  if (preferences[key] !== value) {
+    updatePreference(target, { key, apply: current => ({ ...current, [key]: value }) });
+  }
+}
+
+function updateWorker(
+  target: FeedbackTarget,
+  action: (requested: Preferences) => Promise<void>,
+  { fallback = "saveFailed", keepQuickStartLayout = false }: {
+    fallback?: Message;
+    keepQuickStartLayout?: boolean;
+  } = {},
+): void {
+  if (!loaded || !ready || workerAction) return;
+  const requested = preferences;
+  const operation = { target, running: false, keepQuickStartLayout };
+  workerAction = operation;
+  clearFeedback(target);
+  renderControls();
+  renderFeedback();
+  queue = queue.then(async () => {
+    operation.running = true;
+    ++statusRevision;
+    try {
+      await action(requested);
+    } catch (error) {
+      feedback[target] = errorMessage(error, fallback);
+    } finally {
+      workerAction = undefined;
+      delete dismissedFeedback[target];
+      renderPendingPreferences();
+      renderStatus();
+    }
+  });
+}
+
+function saveSchedule(enabled: boolean): void {
+  if (workerAction) return;
+  const next = enabled
+    ? { enabled, start: start.value, end: end.value }
+    : { ...preferences.schedule, enabled };
+  if (enabled && !scheduleForm.reportValidity()) return;
+  if (enabled && next.start === next.end) {
+    feedback.activity = "invalidSchedule";
+    delete dismissedFeedback.activity;
+    end.focus();
+    renderFeedback();
+    return;
+  }
+  updateWorker("activity", async () => {
+    await progress.run([{
+      label: () => translate("applyingChanges"),
+      run: async () => {
+        const previous = savedPreferences.schedule;
+        const rescheduled = enabled && (!previous.enabled || previous.start !== next.start || previous.end !== next.end);
+        await save({ ...savedPreferences, schedule: next });
+        setStatuses(await desktop.getStatuses(), rescheduled);
+      },
+    }]);
+    if (enabled && !toolError("activity")) feedback.activity = "saved";
+  });
+}
+
+function cancelCaffeinateAutosave(): void {
+  ++caffeinateEditRevision;
+  window.clearTimeout(caffeinateSaveDelay);
+  caffeinateSaveDelay = undefined;
+}
+
+async function applyCaffeinateSettings(settings: CaffeinateSettings): Promise<void> {
+  if (JSON.stringify(settings) === JSON.stringify(savedPreferences.caffeinate) &&
+    statuses.caffeinate.error !== "caffeinateReconfigureFailed") return;
+  caffeinateSaving = true;
+  ++statusRevision;
+  try {
+    setStatuses(await desktop.saveCaffeinateSettings(settings));
+    savedPreferences = { ...savedPreferences, caffeinate: settings };
+    toolFailures = toolFailures.filter(({ tool }) => tool !== "caffeinate");
+  } finally {
+    caffeinateSaving = false;
+  }
+}
+
+function queueCaffeinateAutosave(): void {
+  if (!ready || !loaded) return;
+  cancelCaffeinateAutosave();
+  const edit = caffeinateEditRevision;
+  caffeinateSaveDelay = window.setTimeout(() => {
+    caffeinateSaveDelay = undefined;
+    queue = queue.then(async () => {
+      if (edit !== caffeinateEditRevision) return;
+      clearFeedback("caffeinate");
+      delete dismissedFeedback.caffeinate;
+      try {
+        const settings = caffeinate.settingsForSave(savedPreferences.caffeinate);
+        await progress.run([{
+          label: () => translate("applyingChanges"),
+          run: () => applyCaffeinateSettings(settings),
+        }]);
+      } catch (error) {
+        const incomplete = error === "caffeinateInvalidPid" || error === "caffeinateInvalidDuration";
+        if (edit === caffeinateEditRevision && !incomplete) {
+          feedback.caffeinate = errorMessage(error, "saveFailed");
+        }
+      } finally {
+        renderPendingPreferences();
+        renderStatus();
+      }
+    });
+  }, 700);
+}
+
+function toolActionLabel(id: ToolId, active: boolean): string {
+  return translate(active ? "toolStarting" : "toolStopping").replace("{tool}", translate(id));
+}
+
+async function setToolActive(id: ToolId, active: boolean): Promise<void> {
+  if (id === "caffeinate" && active) {
+    cancelCaffeinateAutosave();
+    await applyCaffeinateSettings(caffeinate.settingsForSave(savedPreferences.caffeinate));
+  }
+  setStatuses(await desktop.setToolActive(id, active), id === "activity" && active);
+  if (id === "activity" && active) refreshPermissions();
+}
+
+async function runToolChanges(ids: readonly ToolId[], active: boolean, failureTitle: Message): Promise<void> {
+  toolFailureTitle = failureTitle;
+  for (const id of ids) clearFeedback(id);
+  await progress.run(ids.map(id => ({
+    label: () => toolActionLabel(id, active),
+    run: async () => {
+      let message: Message | undefined;
+      if (!canChangeTool(id, active)) return;
+      try {
+        await setToolActive(id, active);
+        message = toolError(id);
+      } catch (error) {
+        message = errorMessage(error, id === "caffeinate" && active ? "caffeinateStartFailed" : "workerUnavailable");
+      }
+      delete dismissedFeedback[id];
+      if (message) toolFailures.push({ tool: id, message });
+      renderStatus();
+    },
+  })));
+}
+
+let pointerPress: { element: HTMLButtonElement; id: number } | undefined;
+
+function clearPointerPress(): void {
+  pointerPress?.element.removeAttribute("data-press-held");
+  pointerPress = undefined;
+}
+
+for (const type of ["pointerup", "pointercancel"] as const) {
+  window.addEventListener(type, event => {
+    if (pointerPress?.id === event.pointerId) clearPointerPress();
+  }, true);
+}
+window.addEventListener("blur", clearPointerPress);
+
+for (const button of [startSelected, stopSelected, ...powerButtons]) {
+  let releaseFeedback: number | undefined;
+  const allowed = () => !button.disabled && button.getAttribute("aria-disabled") !== "true";
+  const activationKey = (event: KeyboardEvent) => event.key === " " || event.key === "Enter";
+  button.addEventListener("pointerdown", event => {
+    if (!allowed() || !event.isPrimary || event.button !== 0) return;
+    clearPointerPress();
+    pointerPress = { element: button, id: event.pointerId };
+    button.setAttribute("data-press-held", "");
+  });
+  button.addEventListener("keydown", event => {
+    if (!activationKey(event)) return;
+    if (event.repeat) event.preventDefault();
+    if (allowed()) button.setAttribute("data-press-held", "");
+  });
+  button.addEventListener("keyup", event => {
+    if (activationKey(event)) button.removeAttribute("data-press-held");
+  });
+  button.addEventListener("blur", () => button.removeAttribute("data-press-held"));
+  button.addEventListener("click", () => {
+    if (!allowed()) return;
+    window.clearTimeout(releaseFeedback);
+    button.setAttribute("data-press-feedback", "");
+    releaseFeedback = window.setTimeout(() => button.removeAttribute("data-press-feedback"), 250);
+  });
+}
+
+powerButtons.forEach(button => button.addEventListener("click", () => {
+  const id = button.dataset.toolPower as ToolId;
+  const active = statuses[id].mode === "off";
+  const target = button.closest('[data-module-view="tools"]') ? "tools" : id;
+  updateWorker(target, async requested => {
+    if (id === "activity" && active && requested.duration !== savedPreferences.duration) throw "saveFailed";
+    if (target === "tools") {
+      await runToolChanges([id], active, id);
+      return;
+    }
+    await progress.run([{
+      label: () => id === "caffeinate" && active ? translate("caffeinateStarting") : toolActionLabel(id, active),
+      run: async () => {
+        await setToolActive(id, active);
+        toolFailures = toolFailures.filter(({ tool }) => tool !== id);
+        renderStatus();
+      },
+    }]);
+  }, { fallback: id === "caffeinate" && active ? "caffeinateStartFailed" : "workerUnavailable" });
+}));
+includeSwitches.forEach(toggle => toggle.addEventListener("change", () => {
+  const id = toggle.dataset.toolInclude as ToolId;
+  const checked = toggle.checked;
+  const target = toggle.closest('[data-module-view="tools"]') ? "tools" : id;
+  updatePreference(target, {
+    key: id,
+    apply: current => ({ ...current, quickStart: { ...current.quickStart, [id]: checked } }),
+  });
+}));
+function changeSelected(active: boolean): void {
+  updateWorker("tools", async requested => {
+    if (tools.some(({ id }) => requested.quickStart[id] !== savedPreferences.quickStart[id])) throw "saveFailed";
+    setStatuses(await desktop.getStatuses());
+    const ids = tools.filter(({ id }) => requested.quickStart[id] && canChangeTool(id, active)).map(({ id }) => id);
+    if (active && ids.includes("activity") && requested.duration !== savedPreferences.duration) throw "saveFailed";
+    await runToolChanges(ids, active, active ? "selectedStartFailed" : "selectedStopFailed");
+  }, { fallback: "workerUnavailable", keepQuickStartLayout: true });
+}
+
+startSelected.addEventListener("click", () => changeSelected(true));
+stopSelected.addEventListener("click", () => changeSelected(false));
+durationButtons.forEach(button => button.addEventListener("click", () => {
+  updateChoice("activity", "duration", button.dataset.duration as Duration);
+}));
+languageButtons.forEach(button => button.addEventListener("click", () => {
+  updateChoice("settings", "language", button.dataset.language as Preferences["language"]);
+}));
+themeButtons.forEach(button => button.addEventListener("click", () => {
+  updateChoice("settings", "theme", button.dataset.themeChoice as Theme);
+}));
+modeChoices.forEach(option => option.addEventListener("change", () => {
+  if (!option.checked) return;
+  selectActivityMode(option.value as ActivityMode);
+  renderControls();
+}));
+scheduleDisable.addEventListener("click", () => saveSchedule(false));
+scheduleForm.addEventListener("submit", event => {
+  event.preventDefault();
+  saveSchedule(true);
+});
+caffeinate.onChange(queueCaffeinateAutosave);
+noticeDismiss.addEventListener("click", () => {
+  if (!visibleNotice) return;
+  dismissedFeedback[visibleNotice.target] = visibleNotice.key;
+  renderFeedback();
+});
+noticeAccessibility.addEventListener("click", () => {
+  if (visibleNotice) void openAccessibility(visibleNotice.target);
+});
+settingsAccessibility.addEventListener("click", () => { void openAccessibility("settings"); });
+for (const button of document.querySelectorAll<HTMLButtonElement>("[data-view]")) {
+  button.addEventListener("click", () => {
+    renderFeedback();
+    if (button.dataset.view === "settings") refreshPermissions();
+  });
+}
+async function refreshSystemLanguage(): Promise<void> {
+  const language = await desktop.getSystemLanguage();
+  if (language === systemLanguage) return;
+  systemLanguage = language;
+  renderPreferences(preferences);
+}
+
+systemAppearance.addEventListener("change", () => renderTheme(true));
+window.addEventListener("languagechange", () => { void refreshSystemLanguage(); });
+desktop.onFocus(() => {
+  refreshPermissions();
+  void refreshSystemLanguage();
+});
+
+async function initialize(): Promise<void> {
+  renderTheme(false);
+  renderStatus();
+  try {
+    [savedPreferences, systemLanguage] = await Promise.all([
+      desktop.getPreferences(),
+      desktop.getSystemLanguage(),
+    ]);
+    preferences = savedPreferences;
+    loaded = true;
+    selectActivityMode(preferences.schedule.enabled ? "schedule" : "duration");
+    start.value = preferences.schedule.start;
+    end.value = preferences.schedule.end;
+    caffeinate.set(preferences.caffeinate);
+  } catch {
+    feedback.tools = "saveFailed";
+  }
+  renderPreferences();
+  await refreshStatus();
+  refreshPermissions();
+  window.setInterval(() => { void refreshStatus(); }, 1000);
+  window.setInterval(() => refreshPermissions(true), 1800);
+}
+
+void initialize();

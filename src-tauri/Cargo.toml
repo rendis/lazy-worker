@@ -1,0 +1,21 @@
+[package]
+name = "lazy-worker"
+version = "0.1.0"
+edition = "2021"
+description = "Small desktop utilities for everyday work"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAppearance", "NSBezierPath", "NSColor", "NSStatusBarButton", "NSStatusItem", "NSView"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSArray", "NSEnumerator", "NSGeometry", "NSLocale", "NSString"] }
+png = "0.18"
+tauri = { version = "~2.12.7", features = ["tray-icon"] }

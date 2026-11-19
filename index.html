@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Lazy Worker</title>
+    <link rel="icon" type="image/png" href="/src/assets/logo.png" />
+  </head>
+  <body>
+    <header id="window-titlebar" class="window-titlebar" data-tauri-drag-region hidden>
+      <img src="/src/assets/logo.png" width="23" height="23" alt="" draggable="false" />
+      <span>Lazy Worker</span>
+    </header>
+    <div class="workspace">
+      <aside class="sidebar">
+        <nav id="tool-navigation" aria-label="Tools">
+          <button class="nav-button" type="button" data-view="tools">
+            <i data-lucide="layout-grid"></i><span data-text="tools">Tools</span>
+          </button>
+        </nav>
+
+        <button id="settings-button" class="nav-button settings-button" type="button" data-view="settings">
+          <i data-lucide="settings"></i><span data-text="settings">Settings</span>
+        </button>
+      </aside>
+
+      <main>
+        <div data-module-view="tools">
+          <h1 data-text="tools" tabindex="-1">Tools</h1>
+          <section class="quick-start" aria-labelledby="quick-start-heading">
+            <h2 id="quick-start-heading" data-text="quickStart">Quick start</h2>
+            <p class="section-description" data-text="quickStartDescription">Start or stop your selected tools. Tools start with their saved settings.</p>
+            <div id="quick-start-actions" class="quick-start-actions" data-mode="start">
+              <button id="start-selected" class="selected-action" type="button" disabled>
+                <i data-lucide="power"></i><span data-text="startSelected">Start selected</span>
+              </button>
+              <button id="stop-selected" class="selected-action" type="button" aria-hidden="true" tabindex="-1" disabled>
+                <i data-lucide="square"></i><span data-text="stopSelected">Stop selected</span>
+              </button>
+              <span class="selected-action-surface" aria-hidden="true"></span>
+            </div>
+            <div id="tool-catalog" class="tool-catalog">
+              <div class="catalog-heading" aria-hidden="true"><span data-text="quickStart">Quick start</span></div>
+            </div>
+          </section>
+        </div>
+
+        <div data-module-view="activity" hidden>
+          <section class="module-body" aria-labelledby="activity-heading">
+            <div class="module-help">
+              <button class="help-button" type="button" data-help-button aria-expanded="false" aria-controls="activity-help">
+                <i data-lucide="info"></i><span data-text="howItWorks">How it works</span>
+              </button>
+              <p id="activity-help" class="help-panel" data-text="activityExplanation" aria-hidden="true" inert>
+                While enabled, Lazy Worker prevents idle sleep. It moves the pointer only after 45 seconds
+                without keyboard or mouse activity and waits again when you return.
+              </p>
+            </div>
+            <fieldset class="activity-mode">
+              <legend class="control-label" data-text="activityMode">Run mode</legend>
+              <div class="segments activity-modes" id="activity-modes" data-selection="duration">
+                <label>
+                  <input type="radio" name="activity-mode" value="duration" aria-controls="activity-duration" checked />
+                  <span data-text="activityDuration">Duration</span>
+                </label>
+                <label>
+                  <input type="radio" name="activity-mode" value="schedule" aria-controls="schedule-form" />
+                  <span data-text="schedule">Daily schedule</span>
+                </label>
+                <span class="segment-indicator" aria-hidden="true"></span>
+              </div>
+            </fieldset>
+            <div class="activity-mode-panels">
+              <div class="activity-mode-panel" id="activity-duration" data-active>
+                <p class="control-label" id="duration-label" data-text="manualDuration">Manual duration</p>
+                <div class="segments duration-segments" role="group" aria-labelledby="duration-label">
+                  <button type="button" data-duration="minutes15" data-text="minutes15" aria-pressed="true">15 min</button>
+                  <button type="button" data-duration="minutes30" data-text="minutes30" aria-pressed="false">30 min</button>
+                  <button type="button" data-duration="hour" data-text="hour" aria-pressed="false">1 hour</button>
+                  <button type="button" data-duration="untilStopped" data-text="untilStopped" aria-pressed="false">Until stopped</button>
+                  <span class="segment-indicator" aria-hidden="true"></span>
+                </div>
+              </div>
+              <form class="activity-mode-panel" id="schedule-form" aria-label="Daily schedule" data-label="schedule" aria-hidden="true" inert>
+                <div class="schedule-fields">
+                  <label>
+                    <span data-text="start">Start time</span>
+                    <input type="time" id="start" value="09:00" required disabled />
+                  </label>
+                  <label>
+                    <span data-text="end">End time</span>
+                    <input type="time" id="end" value="17:00" required disabled />
+                  </label>
+                </div>
+                <p id="schedule-description" class="schedule-description" data-text="scheduleDescription">Runs while Lazy Worker is open. The power button starts or stops a session now.</p>
+                <div class="schedule-actions">
+                  <span id="schedule-state" class="schedule-state" role="status"></span>
+                  <button type="button" class="schedule-disable" id="schedule-disable" data-text="scheduleDisable" aria-hidden="true" disabled>Turn off</button>
+                  <button type="submit" class="save-button" id="schedule-save" disabled><i data-lucide="check"></i><span id="schedule-save-label">Enable schedule</span></button>
+                </div>
+              </form>
+            </div>
+          </section>
+        </div>
+
+        <div data-module-view="caffeinate" hidden>
+          <section class="module-body" aria-labelledby="caffeinate-heading">
+            <div class="module-help">
+              <button class="help-button" type="button" data-help-button aria-expanded="false" aria-controls="caffeinate-help">
+                <i data-lucide="info"></i><span data-text="howItWorks">How it works</span>
+              </button>
+              <p id="caffeinate-help" class="help-panel" data-text="caffeinateExplanation" aria-hidden="true" inert></p>
+            </div>
+
+            <form id="caffeinate-form">
+              <fieldset class="caffeinate-mode">
+                <legend class="control-label" data-text="caffeinateMode">Run for</legend>
+                <div class="segments caffeinate-modes" data-selection="untilStopped">
+                  <label>
+                    <input type="radio" name="caffeinate-mode" value="untilStopped" checked />
+                    <span data-text="untilStopped">Until stopped</span>
+                  </label>
+                  <label>
+                    <input type="radio" name="caffeinate-mode" value="timer" />
+                    <span data-text="caffeinateTimer">Timer</span>
+                  </label>
+                  <label>
+                    <input type="radio" name="caffeinate-mode" value="process" />
+                    <span data-text="caffeinateProcess">Process</span>
+                  </label>
+                  <span class="segment-indicator" aria-hidden="true"></span>
+                </div>
+              </fieldset>
+
+              <div class="caffeinate-mode-fields">
+                <div class="caffeinate-fields" data-caffeinate-fields="timer" aria-hidden="true">
+                  <label class="caffeinate-field-label" for="caffeinate-duration" data-text="caffeinateDuration">Duration</label>
+                  <div class="caffeinate-timer-control">
+                    <input id="caffeinate-duration" type="number" min="1" step="1" inputmode="numeric" disabled />
+                    <div class="caffeinate-unit-control">
+                      <select id="caffeinate-unit" data-label="caffeinateUnit" aria-label="Unit" disabled>
+                        <option value="minutes" data-text="caffeinateMinutes">Minutes</option>
+                        <option value="seconds" data-text="caffeinateSeconds">Seconds</option>
+                      </select>
+                      <i data-lucide="chevron-right"></i>
+                    </div>
+                  </div>
+                </div>
+                <div class="caffeinate-fields caffeinate-process-fields" data-caffeinate-fields="process" aria-hidden="true">
+                  <div class="caffeinate-process-picker">
+                    <label class="caffeinate-field-label" id="caffeinate-process-label" for="caffeinate-process" data-text="caffeinateRunningProcess">Running process</label>
+                    <div class="caffeinate-process-control">
+                      <input id="caffeinate-process" type="text" role="combobox" aria-autocomplete="list"
+                        aria-expanded="false" aria-controls="caffeinate-processes" autocomplete="off" spellcheck="false" placeholder=" " disabled />
+                      <span class="caffeinate-process-placeholder" aria-hidden="true" data-text="caffeinateChooseProcess">Search by name or PID</span>
+                      <i data-lucide="chevron-right"></i>
+                    </div>
+                    <div class="caffeinate-process-popup" aria-hidden="true">
+                      <div class="caffeinate-process-toolbar">
+                        <p role="status" class="caffeinate-process-feedback">
+                          <span data-process-status="loading" data-text="caffeinateLoadingProcesses" hidden>Loading processes…</span>
+                          <span data-process-status="error" data-text="caffeinateListProcessesFailed" hidden>Could not load processes.</span>
+                          <span data-process-status="empty" data-text="caffeinateNoProcesses" hidden>No matching processes.</span>
+                        </p>
+                        <button type="button" id="caffeinate-refresh-processes" data-text="caffeinateRefreshProcesses" disabled>Refresh</button>
+                      </div>
+                      <ul class="caffeinate-process-list" id="caffeinate-processes" role="listbox" aria-labelledby="caffeinate-process-label"></ul>
+                    </div>
+                  </div>
+                  <div>
+                    <label class="caffeinate-field-label" for="caffeinate-pid" data-text="caffeinatePid">Manual PID</label>
+                    <input id="caffeinate-pid" type="number" min="1" max="2147483647" step="1" inputmode="numeric" disabled />
+                  </div>
+                </div>
+              </div>
+
+              <section class="caffeinate-options" aria-labelledby="caffeinate-options-heading">
+                <h2 id="caffeinate-options-heading" data-text="caffeinateOptions">Sleep options</h2>
+                <label class="caffeinate-option">
+                  <input type="checkbox" data-caffeinate-option="i" checked />
+                  <i data-lucide="laptop"></i><span data-text="caffeinateIdle">Prevent system idle sleep</span>
+                  <code aria-hidden="true">-i</code>
+                </label>
+                <label class="caffeinate-option">
+                  <input type="checkbox" data-caffeinate-option="d" />
+                  <i data-lucide="monitor"></i><span data-text="caffeinateDisplay">Prevent display sleep</span>
+                  <code aria-hidden="true">-d</code>
+                </label>
+                <label class="caffeinate-option">
+                  <input type="checkbox" data-caffeinate-option="m" />
+                  <i data-lucide="database"></i><span data-text="caffeinateDisk">Prevent disk idle sleep</span>
+                  <code aria-hidden="true">-m</code>
+                </label>
+                <label class="caffeinate-option">
+                  <input type="checkbox" data-caffeinate-option="s" />
+                  <i data-lucide="power"></i><span data-text="caffeinateSystem">Prevent system sleep on AC power</span>
+                  <code aria-hidden="true">-s</code>
+                </label>
+                <label class="caffeinate-option">
+                  <input type="checkbox" data-caffeinate-option="u" />
+                  <i data-lucide="user-round"></i><span data-text="caffeinateUser">Declare user active</span>
+                  <code aria-hidden="true">-u</code>
+                </label>
+
+                <div class="caffeinate-preview" role="group" aria-labelledby="caffeinate-preview-label">
+                  <p class="control-label" id="caffeinate-preview-label" data-text="caffeinatePreview">Command preview</p>
+                  <code id="caffeinate-preview">/usr/bin/caffeinate -i</code>
+                </div>
+              </section>
+            </form>
+          </section>
+        </div>
+        <div data-module-view="settings" hidden>
+          <h1 data-text="settings" tabindex="-1">Settings</h1>
+          <div class="settings-preferences">
+            <div class="settings-group">
+              <p class="control-label" id="language-label"><i data-lucide="globe"></i><span data-text="language">Language</span></p>
+              <div class="segments" role="group" aria-labelledby="language-label">
+                <button type="button" data-language="en" lang="en" aria-pressed="false">English</button>
+                <button type="button" data-language="system" data-text="system" aria-pressed="true">System</button>
+                <button type="button" data-language="es" lang="es" aria-pressed="false">Español</button>
+                <span class="segment-indicator" aria-hidden="true"></span>
+              </div>
+            </div>
+            <div class="settings-group">
+              <p class="control-label" id="appearance-label"><i data-lucide="contrast"></i><span data-text="appearance">Appearance</span></p>
+              <div class="segments" role="group" aria-labelledby="appearance-label">
+                <button type="button" data-theme-choice="light" aria-pressed="false"><i data-lucide="sun"></i><span data-text="light">Light</span></button>
+                <button type="button" data-theme-choice="system" aria-pressed="true"><i data-lucide="monitor"></i><span data-text="system">System</span></button>
+                <button type="button" data-theme-choice="dark" aria-pressed="false"><i data-lucide="moon"></i><span data-text="dark">Dark</span></button>
+                <span class="segment-indicator" aria-hidden="true"></span>
+              </div>
+            </div>
+            <section class="settings-permissions" aria-labelledby="permissions-heading">
+              <div class="permissions-heading">
+                <span class="permission-symbol" aria-hidden="true"><i data-lucide="lock-keyhole"></i></span>
+                <div>
+                  <div class="permission-heading-title">
+                    <h2 id="permissions-heading" data-text="accessibility">Accessibility</h2>
+                    <div>
+                      <button class="help-button permission-help-button" type="button" data-help-button data-label="accessibilityHelp"
+                        aria-label="Help with Accessibility" aria-expanded="false" aria-controls="accessibility-help">
+                        <i data-lucide="info" aria-hidden="true"></i>
+                      </button>
+                      <div id="accessibility-help" class="help-panel permission-guide" aria-hidden="true" inert>
+                        <ol>
+                          <li data-text="accessibilityHelpOpen">Select “Open Accessibility” to go to Privacy & Security → Accessibility.</li>
+                          <li>
+                            <p data-text="accessibilityHelpEnable">Turn on Lazy Worker. If it’s already on and Activity still fails, select the Lazy Worker entry in the list and click −. If it’s missing or you just removed it, click +, choose /Applications/Lazy Worker.app, and turn it on.</p>
+                            <div class="permission-example" role="img" data-label="accessibilityHelpExample"
+                              aria-label="Example showing Accessibility enabled for Lazy Worker">
+                              <img src="/src/assets/logo.png" width="23" height="23" alt="" />
+                              <strong>Lazy Worker</strong>
+                              <span data-text="accessibilityHelpOn">On</span>
+                              <span class="permission-example-switch"></span>
+                            </div>
+                            <p data-text="accessibilityHelpMonterey">On macOS 12, open Security & Privacy → Privacy → Accessibility, unlock the pane and select the checkbox.</p>
+                          </li>
+                          <li data-text="accessibilityHelpRetry">Return here and start Activity again.</li>
+                        </ol>
+                      </div>
+                    </div>
+                  </div>
+                  <p id="accessibility-status" role="status"></p>
+                </div>
+              </div>
+              <button class="accessibility-button" id="settings-accessibility" type="button" disabled>
+                <i data-lucide="external-link" aria-hidden="true"></i><span data-text="openAccessibility">Open Accessibility settings</span>
+              </button>
+            </section>
+          </div>
+        </div>
+      </main>
+      <div id="operation-progress" class="operation-progress" role="status" aria-atomic="true">
+        <span data-progress-label></span>
+        <span class="operation-progress-counter" data-progress-counter></span>
+        <span class="operation-progress-track" aria-hidden="true"><span data-progress-fill></span></span>
+      </div>
+      <div id="notice-region" class="notice" aria-hidden="true" inert>
+        <span class="notice-symbol" aria-hidden="true">
+          <i data-lucide="info"></i><i data-lucide="triangle-alert"></i>
+        </span>
+        <div class="notice-copy">
+          <p id="notice-title" class="notice-title"></p>
+          <p id="notice-description" class="notice-description"></p>
+          <button class="accessibility-button" id="notice-accessibility" type="button" hidden>
+            <i data-lucide="lock-keyhole" aria-hidden="true"></i><span data-text="openAccessibility">Open Accessibility settings</span>
+          </button>
+        </div>
+        <button class="notice-dismiss" id="notice-dismiss" type="button" data-label="dismissNotice" aria-label="Dismiss notification">
+          <i data-lucide="x" aria-hidden="true"></i>
+        </button>
+      </div>
+      <span class="visually-hidden" id="notice-announcement" role="status" aria-atomic="true"></span>
+    </div>
+
+    <template id="tool-nav-template">
+      <button class="nav-button" type="button"><i></i><span></span></button>
+    </template>
+    <template id="tool-card-template">
+      <div class="tool-row">
+        <button class="tool-row-link" type="button"></button>
+        <span class="tool-name"><i class="tool-icon"></i><strong></strong></span>
+        <span class="status" data-tool-status data-mode="off" role="status">Off</span>
+        <label class="switch catalog-switch">
+          <input type="checkbox" role="switch" data-tool-include disabled /><span aria-hidden="true"></span>
+        </label>
+        <span class="catalog-switch-label visually-hidden" data-text="quickStart">Quick start</span>
+        <button class="power catalog-power" type="button" role="switch" aria-checked="false" data-tool-power disabled>
+          <i data-lucide="power"></i>
+        </button>
+        <i class="tool-arrow" data-lucide="chevron-right"></i>
+      </div>
+    </template>
+    <template id="tool-header-template">
+      <header class="module-header">
+        <div class="module-heading">
+          <div class="module-icon"><i class="tool-icon"></i></div>
+          <div class="module-identity">
+            <h1 tabindex="-1"></h1>
+            <div class="module-status">
+              <span class="status" data-tool-status data-mode="off" role="status">Off</span>
+              <span class="session-timer" data-tool-timer role="timer" aria-hidden="true">00:00:00</span>
+            </div>
+          </div>
+        </div>
+        <div class="module-actions">
+          <label class="quick-switch">
+            <span class="quick-switch-label" data-text="quickStart">Quick start</span>
+            <span class="switch">
+              <input type="checkbox" role="switch" data-tool-include disabled /><span aria-hidden="true"></span>
+            </span>
+          </label>
+          <button class="power" type="button" role="switch" aria-checked="false" data-tool-power disabled>
+            <i data-lucide="power"></i>
+          </button>
+        </div>
+        <p class="module-description"></p>
+      </header>
+    </template>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
