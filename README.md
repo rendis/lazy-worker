@@ -67,11 +67,6 @@ Build the project on Windows using the [Windows development prerequisites](https
 
 Implement the Windows worker alongside `src-tauri/src/activity/macos.rs` and select it by target in `src-tauri/src/activity/mod.rs`. A worker starts a session, reports whether it is running, and releases its resources when dropped. Keep the schedule and preferences outside that adapter.
 
-## Design
-
-- [Initial Activity light concept](docs/design/light-concept.png)
-- [Initial Settings dark concept](docs/design/dark-settings-concept.png)
-
 ## License
 
 Lazy Worker is available under the [MIT License](LICENSE).
