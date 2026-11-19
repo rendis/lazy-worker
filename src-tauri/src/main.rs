@@ -5,6 +5,8 @@ mod caffeinate;
 mod preferences;
 
 #[cfg(target_os = "macos")]
+mod login_launch;
+#[cfg(target_os = "macos")]
 mod panel;
 #[cfg(target_os = "macos")]
 mod presentation;
@@ -201,10 +203,15 @@ fn main() {
             fs::create_dir_all(&directory)?;
             let path = directory.join("preferences.json");
             let preferences = preferences::load(&path)?;
-            let controller = Arc::new(Mutex::new(Tools {
+            let start_tools_on_launch = preferences.start_tools_on_launch;
+            let mut tools = Tools {
                 activity: Activity::new(preferences, path),
                 caffeinate: Caffeinate::new(),
-            }));
+            };
+            if start_tools_on_launch {
+                tools.start_selected();
+            }
+            let controller = Arc::new(Mutex::new(tools));
             let clock = Arc::downgrade(&controller);
             app.manage(controller);
             #[cfg(target_os = "macos")]
@@ -246,6 +253,10 @@ fn main() {
             get_activity_accessibility,
             request_activity_accessibility,
             set_tool_active,
+            #[cfg(target_os = "macos")]
+            login_launch::get_login_launch,
+            #[cfg(target_os = "macos")]
+            login_launch::set_login_launch,
             #[cfg(target_os = "macos")]
             updates::get_available_update,
             #[cfg(target_os = "macos")]

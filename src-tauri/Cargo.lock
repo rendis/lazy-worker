@@ -1824,12 +1824,13 @@ dependencies = [
 
 [[package]]
 name = "lazy-worker"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
+ "plist",
  "png",
  "serde",
  "serde_json",

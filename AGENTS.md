@@ -3,6 +3,7 @@
 - Write code, comments, and documentation in English. Keep English and Spanish webview strings together in `src/messages.ts`. Localize the native menu in `src-tauri/src/tray.rs`.
 - Hide the macOS panel on close and keep workers running until explicitly stopped or the app quits.
 - Acquire the macOS instance lock before app setup. Route repeat launches through the shared panel show path.
+- Register launch at login through a per-user LaunchAgent that opens the installed app bundle. Run startup Quick start once after acquiring the instance lock.
 - Keep the macOS menu icon legible in the system menu bar appearance and reserve space for its activity badge in both states.
 - Hide the existing `NSStatusItem` during a presentation so its activity badge survives restoration.
 - Keep the native panel fixed-size in the Tauri window configuration. Keep desktop scrolling inside `<main>` so the sidebar stays fixed.

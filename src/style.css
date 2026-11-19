@@ -736,12 +736,13 @@ h1:focus { outline: none; }
   transition: background-color var(--theme-motion, 0s), border-color var(--theme-motion, 0s),
     box-shadow var(--theme-motion, 0s), color var(--theme-ink-motion, 0s);
 }
-.settings-presentation {
+.settings-startup, .settings-presentation {
   grid-column: 1 / -1;
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
-.presentation-control {
+.settings-startup { display: grid; gap: 12px; }
+.settings-switch-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -749,14 +750,14 @@ h1:focus { outline: none; }
   font-size: 14px;
   font-weight: 700;
 }
-.presentation-control label {
+.settings-switch-row label {
   display: flex;
   align-items: center;
   gap: 7px;
   cursor: pointer;
 }
-.presentation-control label .lucide { width: 16px; height: 16px; color: var(--secondary); }
-.presentation-control .permission-heading-title { gap: 5px; }
+.settings-switch-row label .lucide { width: 16px; height: 16px; flex: none; color: var(--secondary); }
+.settings-switch-row .permission-heading-title { gap: 5px; }
 .permission-warning:not([hidden]) {
   display: inline-grid;
   place-items: center;
@@ -772,7 +773,7 @@ h1:focus { outline: none; }
 }
 .permission-warning:is(:hover, [aria-expanded="true"]) { background: var(--glass); }
 .permission-warning .lucide { width: 14px; height: 14px; }
-#sharing-description {
+.settings-switch-description {
   margin-top: 2px;
   color: var(--secondary);
   font-size: 13px;
@@ -832,7 +833,7 @@ h1:focus { outline: none; }
 .accessibility-button:hover:enabled { background: var(--glass); }
 .accessibility-button .lucide { width: 15px; height: 15px; }
 .settings-preferences[data-permission-pending] .settings-presentation { padding-bottom: 2px; }
-.settings-preferences[data-permission-pending] .presentation-control .switch { opacity: .76; }
+.settings-preferences[data-permission-pending] .settings-presentation .switch { opacity: .76; }
 .settings-preferences[data-permission-pending] .settings-permissions {
   margin-top: 0;
   padding: 13px;

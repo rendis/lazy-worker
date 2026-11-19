@@ -19,6 +19,7 @@ export type Preferences = {
   duration: Duration;
   schedule: { enabled: boolean; start: string; end: string };
   quickStart: Record<ToolId, boolean>;
+  startToolsOnLaunch: boolean;
   caffeinate: CaffeinateSettings;
   hideWhileSharing: boolean;
 };
@@ -38,6 +39,7 @@ export const defaults: Preferences = {
   duration: "minutes15",
   schedule: { enabled: false, start: "09:00", end: "17:00" },
   quickStart: { activity: false, caffeinate: false },
+  startToolsOnLaunch: false,
   hideWhileSharing: true,
   caffeinate: {
     mode: "untilStopped",
@@ -190,6 +192,18 @@ export const desktop = {
   async savePreferences(preferences: Preferences): Promise<void> {
     if (native) return invoke("save_preferences", { preferences });
     savePreviewPreferences({ ...preferences, caffeinate: loadPreviewPreferences().caffeinate });
+  },
+  async getLoginLaunch(): Promise<boolean> {
+    return invoke("get_login_launch");
+  },
+  async setLoginLaunch(enabled: boolean): Promise<void> {
+    return invoke("set_login_launch", { enabled });
+  },
+  startPreviewTools(preferences: Preferences): void {
+    if (native || !preferences.startToolsOnLaunch) return;
+    for (const id of ["activity", "caffeinate"] as const) {
+      if (preferences.quickStart[id]) setPreviewActive(id, true, preferences);
+    }
   },
   async saveCaffeinateSettings(settings: CaffeinateSettings): Promise<Statuses> {
     if (native) return invoke("save_caffeinate_settings", { settings });

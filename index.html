@@ -234,8 +234,34 @@
                 <span class="segment-indicator" aria-hidden="true"></span>
               </div>
             </div>
+            <div class="settings-startup">
+              <div id="login-launch-setting" hidden>
+                <div class="settings-switch-row">
+                  <label for="login-launch">
+                    <i data-lucide="laptop"></i><span data-text="loginLaunch">Open Lazy Worker at login</span>
+                  </label>
+                  <span class="switch">
+                    <input id="login-launch" type="checkbox" switch role="switch" aria-describedby="login-launch-description" disabled />
+                    <span aria-hidden="true"></span>
+                  </span>
+                </div>
+                <p class="settings-switch-description" id="login-launch-description" data-text="loginLaunchDescription">Opens the app when you sign in to your Mac.</p>
+              </div>
+              <div>
+                <div class="settings-switch-row">
+                  <label for="start-tools-on-launch">
+                    <i data-lucide="zap"></i><span data-text="startToolsOnLaunch">Run Quick start when the app opens</span>
+                  </label>
+                  <span class="switch">
+                    <input id="start-tools-on-launch" type="checkbox" switch role="switch" aria-describedby="start-tools-on-launch-description" disabled />
+                    <span aria-hidden="true"></span>
+                  </span>
+                </div>
+                <p class="settings-switch-description" id="start-tools-on-launch-description" data-text="startToolsOnLaunchDescription">Starts the tools marked for Quick start with their saved settings.</p>
+              </div>
+            </div>
             <div class="settings-presentation" id="settings-presentation" hidden>
-              <div class="presentation-control">
+              <div class="settings-switch-row">
                 <div class="permission-heading-title">
                   <label for="hide-while-sharing">
                     <i data-lucide="eye-off"></i><span data-text="hideWhileSharing">Hide Lazy Worker while sharing</span>
@@ -250,7 +276,7 @@
                   <span aria-hidden="true"></span>
                 </span>
               </div>
-              <p id="sharing-description" data-text="sharingPrivacyDescription">Hides the panel and menu bar icon during detected screen shares. Requires Accessibility permission.</p>
+              <p class="settings-switch-description" id="sharing-description" data-text="sharingPrivacyDescription">Hides the panel and menu bar icon during detected screen shares. Requires Accessibility permission.</p>
             </div>
             <section class="settings-permissions" aria-labelledby="permissions-heading">
               <div class="permissions-heading">

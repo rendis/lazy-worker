@@ -12,6 +12,8 @@ Use the wind-up key in the menu bar to open the panel, start the selected tools,
 
 Enable **Quick start** from a module header or its row in Tools. Both views share the same saved selection. **Start selected** starts the selected tools that are off, and **Stop selected** stops the selected tools that are running. Tools shows both actions when the selection has a mix of states. Use a row’s power button to start or stop that tool directly. Running sessions keep their original start time. Each module shows a session timer in its header. Quick start selections persist when the app closes or the Mac restarts.
 
+In **Settings**, turn on **Open Lazy Worker at login** to open the installed app when you sign in to macOS, including after a restart. Turn on **Run Quick start when the app opens** to start the selected tools with their saved settings each time Lazy Worker starts. Both options default to off and can be used independently.
+
 ## Activity
 
 Open **How it works** in Activity to see what happens while a session is active.

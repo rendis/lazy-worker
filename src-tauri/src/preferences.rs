@@ -121,6 +121,7 @@ pub struct Preferences {
     pub duration: ManualDuration,
     pub schedule: Schedule,
     pub quick_start: QuickStart,
+    pub start_tools_on_launch: bool,
     pub caffeinate: CaffeinateSettings,
     pub hide_while_sharing: bool,
 }
@@ -133,6 +134,7 @@ impl Default for Preferences {
             duration: ManualDuration::default(),
             schedule: Schedule::default(),
             quick_start: QuickStart::default(),
+            start_tools_on_launch: false,
             caffeinate: CaffeinateSettings::default(),
             hide_while_sharing: true,
         }
@@ -214,6 +216,7 @@ mod tests {
         assert!(matches!(preferences.duration, ManualDuration::Minutes30));
         assert!(!preferences.quick_start.activity);
         assert!(!preferences.quick_start.caffeinate);
+        assert!(!preferences.start_tools_on_launch);
         assert_eq!(preferences.caffeinate.seconds, 1800);
     }
 

@@ -2,7 +2,7 @@ import "./style.css";
 import {
   Activity, ArrowRight, Check, ChevronRight, Coffee, Contrast, createIcons,
   Database, ExternalLink, EyeOff, Globe, Info, Laptop, LayoutGrid, LockKeyhole, Monitor, Moon, Power,
-  Settings, Square, Sun, TriangleAlert, UserRound, X,
+  Settings, Square, Sun, TriangleAlert, UserRound, X, Zap,
 } from "lucide";
 import { mountCaffeinateForm } from "./caffeinate-form";
 import {
@@ -24,7 +24,7 @@ createIcons({
   icons: {
     Activity, ArrowRight, Check, ChevronRight, Coffee, Contrast, Database,
     ExternalLink, EyeOff, Globe, Info, Laptop, LayoutGrid, LockKeyhole, Monitor, Moon, Power, Settings,
-    Square, Sun, TriangleAlert, UserRound, X,
+    Square, Sun, TriangleAlert, UserRound, X, Zap,
   },
   attrs: { "aria-hidden": "true", "stroke-width": 1.75 },
 });
@@ -72,16 +72,19 @@ const settingsPreferences = element("settings-preferences");
 const settingsPermissionDot = element("settings-permission-dot");
 const settingsPermissionState = element("settings-permission-state");
 const permissionFeatures = element("permission-features");
+const loginLaunch = element<HTMLInputElement>("login-launch");
+const startToolsOnLaunch = element<HTMLInputElement>("start-tools-on-launch");
 const hideWhileSharing = element<HTMLInputElement>("hide-while-sharing");
 const permissionWarnings = document.querySelectorAll<HTMLButtonElement>("[data-permission-warning]");
 const activityWarning = document.querySelector<HTMLButtonElement>('[data-permission-warning="activity"]')!;
 const sharingWarning = document.querySelector<HTMLButtonElement>('[data-permission-warning="hideWhileSharing"]')!;
 element("settings-presentation").hidden = !desktop.showPresentationPrivacy;
+element("login-launch-setting").hidden = !desktop.macApp;
 
 type ActivityMode = "duration" | "schedule";
 type FeedbackTarget = ToolId | "tools" | "settings";
 type FeedbackLine = { message: Message; tool?: ToolId };
-type PreferenceChoice = "duration" | "language" | "theme" | "hideWhileSharing";
+type PreferenceChoice = "duration" | "language" | "theme" | "hideWhileSharing" | "startToolsOnLaunch";
 type PreferenceChange = { key: PreferenceChoice | ToolId; apply: (current: Preferences) => Preferences };
 const accessibilityLabels: Record<ActivityAccessibility, Message> = {
   granted: "accessibilityGranted",
@@ -111,6 +114,7 @@ let visibleNotice: { target: FeedbackTarget; key: string } | undefined;
 let accessibility: ActivityAccessibility | undefined;
 let accessibilityRefresh: Promise<void> | undefined;
 let accessibilityOpening = false;
+let loginLaunchPending = false;
 let accessibilityRequestIssue: FeedbackTarget | undefined;
 let permissionNotice: { trigger: HTMLButtonElement; pinned: boolean } | undefined;
 let permissionNoticeDismissal: number | undefined;
@@ -421,6 +425,8 @@ function renderControls(): void {
   setAttribute(stopSelected, "aria-disabled", pending);
 
   renderActivityControls(unavailable, pending);
+  startToolsOnLaunch.checked = preferences.startToolsOnLaunch;
+  setDisabled(startToolsOnLaunch, !loaded);
   for (const button of [...languageButtons, ...themeButtons]) setDisabled(button, !loaded);
   caffeinate.setDisabled(unavailable || !statuses.caffeinate.supported);
 }
@@ -556,6 +562,27 @@ function clearFeedback(target: FeedbackTarget): void {
   delete feedback[target];
   if (target === "tools") toolFailures = [];
   if (target === accessibilityRequestIssue) accessibilityRequestIssue = undefined;
+}
+
+async function updateLoginLaunch(enabled?: boolean): Promise<void> {
+  if (!desktop.macApp || loginLaunchPending) return;
+  loginLaunchPending = true;
+  const previous = enabled === undefined ? loginLaunch.checked : !enabled;
+  const wasDisabled = loginLaunch.disabled;
+  loginLaunch.disabled = true;
+  try {
+    if (enabled === undefined) loginLaunch.checked = await desktop.getLoginLaunch();
+    else await desktop.setLoginLaunch(enabled);
+    loginLaunch.disabled = false;
+  } catch (error) {
+    loginLaunch.checked = previous;
+    loginLaunch.disabled = wasDisabled;
+    feedback.settings = errorMessage(error, enabled === undefined ? "loginLaunchCheckFailed" : "loginLaunchSaveFailed");
+    delete dismissedFeedback.settings;
+    renderFeedback();
+  } finally {
+    loginLaunchPending = false;
+  }
 }
 
 async function save(next: Preferences): Promise<void> {
@@ -830,6 +857,14 @@ languageButtons.forEach(button => button.addEventListener("click", () => {
 themeButtons.forEach(button => button.addEventListener("click", () => {
   updateChoice("settings", "theme", button.dataset.themeChoice as Theme);
 }));
+loginLaunch.addEventListener("change", () => {
+  clearFeedback("settings");
+  renderFeedback();
+  void updateLoginLaunch(loginLaunch.checked);
+});
+startToolsOnLaunch.addEventListener("change", () => {
+  updateChoice("settings", "startToolsOnLaunch", startToolsOnLaunch.checked);
+});
 hideWhileSharing.addEventListener("change", () => {
   if (hideWhileSharing.checked && desktop.macApp && accessibility !== "granted") {
     hideWhileSharing.checked = false;
@@ -893,7 +928,10 @@ settingsAccessibility.addEventListener("click", () => { void openAccessibility("
 for (const button of document.querySelectorAll<HTMLButtonElement>("[data-view]")) {
   button.addEventListener("click", () => {
     renderFeedback();
-    if (button.dataset.view === "settings") refreshPermissions();
+    if (button.dataset.view === "settings") {
+      refreshPermissions();
+      void updateLoginLaunch();
+    }
   });
 }
 async function refreshSystemLanguage(): Promise<void> {
@@ -907,6 +945,7 @@ systemAppearance.addEventListener("change", () => renderTheme(true));
 window.addEventListener("languagechange", () => { void refreshSystemLanguage(); });
 desktop.onFocus(() => {
   refreshPermissions();
+  if (activeView().dataset.moduleView === "settings") void updateLoginLaunch();
   void refreshSystemLanguage();
   void updates.refresh();
 });
@@ -925,6 +964,7 @@ async function initialize(): Promise<void> {
     start.value = preferences.schedule.start;
     end.value = preferences.schedule.end;
     caffeinate.set(preferences.caffeinate);
+    desktop.startPreviewTools(preferences);
   } catch {
     feedback.tools = "saveFailed";
   }
