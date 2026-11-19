@@ -10,6 +10,7 @@
 - Register each module in `src/modules.ts` and mount its shared header so its icon, status, timer, and quick-start switch stay consistent with Tools. Keep the timer slot reserved when idle so it can fade without moving the layout.
 - Derive Tools bulk actions from the runtime state of modules included in Quick start. Keep the action layout stable until a bulk operation finishes. Share one surface across single actions so only their icon and label crossfade. Keep row power available independently of the selection.
 - Keep active power buttons visibly recessed in terracotta until their module stops.
+- Derive each sidebar running dot from its module's runtime status, independent of the current page.
 - Keep system input and power APIs inside the activity adapters. Shared scheduling and preferences must work with the unsupported-platform adapter.
 - List Caffeinate process targets by PID and executable basename. Preserve the current sleep assertion if switching to a process fails.
 - Check Accessibility in the same helper that posts Activity events and keep feedback outside the module layout.

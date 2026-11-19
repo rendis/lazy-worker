@@ -45,6 +45,7 @@ const startSelected = element<HTMLButtonElement>("start-selected");
 const stopSelected = element<HTMLButtonElement>("stop-selected");
 const sessionTimers = document.querySelectorAll<HTMLElement>("[data-tool-timer]");
 const statusLabels = document.querySelectorAll<HTMLElement>("[data-tool-status]");
+const toolNavButtons = document.querySelectorAll<HTMLButtonElement>(".tool-nav-button");
 const powerButtons = document.querySelectorAll<HTMLButtonElement>("[data-tool-power]");
 const includeSwitches = document.querySelectorAll<HTMLInputElement>("[data-tool-include]");
 const durationButtons = document.querySelectorAll<HTMLButtonElement>("[data-duration]");
@@ -312,6 +313,12 @@ function dismissNotice(): void {
 }
 
 function renderStatus(): void {
+  for (const button of toolNavButtons) {
+    const running = ready && statuses[button.dataset.view as ToolId].mode !== "off";
+    button.toggleAttribute("data-running", running);
+    if (running) setAttribute(button, "aria-describedby", "tool-running-description");
+    else button.removeAttribute("aria-describedby");
+  }
   for (const label of statusLabels) {
     const { mode } = statuses[label.dataset.toolStatus as ToolId];
     updateToolStatus(label, mode, translate(mode));

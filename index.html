@@ -19,6 +19,7 @@
             <i data-lucide="layout-grid"></i><span data-text="tools">Tools</span>
           </button>
         </nav>
+        <span id="tool-running-description" data-text="toolRunning" hidden>Running</span>
 
         <button id="settings-button" class="nav-button settings-button" type="button" data-view="settings">
           <i data-lucide="settings"></i><span data-text="settings">Settings</span>
@@ -334,7 +335,7 @@
     </div>
 
     <template id="tool-nav-template">
-      <button class="nav-button" type="button"><i></i><span></span></button>
+      <button class="nav-button tool-nav-button" type="button"><i></i><span></span></button>
     </template>
     <template id="tool-card-template">
       <div class="tool-row">
