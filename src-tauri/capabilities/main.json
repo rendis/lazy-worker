@@ -1,9 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Allow the main window to follow the selected theme and refresh Accessibility when the panel gains focus",
+  "description": "Allow the main window to show the app version, follow the selected theme, and refresh Accessibility on focus",
   "windows": ["main"],
   "permissions": [
+    "core:app:allow-version",
     "core:window:allow-set-theme",
     "core:event:allow-listen",
     "core:event:allow-unlisten"

@@ -1,6 +1,8 @@
+import { getVersion } from "@tauri-apps/api/app";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { version as previewVersion } from "../src-tauri/tauri.conf.json";
 import type { Language } from "./messages";
 import type { ToolId } from "./modules";
 
@@ -176,6 +178,9 @@ export const desktop = {
   macApp,
   showWindowTitlebar: !native || macApp,
   showPresentationPrivacy: !native || macApp,
+  async getVersion(): Promise<string> {
+    return native ? getVersion() : previewVersion;
+  },
   async getPreferences(): Promise<Preferences> {
     return native ? invoke("get_preferences") : loadPreviewPreferences();
   },

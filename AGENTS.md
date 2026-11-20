@@ -9,6 +9,7 @@
 - Keep the native panel fixed-size in the Tauri window configuration. Keep desktop scrolling inside `<main>` so the sidebar stays fixed.
 - Crossfade the theme canvas layers and keep the Settings card geometry stable when its status text is translated.
 - Read the full macOS preferred-language list in native code because WebKit may expose only its first entry.
+- Read the running version through Tauri's app API. Use the configured bundle version in browser previews.
 - Register each module in `src/modules.ts` and mount its shared header so its icon, status, timer, and quick-start switch stay consistent with Tools. Keep the timer slot reserved when idle so it can fade without moving the layout.
 - Derive Tools bulk actions from the runtime state of modules included in Quick start. Keep the action layout stable until a bulk operation finishes. Share one surface across single actions so only their icon and label crossfade. Keep row power available independently of the selection.
 - Keep active power buttons visibly recessed in terracotta until their module stops.

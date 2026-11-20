@@ -953,6 +953,10 @@ desktop.onFocus(() => {
 async function initialize(): Promise<void> {
   renderTheme(false);
   renderStatus();
+  void desktop.getVersion().then(version => {
+    setText(element("app-version"), version);
+    element("settings-version").hidden = false;
+  }).catch(() => {});
   try {
     [savedPreferences, systemLanguage] = await Promise.all([
       desktop.getPreferences(),

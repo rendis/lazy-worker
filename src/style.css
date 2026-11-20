@@ -792,6 +792,13 @@ h1:focus { outline: none; }
 }
 .settings-update h2 { font-size: 14px; font-weight: 700; }
 .settings-update .accessibility-button { margin-top: 6px; }
+.settings-version {
+  grid-column: 1 / -1;
+  color: var(--secondary);
+  font-size: 12px;
+  text-align: end;
+  transition: color var(--theme-ink-motion, 0s);
+}
 .permissions-heading { display: flex; align-items: center; gap: 9px; }
 .permissions-heading h2 { font-size: 14px; font-weight: 700; }
 #accessibility-status {
