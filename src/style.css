@@ -52,6 +52,15 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   outline-offset: 3px;
 }
 p, h1, h2 { margin: 0; }
+/* A thin scroll bar that stays visible without drawing attention. */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 9px;
+  background: var(--line) content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--secondary) content-box; }
 .lucide { display: block; width: 19px; height: 19px; flex-shrink: 0; }
 .visually-hidden {
   position: absolute;

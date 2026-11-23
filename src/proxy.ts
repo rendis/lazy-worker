@@ -501,8 +501,44 @@ export function mountProxy(host: Host) {
     };
   }
 
+  const rowMotion = { duration: 240, easing: "cubic-bezier(.22, .7, .36, 1)" };
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+  /** Opens a new row from nothing, so the rows under it move down instead of jumping. */
+  function enter(root: HTMLElement): void {
+    if (reducedMotion.matches || !root.animate) return;
+    const height = `${root.offsetHeight}px`;
+    root.style.overflow = "hidden";
+    settle(root.animate([{ height: "0px", opacity: 0 }, { height, opacity: 1 }], rowMotion),
+      () => { root.style.overflow = ""; });
+  }
+
+  /** A hidden window can pause animations, so a timer also ends the change. */
+  function settle(animation: Animation, done: () => void): void {
+    void animation.finished.catch(() => {}).then(done);
+    window.setTimeout(() => {
+      animation.cancel();
+      done();
+    }, rowMotion.duration + 80);
+  }
+
+  /** Closes a removed row before it leaves, so the rows under it move up instead of jumping. */
+  function leave(root: HTMLElement): void {
+    if (reducedMotion.matches || !root.animate) {
+      root.remove();
+      return;
+    }
+    root.toggleAttribute("data-leaving", true);
+    root.inert = true;
+    root.style.overflow = "hidden";
+    settle(root.animate([{ height: `${root.offsetHeight}px`, opacity: 1 }, { height: "0px", opacity: 0 }], rowMotion),
+      () => root.remove());
+  }
+
   /** Keeps each row's element across updates, so its controls can animate between states. */
   function reconcile(container: HTMLElement, rows: Rows, build: (app: ProxyApp) => Row): void {
+    const first = rows.size === 0;
+    const added: HTMLElement[] = [];
     const labels = [host.translate("open"), host.translate("proxyInstalled"), host.translate("variantApp"), host.quickStartHint()];
     let built = false;
     for (const app of settings!.apps) {
@@ -510,7 +546,8 @@ export function mountProxy(host: Host) {
       let entry = rows.get(app.id);
       if (entry?.signature !== signature) {
         const row = build(app);
-        entry?.row.root.replaceWith(row.root);
+        if (entry) entry.row.root.replaceWith(row.root);
+        else if (!first) added.push(row.root);
         entry = { signature, row };
         rows.set(app.id, entry);
         built = true;
@@ -519,15 +556,18 @@ export function mountProxy(host: Host) {
     }
     for (const [id, entry] of rows) {
       if (settings!.apps.every(app => app.id !== id)) {
-        entry.row.root.remove();
+        leave(entry.row.root);
         rows.delete(id);
       }
     }
+    // A row that is closing keeps its place and does not count for the order.
     settings!.apps.forEach((app, index) => {
       const root = rows.get(app.id)!.row.root;
-      if (container.children[index] !== root) container.insertBefore(root, container.children[index] ?? null);
+      const placed = [...container.children].filter(child => !child.hasAttribute("data-leaving"));
+      if (placed[index] !== root) container.insertBefore(root, placed[index] ?? null);
     });
     if (built) host.refreshIcons();
+    added.forEach(enter);
   }
 
   function renderApps(): void {
