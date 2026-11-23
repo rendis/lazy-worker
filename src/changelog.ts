@@ -15,6 +15,8 @@ export const releases: readonly Release[] = [
     changes: [
       { en: "The update section in Settings opens smoothly.",
         es: "La sección de actualización en Ajustes se abre con suavidad." },
+      { en: "Tools shows AI Proxy as its own row, with the server's status in view while its AI tools are hidden.",
+        es: "Herramientas muestra el Proxy de IA en su propia fila, con el estado del servidor a la vista aunque sus herramientas de IA estén ocultas." },
     ],
   },
   {

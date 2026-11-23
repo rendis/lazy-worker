@@ -1251,24 +1251,26 @@ h1:focus { outline: none; }
 }
 .tool-arrow.lucide { width: 16px; height: 16px; color: var(--secondary); }
 
+/* The arrow that opens a group sits in the row's last column, above the link that covers the row. */
+.tool-group-toggle-tip { position: relative; z-index: 2; justify-self: center; }
 .tool-group-toggle {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  width: 100%;
-  min-height: 54px;
-  padding: 0 4px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin: -5px;
+  padding: 0;
   border: 0;
-  border-bottom: 1px solid var(--hairline);
+  border-radius: 7px;
   background: transparent;
-  text-align: start;
+  color: var(--secondary);
+  transition: background-color .16s ease, color .16s ease;
 }
-.tool-group-toggle:hover { background: var(--glass); }
-.tool-group-toggle:focus-visible { outline-offset: -3px; }
-.tool-group-toggle .tool-name { flex: 0 1 13rem; }
-.tool-group-chevron.lucide { width: 15px; height: 15px; color: var(--secondary); transition: transform .16s ease; }
-.tool-group-toggle[aria-expanded="true"] .tool-group-chevron { transform: rotate(90deg); }
-.tool-group-count, .tool-app-state { color: var(--secondary); font-size: 13px; font-weight: 640; }
+.tool-group-toggle:hover { background: var(--glass); color: var(--text); }
+.tool-group-toggle .lucide { width: 16px; height: 16px; transition: transform var(--selection-duration) var(--selection-easing); }
+.tool-group-toggle[aria-expanded="true"] .lucide { transform: rotate(180deg); }
+.tool-group-toggle-tip[data-tip]::after { right: -6px; }
+.tool-app-state { color: var(--secondary); font-size: 13px; font-weight: 640; }
 .tool-group-rows { margin-inline-start: 13px; padding-inline-start: 14px; border-inline-start: 1px solid var(--hairline); }
 .tool-group-rows .tool-name { font-size: 14px; }
 .tool-app-row[data-missing] :is(.tool-name, .tool-app-state) { opacity: .55; }

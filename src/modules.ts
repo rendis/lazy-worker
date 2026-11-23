@@ -35,7 +35,7 @@ export const tools: readonly Tool[] = [
     id: "proxy", title: "proxy", description: "proxyDescription", icon: "server",
     help: { text: "proxyExplanation", clip: { video: proxyClip, poster: proxyPoster, label: "proxyClip" } },
     section: { title: "ai", icon: "sparkles" },
-    row: { title: "proxyServer", group: "ai-group-rows" },
+    row: { title: "aiProxy", group: "ai-group-head" },
   },
 ];
 

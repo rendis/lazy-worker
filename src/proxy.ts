@@ -126,10 +126,12 @@ export function mountProxy(host: Host) {
   const groupToggle = element<HTMLButtonElement>("ai-group-toggle");
   const groupBody = element("ai-group-body");
   const groupApps = element("ai-group-apps");
-  const groupCount = element("ai-group-count");
+  // The proxy's own row heads the group. Its arrow takes the place of the row's arrow to the module.
+  const groupHead = element("ai-group-head");
+  const groupToggleTip = groupToggle.parentElement!;
+  groupHead.querySelector(".tool-row .tool-arrow")?.replaceWith(groupToggleTip);
 
   let settings: ProxySettings | undefined;
-  let serverQuickStart = false;
   let running = false;
   let network: ProxyNetwork = { hostname: null, addresses: [] };
   let peers: ProxyPeer[] = [];
@@ -573,8 +575,6 @@ export function mountProxy(host: Host) {
   function renderApps(): void {
     reconcile(apps, clientRows, clientRow);
     reconcile(groupApps, groupRows, groupRow);
-    const marked = Number(serverQuickStart) + settings!.apps.filter(app => app.quickStart).length;
-    groupCount.textContent = marked ? host.translate("quickStartMarked").replace("{count}", String(marked)) : "";
   }
 
   function renderServerState(): void {
@@ -872,7 +872,7 @@ export function mountProxy(host: Host) {
     if (event.key === "Escape") setLogOpen(false);
   });
   // The server's row in Tools leads to the server, whatever role was showing last.
-  element("ai-group-rows").addEventListener("click", event => {
+  groupHead.addEventListener("click", event => {
     if (!(event.target as Element).closest(".tool-row-link") || settings?.role === "server") return;
     host.update(current => ({ ...current, role: "server" }));
   });
@@ -888,7 +888,6 @@ export function mountProxy(host: Host) {
     refresh: refreshEnvironment,
     render(current: ProxySettings, quickStart: boolean, active: boolean, enabled: boolean): void {
       settings = current;
-      serverQuickStart = quickStart;
       running = active;
       view.dataset.role = current.role;
       roles.dataset.selection = current.role;

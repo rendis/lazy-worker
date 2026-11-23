@@ -19,7 +19,7 @@
 - Give each module a help popover with one plain paragraph and its `-loop.mp4` clip and poster from `src/assets/clips`. The clay workshop export writes them there, because its renders folder stays out of git.
 - Lay out module settings as `.setting-row` lines with an icon, a label, and the control at the end. Use `.segments` for exclusive choices and `.switch` for on/off options. Offer the useful combinations of a tool's options as one named choice, and keep rare options under Advanced, so a user who is not technical decides once. Give each option of a named choice an icon beside its word through `.segment-icons`.
 - Mark Quick start with the bolt switch only. Its hint states when the tool starts, based on the startup setting.
-- Give a module that sits under a broader sidebar section a `section` in `src/modules.ts`, and a `row` when its Tools row belongs to a group.
+- Give a module that sits under a broader sidebar section a `section` in `src/modules.ts`, and a `row` when its Tools row belongs to a group. A tool whose row opens more rows heads its group with its own row, so its status shows while the group is closed.
 - Keep proxy logic in `src/proxy.ts` and reach the system only through `desktop`. Give each `desktop` proxy call a browser-preview result.
 - Store a proxy command as a template where `{server}` stands for the server address. Store `null` for an unchanged built-in command. Save a command of the user's own exactly as written, and ask for the server address only when the command names it.
 - Ask before an action that cannot be undone, in the place where the user started it.
