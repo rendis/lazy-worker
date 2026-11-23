@@ -30,23 +30,22 @@
 
       <main>
         <div data-module-view="tools">
-          <h1 data-text="tools" tabindex="-1">Tools</h1>
-          <section class="quick-start" aria-labelledby="quick-start-heading">
-            <div class="quick-start-heading">
-              <div>
-                <h2 id="quick-start-heading" data-text="quickStart">Quick start</h2>
-                <p class="section-description" data-text="quickStartDescription">Start or stop your selected tools. Tools start with their saved settings.</p>
-              </div>
-              <div id="quick-start-actions" class="quick-start-actions" data-mode="start">
-                <button id="start-selected" class="selected-action" type="button" disabled>
-                  <i data-lucide="power"></i><span data-text="startSelected">Start selected</span>
-                </button>
-                <button id="stop-selected" class="selected-action" type="button" aria-hidden="true" tabindex="-1" disabled>
-                  <i data-lucide="square"></i><span data-text="stopSelected">Stop selected</span>
-                </button>
-                <span class="selected-action-surface" aria-hidden="true"></span>
-              </div>
+          <!-- The bulk actions share the title line, so their width never moves the tool list. -->
+          <div class="tools-heading">
+            <h1 data-text="tools" tabindex="-1">Tools</h1>
+            <div id="quick-start-actions" class="quick-start-actions" data-mode="start">
+              <button id="start-selected" class="selected-action" type="button" disabled>
+                <i data-lucide="power"></i><span data-text="startSelected">Start selected</span>
+              </button>
+              <button id="stop-selected" class="selected-action" type="button" aria-hidden="true" tabindex="-1" disabled>
+                <i data-lucide="square"></i><span data-text="stopSelected">Stop selected</span>
+              </button>
+              <span class="selected-action-surface" aria-hidden="true"></span>
             </div>
+          </div>
+          <section class="quick-start" aria-labelledby="quick-start-heading">
+            <h2 id="quick-start-heading" data-text="quickStart">Quick start</h2>
+            <p class="section-description" data-text="quickStartDescription">Start or stop your selected tools. Tools start with their saved settings.</p>
             <div id="tool-catalog" class="tool-catalog">
               <div class="catalog-heading" aria-hidden="true" hidden></div>
             </div>

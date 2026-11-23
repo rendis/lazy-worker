@@ -44,7 +44,7 @@
 - Filter a field as the user types when its value has a fixed alphabet, and show its error in the row's own note.
 - Center the macOS window buttons in the 42 px title bar through `trafficLightPosition`. Its `y` plus the 16 px button height gives the height of the band that centers them.
 - Find command-line clients through the login shell `PATH`. Open a command-line client through a `.command` script in Terminal, and run an `open` command directly.
-- Derive Tools bulk actions from the runtime state of modules included in Quick start. Keep the action layout stable until a bulk operation finishes. Share one surface across single actions so only their icon and label crossfade. Keep row power available independently of the selection.
+- Derive Tools bulk actions from the runtime state of modules included in Quick start. Keep the action layout stable until a bulk operation finishes. Keep the bulk actions on the Tools title line, so their changing width never moves the tool list. Share one surface across single actions so only their icon and label crossfade. Keep row power available independently of the selection.
 - Keep active power buttons visibly recessed in terracotta until their module stops.
 - Derive each sidebar running dot from its module's runtime status, independent of the current page.
 - Keep system input and power APIs inside the activity adapters. Shared scheduling and preferences must work with the unsupported-platform adapter.
