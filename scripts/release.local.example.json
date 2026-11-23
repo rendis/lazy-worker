@@ -1,0 +1,6 @@
+{
+  "signingIdentity": "Developer ID Application: Your Name (TEAMID)",
+  "notaryProfile": "the notarytool keychain profile name",
+  "updaterKeyService": "the keychain item that holds the updater key as JSON",
+  "rustHome": "~/optional/folder/with/cargo/and/rustup"
+}
