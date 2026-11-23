@@ -269,7 +269,14 @@
                 <div class="setting-row">
                   <i data-lucide="square-terminal"></i>
                   <span class="setting-label" data-text="caffeinatePreview">Command preview</span>
-                  <code id="caffeinate-preview">/usr/bin/caffeinate -s</code>
+                  <span class="command-copy">
+                    <code id="caffeinate-preview">/usr/bin/caffeinate -s</code>
+                    <span class="tip" data-tip-text="copyCommand">
+                      <button class="icon-button" id="caffeinate-copy" type="button" data-label="copyCommand" aria-label="Copy the command">
+                        <i data-lucide="copy"></i><i data-lucide="check"></i>
+                      </button>
+                    </span>
+                  </span>
                 </div>
               </details>
             </form>

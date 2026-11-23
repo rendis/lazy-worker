@@ -1853,3 +1853,11 @@ h1:focus { outline: none; }
 .caffeinate-power-modes[data-selection="always"] { --segment-position: 1; }
 .command-preview .setting-row code { color: var(--secondary); font-size: 12px; text-align: end; overflow-wrap: anywhere; }
 .command-preview[open] summary { margin-bottom: 4px; }
+
+.command-copy { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.command-copy code { color: var(--secondary); font-size: 12px; overflow-wrap: anywhere; text-align: end; }
+#caffeinate-copy { position: relative; }
+#caffeinate-copy .lucide { transition: opacity .16s ease, transform .16s ease; }
+#caffeinate-copy .lucide:last-child { position: absolute; opacity: 0; transform: scale(.7); color: var(--online); }
+#caffeinate-copy[data-copied] .lucide:first-child { opacity: 0; transform: scale(.7); }
+#caffeinate-copy[data-copied] .lucide:last-child { opacity: 1; transform: none; }

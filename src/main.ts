@@ -203,6 +203,16 @@ const onboarding = mountOnboarding({
   openAccessibility: () => { void openAccessibility("settings"); },
   onClose: markVersionSeen,
 });
+const caffeinateCopy = element<HTMLButtonElement>("caffeinate-copy");
+let caffeinateCopied: number | undefined;
+caffeinateCopy.addEventListener("click", () => {
+  void navigator.clipboard.writeText(element("caffeinate-preview").textContent ?? "").then(() => {
+    // The check mark confirms the copy for a moment.
+    caffeinateCopy.setAttribute("data-copied", "");
+    window.clearTimeout(caffeinateCopied);
+    caffeinateCopied = window.setTimeout(() => caffeinateCopy.removeAttribute("data-copied"), 1400);
+  }).catch(() => {});
+});
 const lidModes = element("caffeinate-lid");
 const lidChoices = [...lidModes.querySelectorAll<HTMLInputElement>("input")];
 const lidCollapse = element("caffeinate-lid-collapse");

@@ -47,7 +47,7 @@ Caffeinate keeps the Mac awake with the macOS `caffeinate` utility.
 
 - **Keep the Mac awake** has two choices. **On charger** keeps the Mac awake while the charger is connected, and lets it sleep as usual on battery. **Always** keeps it awake on battery too. A new installation starts with **On charger**.
 - **Keep the screen on** stops the screen from turning off. With it, the Mac stays awake on battery too.
-- **Advanced** holds two rare options and the command that runs. **Keep the disk awake** is for an external hard disk that pauses when idle. **Turn the screen on at start** wakes the screen when Caffeinate starts; without a timer its effect lasts five seconds.
+- **Advanced** holds two rare options and the command that runs, with a button that copies it. **Keep the disk awake** is for an external hard disk that pauses when idle. **Turn the screen on at start** wakes the screen when Caffeinate starts; without a timer its effect lasts five seconds.
 
 Choose to run until stopped, for a duration, or while a running process stays open. Choose a process from the list or enter its PID. Stopping Caffeinate releases the sleep assertions. The target process can finish independently. Valid changes save automatically after a short pause and apply to a running session. Quick start uses the saved settings. Saved command mode migrates to Until stopped and drops the old executable and arguments.
 
