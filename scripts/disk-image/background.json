@@ -1,0 +1,25 @@
+{
+  "request": "Background picture for a macOS installer window (a DMG), where the user drags an app icon onto the Applications folder. Finder will draw two real icons on top of this picture, so the picture must leave two empty landing spots for them. Wide landscape image, 33:20. Handmade claymation style, same world, materials and palette as the reference workbench image: matte modeling clay with fingerprints, a deep teal wall behind, a warm terracotta workbench surface filling the lower two thirds, soft warm studio light. Composition: on the workbench surface, two round, slightly raised, EMPTY clay coasters or pads of the same size, one centered in the left third and one centered in the right third, both at mid height of the image. Nothing stands on them. Between them, in the exact center, one chunky cream-colored clay arrow pointing from the left pad to the right pad. The workbench area directly under each pad stays plain terracotta, free of objects, so a text label can sit there. The character Miga from the model sheet reference (tapered terracotta body, low cap ridge, cream eyes, dark brows, mitten hands, two-loop brass wind-up key on her back) peeks up from behind the bottom edge of the frame at the bottom center, seen from the chest up, smiling, one mitten hand pointing toward the right pad. She must not overlap the pads or the arrow. No text, no letters, no logos, no app icons, no folders, no window chrome, no border. Keep the four corners calm.",
+  "edit": null,
+  "select": null,
+  "references": [
+    "docs/design/clay-workshop/assets/miga-poses.webp",
+    "docs/images/hero.jpg"
+  ],
+  "size": "1320x800",
+  "model": "gpt-6.2-sol",
+  "effort": "medium",
+  "generated": "2026-11-23T15:48:32",
+  "caption": {
+    "text": "Drag Lazy Worker to Applications",
+    "font": "Avenir Next, 54 px on the 1320 px image, with a soft dark shadow",
+    "colors": {
+      "Drag": "#f0e6d2",
+      "Lazy Worker": "#f2bd4b",
+      "to": "#f0e6d2",
+      "Applications": "#86cdf7"
+    },
+    "position": "centered, 84 px from the top",
+    "tool": "ImageMagick, applied after generation: one label for each word, joined with 18 px gaps"
+  }
+}

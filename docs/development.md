@@ -58,13 +58,15 @@ Run it on a clean `main`. It does these steps in order and stops at the first on
 3. Sets the version in the five files that hold it and commits.
 4. Builds Apple silicon and Intel with Developer ID, and verifies each app's version, architecture, signature, hardened runtime, and macOS 12.0 target.
 5. Notarizes and staples each app.
-6. Packages each one as a notarized disk image and a ZIP for manual installation, and as a signed `.app.tar.gz` for the updater, with `latest.json` and `SHA256SUMS.txt`.
+6. Packages each one as a notarized disk image and a ZIP for manual installation. The disk image opens on a window with Miga, the app, and the Applications folder; its picture and layout are in `scripts/disk-image`. It also packages each one as a signed `.app.tar.gz` for the updater, with `latest.json` and `SHA256SUMS.txt`.
 7. Rehearses the update: installs the last published release in a scratch folder and updates it with the real Tauri updater.
 8. Tags, pushes, and creates a draft release on GitHub.
 
 Review the draft and publish it. Installed copies see the update once the release is published.
 
 Use `npm run release -- --dry-run` to rehearse the current version. A dry run does steps 1, 2 and 4 to 7, and changes nothing in the repository or on GitHub.
+
+The command needs [uv](https://docs.astral.sh/uv/) on your `PATH`. Its `uvx` runs `dmgbuild`, the tool that builds the disk image, at the version the command pins.
 
 The command reads local names from `.release.local.json`, which git ignores. Copy `scripts/release.local.example.json` and fill in the Developer ID identity, the `notarytool` keychain profile, and the keychain item that holds the updater key as JSON with `privateKey` and `publicKey`. Set `rustHome` when the release uses its own Rust toolchain. Keep the Tauri private key outside the repository and use the same key for every release.
 

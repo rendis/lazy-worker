@@ -71,6 +71,7 @@
 - Require the Tauri updater to verify the signed version. Call `request_restart` after installing so `RunEvent::Exit` releases active tools.
 - Local builds default to ad-hoc signing. If Accessibility fails after reinstall, compare the installed app's CDHash with the requirement in the macOS TCC log. Keep the app and Activity helper signing identities stable across releases. Keep private signing keys outside the repository.
 - Keep the disk image names free of the version, because the README links to them through the latest release.
+- Keep the disk image picture and its window layout in `scripts/disk-image`. Keep `background.png` at the window size and `background@2x.png` at twice that size. Move an icon in `settings.py` when its pad moves in the picture, and record how the picture was made in `background.json`.
 - Archive the stapled app for the Tauri updater and bind its signature to the release version before publishing `latest.json`.
 - Publish with `npm run release -- <version> --summary "<one line>"`, from a clean `main`. It sets the version, builds and notarizes both architectures, rehearses the update from the last release, and leaves a draft on GitHub. Rehearse a change to the release steps with `npm run release -- --dry-run`.
 - Keep the release steps in `scripts/release.mjs`. Keep local names, such as the signing identity, in `.release.local.json`, which git ignores.

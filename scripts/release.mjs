@@ -138,6 +138,9 @@ const tag = `v${version}`;
 const stage = path.join(root, "src-tauri/target/release-candidate", version);
 const packages = path.join(stage, "packages");
 const artifact = (arch, extension) => path.join(packages, `Lazy-Worker-${version}-macos-${arch}.${extension}`);
+// The tool that builds the disk image. `uvx` downloads this exact version the first time and keeps it.
+const diskImageBuilder = "dmgbuild==1.6.7";
+const diskImageSource = path.join(root, "scripts/disk-image");
 const diskImage = arch => path.join(packages, `Lazy-Worker-${arch === "arm64" ? "apple-silicon" : "intel"}.dmg`);
 
 // ---------------------------------------------------------------------------------------------- checks
@@ -166,6 +169,9 @@ if (!read("src/changelog.ts").includes(`version: "${version}"`)) {
 }
 
 run("gh", ["auth", "status"], { quiet: true });
+if (run("uvx", ["--version"], { quiet: true, allowFailure: true }) === undefined) {
+  fail("uvx is missing. Install uv (https://docs.astral.sh/uv/), which runs the disk image builder.");
+}
 const published = JSON.parse(run("gh", ["release", "list", "--repo", repository, "--limit", "50",
   "--json", "tagName,isDraft,isPrerelease"], { quiet: true }))
   .filter(release => !release.isDraft && !release.isPrerelease && /^v\d+\.\d+\.\d+$/.test(release.tagName))
@@ -278,14 +284,20 @@ for (const { arch, platform } of targets) {
   });
   // The disk image is for people who install by dragging the app to Applications.
   // Its name has no version, so a link to the latest release always finds it.
-  const volume = path.join(stage, arch, "disk-image");
-  fs.rmSync(volume, { recursive: true, force: true });
-  fs.mkdirSync(volume);
-  run("ditto", [app, path.join(volume, path.basename(app))]);
-  fs.symlinkSync("/Applications", path.join(volume, "Applications"));
-  run("hdiutil", ["create", "-quiet", "-volname", "Lazy Worker", "-srcfolder", volume, "-fs", "HFS+", "-format", "UDZO",
-    "-ov", diskImage(arch)]);
-  fs.rmSync(volume, { recursive: true });
+  // dmgbuild lays out the window: the background with Miga, and each icon on its pad.
+  fs.rmSync(diskImage(arch), { force: true });
+  run("uvx", ["--from", diskImageBuilder, "dmgbuild", "-s", path.join(diskImageSource, "settings.py"),
+    "-D", `app=${app}`, "-D", `background=${path.join(diskImageSource, "background.png")}`, "Lazy Worker", diskImage(arch)],
+  { quiet: true });
+  // The copy inside the image must still be the signed and stapled app.
+  const mounted = run("hdiutil", ["attach", "-nobrowse", "-readonly", diskImage(arch)], { quiet: true })
+    .split("\n").at(-1).split("\t").at(-1).trim();
+  const copy = path.join(mounted, path.basename(app));
+  const intact = run("codesign", ["--verify", "--deep", "--strict", copy], { quiet: true, allowFailure: true }) !== undefined
+    && run("xcrun", ["stapler", "validate", "-q", copy], { quiet: true, allowFailure: true }) !== undefined
+    && fs.existsSync(path.join(mounted, ".background.tiff"));
+  run("hdiutil", ["detach", "-quiet", mounted], { quiet: true });
+  if (!intact) fail(`the ${arch} disk image lost the app's signature, its notarization ticket, or its background.`);
   run("codesign", ["--sign", local.signingIdentity, "--timestamp", diskImage(arch)], { quiet: true });
   notarize(diskImage(arch), diskImage(arch), `the ${arch} disk image`);
   if (!report("spctl", "-a", "-t", "open", "--context", "context:primary-signature", "-vv", diskImage(arch))
