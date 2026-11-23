@@ -1271,6 +1271,9 @@ h1:focus { outline: none; }
 [data-module-view="proxy"][data-role="client"] .module-actions,
 [data-module-view="proxy"][data-role="client"] .module-actions * { visibility: hidden; }
 .proxy-role { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; padding-bottom: 12px; border-bottom: 1px solid var(--hairline); }
+/* A choice with an icon and a word keeps the two on one line. */
+.segment-icons label > span { display: inline-flex; align-items: center; gap: 6px; }
+.segment-icons .lucide { width: 15px; height: 15px; }
 .icon-segments label { min-height: 36px; padding-inline: 18px; }
 .icon-segments label > span { display: inline-flex; align-items: center; gap: 8px; }
 .icon-segments .lucide { width: 17px; height: 17px; }

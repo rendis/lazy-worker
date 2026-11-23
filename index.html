@@ -72,14 +72,14 @@
             <div class="setting-row">
               <i data-lucide="clock"></i>
               <span class="setting-label" id="activity-mode-label" data-text="activityMode">Run mode</span>
-              <div class="segments activity-modes" id="activity-modes" role="radiogroup" aria-labelledby="activity-mode-label" data-selection="duration">
+              <div class="segments activity-modes segment-icons" id="activity-modes" role="radiogroup" aria-labelledby="activity-mode-label" data-selection="duration">
                 <label>
                   <input type="radio" name="activity-mode" value="duration" aria-controls="activity-duration" checked />
-                  <span data-text="activityDuration">Duration</span>
+                  <span><i data-lucide="timer"></i><span data-text="activityDuration">Duration</span></span>
                 </label>
                 <label>
                   <input type="radio" name="activity-mode" value="schedule" aria-controls="schedule-form" />
-                  <span data-text="schedule">Daily schedule</span>
+                  <span><i data-lucide="calendar-clock"></i><span data-text="schedule">Daily schedule</span></span>
                 </label>
                 <span class="segment-indicator" aria-hidden="true"></span>
               </div>

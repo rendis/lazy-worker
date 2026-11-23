@@ -1,9 +1,9 @@
 import "./style.css";
 import {
-  Activity, AppWindow, ArrowRight, Bot, Box, Brain, Check, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
+  Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
   Cpu, createIcons, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Info, Laptop, LayoutGrid, Link, LockKeyhole,
   Maximize2, MessageSquare, Monitor, Moon, Pencil, Play, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
-  Shield, Sparkles, Square, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Trash2, TriangleAlert, UserRound, X, Zap,
+  Shield, Sparkles, Square, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserRound, X, Zap,
 } from "lucide";
 import { mountCaffeinateForm } from "./caffeinate-form";
 import {
@@ -27,10 +27,10 @@ const updateToolOrder = mountTools();
 function renderIcons(): void {
   createIcons({
     icons: {
-      Activity, AppWindow, ArrowRight, Bot, Box, Brain, Check, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
+      Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
       Cpu, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Info, Laptop, LayoutGrid, Link, LockKeyhole,
       Maximize2, MessageSquare, Monitor, Moon, Pencil, Play, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server,
-      Settings, Shield, Sparkles, Square, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Trash2, TriangleAlert, UserRound, X, Zap,
+      Settings, Shield, Sparkles, Square, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserRound, X, Zap,
     },
     attrs: { "aria-hidden": "true", "stroke-width": 1.75 },
   });
