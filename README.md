@@ -1,74 +1,147 @@
-# Lazy Worker
+<p align="center"><img src="docs/images/hero.jpg" alt="Miga, a clay wind-up helper, stands on a workbench between a pointer, an espresso, an open padlock, and a toolbox."></p>
 
-Lazy Worker is a desktop toolbox with Activity and Caffeinate. The app opens in Tools. In Settings, choose Light or Dark and English or Spanish, or leave either setting on System. System uses the first supported preferred language, with English as the fallback.
+<h1 align="center">Lazy Worker</h1>
 
-## macOS menu bar
+<p align="center"><strong>A toolbox for your Mac menu bar.</strong><br>
+Small tools that keep locks and limits out of your way.</p>
 
-Use the wind-up key in the menu bar to open the panel, start the selected tools, or start and stop individual tools. A terracotta dot appears beside the key while at least one tool is running. Menu actions use saved settings. Close the panel to leave Lazy Worker running in the menu bar. Opening Lazy Worker again brings back the existing panel. Choose **Quit** from the menu to exit and release its active sessions.
+<p align="center">
+  <a href="https://github.com/rendis/lazy-worker/releases/latest"><img src="https://img.shields.io/badge/Download_for_macOS-c9603f?style=for-the-badge&logo=apple&logoColor=white" height="44" alt="Download for macOS"></a>
+</p>
 
-**Settings → Hide Lazy Worker while sharing** defaults to on once Accessibility is granted. Without permission, the switch stays off and shows a warning when selected. Choose **Open Accessibility settings** in the warning to grant access. Lazy Worker hides the menu bar icon and panel when it detects screen sharing, including window sharing. It restores the icon when the share ends or the picker is canceled. The panel returns if it was open. Running tools continue during the share. Detection depends on the app and macOS version, and some apps only expose a signal after sharing starts.
+<p align="center"><sub>Free and open source · macOS 12 or later · Apple silicon and Intel</sub></p>
 
-## Quick start
+<p align="center">
+  <a href="#tools">Tools</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#privacy">Privacy</a> ·
+  <a href="#contributing">Contributing</a> ·
+  <a href="docs/user-guide.md">User guide</a>
+</p>
 
-Enable **Quick start** from a module header or its row in Tools. Both views share the same saved selection. **Start selected** starts the selected tools that are off, and **Stop selected** stops the selected tools that are running. Tools shows both actions when the selection has a mix of states. Use a row’s power button to start or stop that tool directly. Running sessions keep their original start time. Each module shows a session timer in its header. Quick start selections persist when the app closes or the Mac restarts.
+<br>
 
-In **Settings**, turn on **Open Lazy Worker at login** to open the installed app when you sign in to macOS, including after a restart. Turn on **Run Quick start when the app opens** to start the selected tools with their saved settings each time Lazy Worker starts. Both options default to off and can be used independently.
+## Why
 
-## Activity
+Your Mac decides things for you. It falls asleep in the middle of a long job. Your chat marks you as away while you read. Your network blocks the AI service you need.
 
-Open **How it works** in Activity to see what happens while a session is active.
+Lazy Worker gives you one small tool for each of these limits, and one place to run them all.
 
-- In **Duration**, choose 15 minutes, 30 minutes, one hour, or until stopped. The power button starts or stops a session immediately. The header counts down for a fixed-duration session and shows elapsed time for an open-ended or scheduled session.
-- In **Daily schedule**, set a start and end time, then enable or update the schedule. A schedule can span midnight and runs while Lazy Worker is open. Turn it off to disarm it. Stopping a scheduled session with the power button skips the rest of that window.
+<br>
 
-The macOS helper holds an idle-sleep assertion while enabled. It measures the system idle time and moves the pointer briefly only after 45 seconds without input, at most once per 45 seconds. Resumed input postpones the next movement. The helper reads an elapsed time counter and records no keystrokes. Check Accessibility under **Settings → Accessibility**. Use **Open Accessibility** there or in an Activity error to open the macOS privacy pane. Enable Lazy Worker in the system list, return to the panel, and start Activity again. On Monterey, the pane is under **System Preferences → Security & Privacy → Privacy → Accessibility**. A development launch may require enabling the terminal or the helper. The activity indicator describes the local session. Presence in a third-party app depends on what that app observes.
+## Tools
 
-## Caffeinate
+Each tool does one job. Miga, the wind-up helper, shows the desk without the tool, then with it.
 
-Caffeinate uses the macOS system utility to hold sleep assertions for the display, system, or disk and to declare the user active. System sleep assertions apply on AC power. The user-active assertion defaults to five seconds without a timer.
+<br>
 
-Choose to run until stopped, for a duration, or while a running process stays open. Choose a process from the list or enter its PID. Stopping Caffeinate releases the sleep assertions. The target process can finish independently. Valid changes save automatically after a short pause and apply to a running session. Quick start uses the saved settings. Saved command mode migrates to Until stopped and drops the old executable and arguments.
+<!-- Tool block. Copy it for each new tool and alternate align="left" and align="right". -->
+<img align="left" width="480" src="docs/images/activity.gif" alt="Without Activity, nobody touches the Mac and the chat status turns amber. With Activity, Miga pushes the pointer and the status turns green again.">
 
-## Develop
+### Activity
 
-Install Node.js 22.12 or newer, Rust stable, and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform. macOS needs the Xcode command-line tools, including Swift.
+Moves the pointer briefly when your Mac is idle. Run it on a timer or a daily schedule.
 
-```sh
-npm ci
-npm run tauri -- dev
-```
+[Activity in the user guide →](docs/user-guide.md#activity)
 
-Use `npm run dev` to open the interface in a browser. Browser mode simulates module sessions and saves preferences in browser storage. The installed desktop app runs the native helper and schedule.
+<br clear="all">
+<br>
 
-Run the checks with `npm run build` and `cargo test --manifest-path src-tauri/Cargo.toml`.
+<img align="right" width="480" src="docs/images/caffeinate.gif" alt="Without Caffeinate, the Mac falls asleep in the middle of a download. With Caffeinate, Miga offers it an espresso, it wakes up, and the download finishes.">
 
-## Build for macOS
+### Caffeinate
 
-The app bundle and Swift helper target macOS 12.0 (Monterey) and later on Intel and Apple silicon.
+Keeps your Mac awake for a set time, while a process runs, or until you stop it.
 
-```sh
-rustup target add x86_64-apple-darwin
-npm run tauri -- build --target x86_64-apple-darwin --bundles app
-```
+[Caffeinate in the user guide →](docs/user-guide.md#caffeinate)
 
-Use `aarch64-apple-darwin` to build for Apple silicon. Find the app under `src-tauri/target/<target>/release/bundle/macos/`.
+<br clear="all">
+<br>
 
-Local macOS builds use an ad-hoc signature for testing. Distribution requires its own signing and notarization setup.
+<img align="left" width="480" src="docs/images/proxy.gif" alt="Without Proxy, the Inspector blocks every request this Mac sends to its AI services. With Proxy, Miga throws a network cable to the other Mac, the requests reach the AI services through it, and the answers come back.">
 
-macOS may keep an Accessibility entry enabled after an ad-hoc update even when it no longer matches the installed app. If Activity reports a permission error while Lazy Worker is enabled, select its entry in Accessibility and click **−**. Click **+**, choose `/Applications/Lazy Worker.app`, and enable it again. Use a stable signing identity for builds that need their permission to survive updates. Test the packaged build on the actual Intel Mac before claiming Monterey support for a release.
+### AI Proxy
 
-### macOS updates
+Sends your AI tools' traffic through another computer on your network, when this one can't reach the service.
 
-Lazy Worker checks GitHub Releases at launch and every four hours. A new version appears in the menu and in the panel. Choose **Later** to keep working and find the update again in Settings. **Restart to update** downloads and verifies the package, then replaces and restarts Lazy Worker. Restarting ends active sessions.
+[Proxy in the user guide →](docs/user-guide.md#proxy)
 
-The public key and GitHub Releases endpoint are in `src-tauri/tauri.macos.conf.json`. After notarizing and stapling both app bundles, package each as a ZIP for manual installation and as an `.app.tar.gz` for the updater. Sign each updater archive with `tauri signer sign --app-version <version>`. Keep the Tauri private key outside the repository and use the same key for every update. Publish `latest.json` in the same release with `darwin-aarch64` and `darwin-x86_64` entries pointing to the corresponding archives and containing their `.sig` contents. See the [Tauri updater guide](https://v2.tauri.app/plugin/updater/).
+<br clear="all">
+<br>
 
-## Add Windows support
+## How it works
 
-Build the project on Windows using the [Windows development prerequisites](https://v2.tauri.app/start/prerequisites/#windows). The shared UI, scheduling rules, and preferences already have a platform boundary. The Activity and Caffeinate controls display an unavailable state on Windows until Windows adapters are added.
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <h3>1 · Open</h3>
+      <p>Click the wind-up key in your menu bar. The panel lists every tool.</p>
+    </td>
+    <td width="33%" valign="top">
+      <h3>2 · Start</h3>
+      <p>Each tool has its own power button. Quick start runs your selected tools together.</p>
+    </td>
+    <td width="33%" valign="top">
+      <h3>3 · Close</h3>
+      <p>Close the panel. Tools keep running until you stop them or quit Lazy Worker.</p>
+    </td>
+  </tr>
+</table>
 
-Implement the Windows worker alongside `src-tauri/src/activity/macos.rs` and select it by target in `src-tauri/src/activity/mod.rs`. A worker starts a session, reports whether it is running, and releases its resources when dropped. Keep the schedule and preferences outside that adapter.
+<br>
 
-## License
+## Features
 
-Lazy Worker is available under the [MIT License](LICENSE).
+Every tool gets the same support from the toolbox.
+
+<table>
+  <tr>
+    <td width="33%" valign="top"><strong>Menu bar control</strong><br>Start and stop tools from the wind-up key. The panel can stay closed.</td>
+    <td width="33%" valign="top"><strong>Quick start</strong><br>Select your usual tools once. Start them together with one click.</td>
+    <td width="33%" valign="top"><strong>Starts with your Mac</strong><br>Open Lazy Worker at login and let it run Quick start for you.</td>
+  </tr>
+  <tr>
+    <td valign="top"><strong>Hidden while sharing</strong><br>The icon and the panel disappear when you share your screen.</td>
+    <td valign="top"><strong>Your look and language</strong><br>Light or dark. English or Spanish. Or follow your system.</td>
+    <td valign="top"><strong>Updates in place</strong><br>A new version appears in the menu. Restart to install it.</td>
+  </tr>
+</table>
+
+<br>
+
+## Install
+
+1. Open the [latest release](https://github.com/rendis/lazy-worker/releases/latest). Choose the ZIP ending in `arm64.zip` for Apple silicon or `x86_64.zip` for Intel.
+2. Unzip it, move **Lazy Worker** to **Applications**, and open it.
+3. Click the wind-up key in the menu bar and choose **Open Panel**.
+
+Lazy Worker runs on macOS 12 or later. Activity and Hide while sharing need the Accessibility permission. The [user guide](docs/user-guide.md#accessibility) shows how to grant it.
+
+<br>
+
+## Privacy
+
+- **No account.** Your settings stay on your Mac.
+- **No keystrokes.** Activity reads how long your Mac has been idle. It records nothing you type.
+- **Your traffic, your network.** Lazy Worker contacts GitHub Releases to check for updates. Proxy carries traffic only while you run it. By default, it serves only computers on your local network.
+
+<br>
+
+## Contributing
+
+Bug reports, ideas for new tools, and pull requests are welcome. [Contributing](CONTRIBUTING.md) explains the workflow, the checks, and how to add a tool.
+
+<br>
+
+## Learn more
+
+- [User guide](docs/user-guide.md) — Every tool, Quick start, permissions, and updates.
+- [Development guide](docs/development.md) — Project layout, local runs, builds, and releases.
+- [Contributing](CONTRIBUTING.md) — Workflow, guidelines, and the checklist for a new tool.
+- [Issues](https://github.com/rendis/lazy-worker/issues) — Report a problem or ask for a tool.
+
+<br>
+
+<p align="center"><sub>Released under the <a href="LICENSE">MIT License</a>.</sub></p>

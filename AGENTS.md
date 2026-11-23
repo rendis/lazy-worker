@@ -1,6 +1,7 @@
 # Lazy Worker working notes
 
 - Write code, comments, and documentation in English. Keep English and Spanish webview strings together in `src/messages.ts`. Localize the native menu in `src-tauri/src/tray.rs`.
+- Keep the new-tool checklist in `CONTRIBUTING.md` in step with these notes.
 - Introduce the toolbox independently of its current tools in the README. Give each tool the same block under Tools: its clip, its name, one line, and a link to its user guide section. Alternate the clip between left and right. Keep usage details in the user guide.
 - Use the [clay workshop](docs/design/clay-workshop/README.md) as the starting point for feature clips. Produce every clip file with its `npm run export -- <tool>` command.
 - Hide the macOS panel on close and keep workers running until explicitly stopped or the app quits.
