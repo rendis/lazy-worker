@@ -468,7 +468,7 @@ h1:focus { outline: none; }
   pointer-events: none;
   transition: opacity .14s ease, visibility 0s linear .14s;
 }
-.switch[data-quick-start-hint]:is(:hover, :focus-within)::after, .tip[data-tip]:is(:hover, :focus-visible, :focus-within)::after {
+.switch[data-quick-start-hint]:is(:hover, :focus-within)::after, .tip[data-tip]:is(:hover, :focus-visible, :has(:focus-visible))::after {
   opacity: 1;
   visibility: visible;
   transition-delay: .3s, 0s;
@@ -1274,7 +1274,14 @@ h1:focus { outline: none; }
 .icon-segments label > span { display: inline-flex; align-items: center; gap: 8px; }
 .icon-segments .lucide { width: 17px; height: 17px; }
 .mini-segments { --segment-inset: 2px; border-radius: 9px; }
-.mini-segments label { min-height: 24px; padding: 2px 10px; border-radius: 6px; font-size: 12px; }
+.mini-segments label { display: flex; min-height: 26px; padding: 2px 11px; border-radius: 6px; font-size: 12px; cursor: pointer; }
+.mini-segments label > span { display: grid; place-items: center; }
+.mini-segments .lucide { width: 15px; height: 15px; }
+/* A hint that names an icon waits a little, so it does not flash while the pointer passes. */
+.mini-segments .tip[data-tip]::after { right: auto; left: 50%; transform: translateX(-50%); }
+.mini-segments .tip[data-tip]:is(:hover, :has(:focus-visible))::after { transition-delay: .6s, 0s; }
+/* The hint drops over the next row, so its selector rises above that row's controls. */
+.mini-segments:is(:hover, :focus-within) { z-index: 3; }
 .mini-segments .segment-indicator::before { border-radius: 6px; }
 .setting-note { color: var(--secondary); font-size: 13px; line-height: 1.4; }
 .setting-note[data-warning] { color: var(--pending-color); }

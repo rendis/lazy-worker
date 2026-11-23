@@ -32,6 +32,8 @@ const builtInCommands: Record<string, Record<ProxyApp["variant"], string>> = {
 };
 const variants = ["app", "code"] as const;
 const variantLabels = { app: "App", code: "Code" };
+const variantIcons = { app: "app-window", code: "square-terminal" };
+const variantHints: Record<ProxyApp["variant"], Message> = { app: "variantApp", code: "variantCode" };
 const customIcons = [
   "terminal", "sparkles", "bot", "brain", "code", "globe", "cloud", "message-square", "cpu", "rocket", "box",
 ];
@@ -385,7 +387,12 @@ export function mountProxy(host: Host) {
       h("input", { type: "radio", name: `proxy-variant-${app.id}`, value, "data-action": "variant", "data-app": app.id }));
     const variant = variantInputs.length > 0 && h("div", {
       class: "segments radio-segments mini-segments", role: "radiogroup", "aria-label": app.name,
-    }, ...variantInputs.map(input => h("label", {}, input, h("span", {}, variantLabels[input.value as ProxyApp["variant"]]))),
+    }, ...variantInputs.map(input => {
+      const value = input.value as ProxyApp["variant"];
+      const hint = host.translate(variantHints[value]);
+      input.setAttribute("aria-label", hint);
+      return h("label", { class: "tip", "data-tip": hint }, input, h("span", {}, icon(variantIcons[value])));
+    }),
     h("span", { class: "segment-indicator", "aria-hidden": "true" }));
     const state = h("span", { class: "proxy-app-state" });
     const quick = quickSwitch(app);
@@ -480,7 +487,7 @@ export function mountProxy(host: Host) {
 
   /** Keeps each row's element across updates, so its controls can animate between states. */
   function reconcile(container: HTMLElement, rows: Rows, build: (app: ProxyApp) => Row): void {
-    const labels = [host.translate("open"), host.translate("proxyInstalled"), host.quickStartHint()];
+    const labels = [host.translate("open"), host.translate("proxyInstalled"), host.translate("variantApp"), host.quickStartHint()];
     let built = false;
     for (const app of settings!.apps) {
       const signature = JSON.stringify([app.name, app.icon, labels]);

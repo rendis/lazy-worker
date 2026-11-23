@@ -27,6 +27,7 @@
 - Keep every image a file under `src/assets`. The content policy allows no `data:` images, so Vite must not inline assets.
 - Show the brand mark of a built-in proxy tool from `src/assets/brands`. The marks come from Simple Icons. To offer a new brand in the icon picker, add its file there and its name to `brandNames` in `src/proxy.ts`.
 - Discard unsaved input in a module view when the user leaves that view.
+- Name every icon-only choice with a tip and an accessible label. Tie a tip to hover or keyboard focus, so a mouse click does not leave it open.
 - Put `data-tip` on a wrapper when a disabled button must say why it is off. Use an icon button with a tip for a secondary row action.
 - Give each built-in proxy tool an `app` and a `code` command. List App first and use it as the default. Find a desktop app by its bundle identifier.
 - Keep the proxy request log in memory with a fixed size. Drop the oldest entry first and clear the log when the server stops.
