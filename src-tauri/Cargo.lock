@@ -1824,7 +1824,7 @@ dependencies = [
 
 [[package]]
 name = "lazy-worker"
-version = "0.6.7"
+version = "0.6.8"
 dependencies = [
  "chrono",
  "objc2",
