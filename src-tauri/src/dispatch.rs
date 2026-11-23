@@ -135,6 +135,9 @@ pub enum Request {
     },
     RemovePeer { id: String },
     CutAllAccess,
+    AllowPasswordLogin,
+    EnableRemoteAccess,
+    OpenSharingSettings,
 }
 
 impl Request {
@@ -189,6 +192,9 @@ impl Request {
             | Self::SetPeerPermissions { .. }
             | Self::RemovePeer { .. }
             | Self::CutAllAccess
+            | Self::AllowPasswordLogin
+            | Self::EnableRemoteAccess
+            | Self::OpenSharingSettings
             | Self::SaveProxyApps { .. }
             | Self::SaveProxyAllowed { .. }
             | Self::RequestActivityAccessibility => Access::LocalOnly,
@@ -240,7 +246,10 @@ impl Request {
             | Self::RequestActivityAccessibility
             | Self::SetPeerPermissions { .. }
             | Self::RemovePeer { .. }
-            | Self::CutAllAccess => false,
+            | Self::CutAllAccess
+            | Self::AllowPasswordLogin
+            | Self::EnableRemoteAccess
+            | Self::OpenSharingSettings => false,
         }
     }
 }
@@ -359,10 +368,45 @@ async fn run(
             #[cfg(not(unix))]
             let (controllers, socket) = (Vec::new(), devices::Socket::unavailable("unsupported"));
             json(
-                tauri::async_runtime::spawn_blocking(move || devices::overview(controllers, socket))
-                    .await
-                    .map_err(|_| "workerUnavailable")?,
+                tauri::async_runtime::spawn_blocking(move || {
+                    #[cfg(unix)]
+                    let access = crate::remote::access::status();
+                    #[cfg(not(unix))]
+                    let access = devices::RemoteAccess::unavailable();
+                    devices::overview(controllers, socket, access)
+                })
+                .await
+                .map_err(|_| "workerUnavailable")?,
             )
+        }
+        Request::AllowPasswordLogin => {
+            #[cfg(unix)]
+            return json(
+                tauri::async_runtime::spawn_blocking(crate::remote::access::allow_password_login)
+                    .await
+                    .map_err(|_| "remoteAccessChangeFailed")??,
+            );
+            #[cfg(not(unix))]
+            Err("unsupported")
+        }
+        Request::EnableRemoteAccess => {
+            #[cfg(unix)]
+            return json(
+                tauri::async_runtime::spawn_blocking(crate::remote::access::enable_remote_access)
+                    .await
+                    .map_err(|_| "remoteAccessChangeFailed")??,
+            );
+            #[cfg(not(unix))]
+            Err("unsupported")
+        }
+        Request::OpenSharingSettings => {
+            #[cfg(unix)]
+            return tauri::async_runtime::spawn_blocking(crate::remote::access::open_sharing_settings)
+                .await
+                .map_err(|_| "sharingSettingsFailed")?
+                .map(|()| Value::Null);
+            #[cfg(not(unix))]
+            Err("unsupported")
         }
         Request::GetRemoteLog => {
             #[cfg(unix)]
@@ -662,6 +706,9 @@ mod tests {
             json!({"command": "setPeerPermissions", "args": {"id": id, "control": true, "applications": true, "actions": true}}),
             json!({"command": "removePeer", "args": {"id": id}}),
             json!({"command": "cutAllAccess"}),
+            json!({"command": "allowPasswordLogin"}),
+            json!({"command": "enableRemoteAccess"}),
+            json!({"command": "openSharingSettings"}),
         ] {
             let parsed = request(value);
             for origin in [NONE, CONTROL, ACTIONS, Origin::Remote(Permissions { control: true, actions: true })] {

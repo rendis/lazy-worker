@@ -4,6 +4,7 @@
 //! the keys we pinned. Text from outside never becomes an SSH option or a remote command.
 #![cfg_attr(not(test), allow(dead_code))] // The callers arrive with pairing.
 
+pub mod access;
 pub mod authorized_keys;
 pub mod destination;
 pub mod helper;

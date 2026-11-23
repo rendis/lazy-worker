@@ -125,12 +125,21 @@ export type RemoteDevice = {
   /** The shell is on until this time, or `null` while it is off. Only that device can turn it on. */
   shell: { until: number } | null;
 };
+/** How this device lets others in over SSH. `macosMajor` is the major version of macOS. */
+export type RemoteAccess = {
+  remoteLogin: "off" | "on";
+  passwordLogin: "blocked" | "allowed" | "unknown";
+  /** `null` when the system gave no answer. */
+  userAllowed: boolean | null;
+  managedFile: boolean;
+  macosMajor: number | null;
+};
 export type DevicesOverview = {
   thisDevice: {
     /** Empty when the system gives no name. */
     name: string;
     kind: DeviceKind;
-    remoteAccess: "unknown" | "off" | "on";
+    remoteAccess: RemoteAccess;
     pairing: "closed" | "open";
     controllers: Controller[];
     /** Whether this device can receive requests, and an error code when it cannot. */
@@ -353,6 +362,17 @@ function previewLogList(): RemoteLogEntry[] {
   return previewLog;
 }
 
+/** A preview shows the remote access state with `?remote=off|password|keys|nouser`. The actions change it until the page reloads. */
+const previewStates: Record<string, RemoteAccess> = {
+  off: { remoteLogin: "off", passwordLogin: "unknown", userAllowed: null, managedFile: false, macosMajor: 26 },
+  password: { remoteLogin: "on", passwordLogin: "allowed", userAllowed: true, managedFile: false, macosMajor: 26 },
+  keys: { remoteLogin: "on", passwordLogin: "blocked", userAllowed: true, managedFile: true, macosMajor: 26 },
+  nouser: { remoteLogin: "on", passwordLogin: "blocked", userAllowed: false, managedFile: true, macosMajor: 26 },
+};
+const previewAccess: RemoteAccess = { ...(previewStates[previewQuery.get("remote") ?? ""] ?? previewStates.keys) };
+/** `?macos=12` shows the guide of macOS 12, and `?remote-fails` makes turning on fail until the user does it in Sharing. */
+if (previewQuery.has("macos")) previewAccess.macosMajor = Number(previewQuery.get("macos")) || 26;
+
 /** The sample list a preview shows, so the whole Devices view can be checked. Times follow the clock. */
 function previewDevices(): DevicesOverview {
   const now = Math.floor(Date.now() / 1000);
@@ -370,7 +390,7 @@ function previewDevices(): DevicesOverview {
   };
   return {
     thisDevice: {
-      name: "MacBook Pro", kind: "laptop", remoteAccess: "on", pairing: "closed",
+      name: "MacBook Pro", kind: "laptop", remoteAccess: { ...previewAccess }, pairing: "closed",
       controllers: previewControllerList().map(controller => ({
         ...controller, permissions: { ...controller.permissions },
       })),
@@ -567,6 +587,24 @@ export const desktop = {
     previewLogList().unshift({
       time: Math.floor(Date.now() / 1000), peer: id, name: controller.name, request: "removePeer", outcome: "ok",
     });
+  },
+  /** One administrator prompt turns on Remote Login, allows this user, and lets only keys in. */
+  async enableRemoteAccess(): Promise<RemoteAccess> {
+    if (native) return call("enableRemoteAccess");
+    await new Promise(resolve => setTimeout(resolve, 900));
+    if (previewQuery.has("remote-fails") && previewAccess.remoteLogin === "off") throw "remoteLoginStillOff";
+    Object.assign(previewAccess, { remoteLogin: "on", passwordLogin: "blocked", userAllowed: true, managedFile: true });
+    return { ...previewAccess };
+  },
+  async allowPasswordLogin(): Promise<RemoteAccess> {
+    if (native) return call("allowPasswordLogin");
+    Object.assign(previewAccess, { passwordLogin: "allowed", managedFile: false });
+    return { ...previewAccess };
+  },
+  async openSharingSettings(): Promise<void> {
+    if (native) return call("openSharingSettings");
+    // A preview acts as if the user turned Remote Login on and allowed themselves there.
+    Object.assign(previewAccess, { remoteLogin: "on", userAllowed: true, passwordLogin: previewAccess.passwordLogin === "unknown" ? "allowed" : previewAccess.passwordLogin });
   },
   async cutAllAccess(): Promise<void> {
     if (native) return call("cutAllAccess");

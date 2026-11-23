@@ -701,6 +701,19 @@
           <p class="setting-note" data-text="remoteLogNote">Only the last 1000 are kept.</p>
         </section>
       </div>
+      <div class="log-overlay" id="remote-guide-window" inert>
+        <section class="log-window guide-window" role="dialog" aria-labelledby="remote-guide-title">
+          <header>
+            <i data-lucide="shield-check"></i>
+            <h2 id="remote-guide-title" data-text="remoteGuideTitle">Turn on Remote Login</h2>
+            <button type="button" class="icon-button" id="remote-guide-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
+          </header>
+          <div class="remote-guide" id="remote-guide-body" tabindex="0" aria-labelledby="remote-guide-title"></div>
+          <div class="guide-actions">
+            <button type="button" class="access-action" id="remote-guide-open"><i data-lucide="square-arrow-out-up-right"></i><span data-text="openSharingSettings">Open Sharing settings</span></button>
+          </div>
+        </section>
+      </div>
       <div class="log-overlay" id="changelog-window" inert>
         <section class="log-window changelog-window" role="dialog" aria-labelledby="changelog-title">
           <header>

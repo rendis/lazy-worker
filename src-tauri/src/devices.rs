@@ -17,10 +17,47 @@ pub struct Device {
     pub kind: Kind,
 }
 
-#[derive(Clone, Copy, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub enum RemoteAccess {
+pub enum RemoteLogin {
+    Off,
+    On,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PasswordLogin {
+    Blocked,
+    Allowed,
     Unknown,
+}
+
+/// The state of the system SSH server, which other devices use to reach this one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteAccess {
+    pub remote_login: RemoteLogin,
+    pub password_login: PasswordLogin,
+    /// Whether the system lets this user log in over SSH. Nothing when it could not be read.
+    pub user_allowed: Option<bool>,
+    /// True while our own drop-in file is in the SSH server configuration.
+    pub managed_file: bool,
+    /// The major version of macOS, which decides what the System Settings guide shows.
+    pub macos_major: Option<u32>,
+}
+
+impl RemoteAccess {
+    /// For a platform that has no system SSH server to read.
+    #[cfg(not(unix))]
+    pub fn unavailable() -> Self {
+        Self {
+            remote_login: RemoteLogin::Off,
+            password_login: PasswordLogin::Unknown,
+            user_allowed: None,
+            managed_file: false,
+            macos_major: None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Serialize)]
@@ -130,11 +167,11 @@ mod platform {
 }
 
 /// Reads the system, so call it off the main thread.
-pub fn overview(controllers: Vec<Controller>, socket: Socket) -> Overview {
+pub fn overview(controllers: Vec<Controller>, socket: Socket, remote_access: RemoteAccess) -> Overview {
     Overview {
         this_device: ThisDevice {
             device: platform::this_device(),
-            remote_access: RemoteAccess::Unknown,
+            remote_access,
             pairing: Pairing::Closed,
             controllers,
             socket,
@@ -198,7 +235,13 @@ mod tests {
                     name: "Studio".into(),
                     kind: Kind::Laptop,
                 },
-                remote_access: RemoteAccess::Unknown,
+                remote_access: RemoteAccess {
+                    remote_login: RemoteLogin::On,
+                    password_login: PasswordLogin::Blocked,
+                    user_allowed: None,
+                    managed_file: true,
+                    macos_major: Some(26),
+                },
                 pairing: Pairing::Closed,
                 controllers: Vec::new(),
                 socket: Socket::unavailable("x"),
@@ -209,7 +252,13 @@ mod tests {
         .unwrap();
         assert_eq!(value["thisDevice"]["name"], "Studio");
         assert_eq!(value["thisDevice"]["kind"], "laptop");
-        assert_eq!(value["thisDevice"]["remoteAccess"], "unknown");
+        assert_eq!(
+            value["thisDevice"]["remoteAccess"],
+            serde_json::json!({
+                "remoteLogin": "on", "passwordLogin": "blocked", "userAllowed": null, "managedFile": true,
+                "macosMajor": 26
+            })
+        );
         assert_eq!(value["thisDevice"]["pairing"], "closed");
         assert_eq!(value["devices"], serde_json::json!([]));
         assert_eq!(value["thisDevice"]["socket"]["listening"], false);

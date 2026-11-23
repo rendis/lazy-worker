@@ -3,6 +3,7 @@ import {
   desktop, type ActionSchedule, type Controller, type ControllerPermission, type DeviceKind, type DevicesOverview,
   type RemoteApp, type RemoteDevice, type RemoteLogEntry, type RemoteTool, type SavedAction,
 } from "./desktop";
+import guideImage13 from "./assets/guide/remote-login-13.png";
 import { messages, type Language, type Message } from "./messages";
 import { tools } from "./modules";
 import { h, icon, type Child } from "./proxy";
@@ -76,7 +77,14 @@ export function mountDevices(host: Host) {
   const logCount = document.getElementById("device-log-count")!;
   const logClose = document.getElementById("device-log-close") as HTMLButtonElement;
 
+  const guideWindow = document.getElementById("remote-guide-window")!;
+  const guideBody = document.getElementById("remote-guide-body")!;
+  const guideClose = document.getElementById("remote-guide-close") as HTMLButtonElement;
+  const guideOpen = document.getElementById("remote-guide-open") as HTMLButtonElement;
+
   let overview: DevicesOverview | undefined;
+  let enabling = false;
+  let guideTrigger: HTMLElement | undefined;
   let requested = 0;
   /** What waits for a second click: a device id, or `cut` for all access. Only one thing waits at a time. */
   let confirming: string | undefined;
@@ -379,8 +387,36 @@ export function mountDevices(host: Host) {
   }
 
   function thisDeviceBody() {
-    const remoteState = h("span", { class: "device-state" });
-    const access = settingRow("shield-check", "remoteAccess", remoteState);
+    const accessInfo = h("span", { class: "tip option-info", tabindex: "0", role: "img" }, icon("info"));
+    const accessLabel = h("span", { class: "setting-label" }, t("remoteAccess"), " ", accessInfo);
+    const warnIcon = h("span", { class: "access-icon", "data-kind": "warn" }, icon("triangle-alert"));
+    const okIcon = h("span", { class: "access-icon", "data-kind": "ok" }, icon("check"));
+    const accessMessage = h("span", {});
+    const accessNote = h("p", { class: "setting-note access-note" }, warnIcon, okIcon, accessMessage);
+    const enableLabel = h("span", {}, t("remoteAccessEnable"));
+    const enable = h("button", { type: "button", class: "access-action", "data-attention": "" }, icon("power"), enableLabel);
+    const sharing = iconButton(t("openSharingSettings"), "square-arrow-out-up-right", "outlined");
+    const passwords = iconButton(t("allowPasswordsAgain"), "lock-keyhole-open");
+    const passwordButtons = confirmButtons(t("allowPasswordsAccept"), () => { void allowPasswords(); }, () => {
+      confirming = undefined;
+      render();
+      passwords.button.focus();
+    });
+    const passwordConfirm = h("div", { class: "device-confirm", hidden: true },
+      h("span", { class: "setting-note" }, t("allowPasswordsConfirm")), passwordButtons.accept.root, passwordButtons.cancel.root);
+    const access = {
+      root: h("div", { class: "setting-row device-access" },
+        icon("shield-check"),
+        h("div", { class: "access-text" }, accessLabel, accessNote),
+        h("div", { class: "device-end" }, enable, sharing.root, passwords.root, passwordConfirm)),
+    };
+    enable.addEventListener("click", () => { void enableAccess(enable); });
+    sharing.button.addEventListener("click", () => { void openSharing(); });
+    passwords.button.addEventListener("click", () => {
+      confirming = "passwords";
+      render();
+      passwordButtons.cancel.button.focus();
+    });
     const pairingState = h("span", { class: "setting-note" });
     const pairing = iconButton(t("openPairing"), "lock-keyhole-open", "outlined");
     const pairingRow = settingRow("lock-keyhole", "pairing", pairingState, pairing.root);
@@ -431,18 +467,40 @@ export function mountDevices(host: Host) {
     return {
       root,
       update(data: DevicesOverview["thisDevice"]): void {
-        const accessKey: Record<typeof data.remoteAccess, Message> = {
-          unknown: "remoteAccessUnknown", off: "remoteAccessOff", on: "remoteAccessOn",
-        };
-        setText(remoteState, t(accessKey[data.remoteAccess] ?? "remoteAccessUnknown"));
-        remoteState.toggleAttribute("data-on", data.remoteAccess === "on");
+        const remote = data.remoteAccess;
+        const off = remote.remoteLogin === "off";
+        const noUser = remote.userAllowed === false;
+        const needsTurnOn = off || noUser || remote.passwordLogin !== "blocked";
+        const note: Message = off ? "remoteNoteOff" : noUser ? "remoteNoteUser"
+          : remote.passwordLogin === "allowed" ? "remoteNotePasswords"
+          : remote.passwordLogin === "unknown" ? "remoteNoteUnknown" : "remoteNoteKeys";
+        setText(accessMessage, t(note));
+        warnIcon.hidden = !(noUser || remote.passwordLogin === "allowed");
+        okIcon.hidden = needsTurnOn;
+        accessNote.toggleAttribute("data-warning", !warnIcon.hidden);
+        setTip(accessInfo, t("remoteAccessHelp"));
+        setAttribute(accessInfo, "aria-label", t("remoteAccessHelp"));
+        setText(enableLabel, t(enabling ? "remoteAccessEnabling" : "remoteAccessEnable"));
+        enable.hidden = !needsTurnOn;
+        if (enable.disabled !== enabling) enable.disabled = enabling;
+        enable.toggleAttribute("data-attention", !enabling);
+        enable.setAttribute("aria-busy", String(enabling));
+        sharing.root.hidden = !(off || noUser);
+        const canAllow = !needsTurnOn && remote.managedFile;
+        if (confirming === "passwords" && !canAllow) confirming = undefined;
+        passwords.root.hidden = !canAllow || confirming === "passwords";
+        passwordConfirm.hidden = !(canAllow && confirming === "passwords");
+        if (guideWindow.hasAttribute("data-open")) {
+          if (off || noUser) renderGuide();
+          else closeGuide(false);
+        }
         setText(pairingState, t(data.pairing === "open" ? "pairingOpen" : "pairingClosed"));
         // Pairing and actions arrive in later steps, so the app shows them off until then.
         const later = desktop.sampleDevices ? undefined : t("notAvailableYet");
         pairing.disable(data.pairing === "open" ? t("pairingOpen") : later, t("openPairing"));
         addAction.disable(later, t("addAction"));
         log.disable(undefined, t("showLog"));
-        if (confirming && confirming !== "cut" && !data.controllers.some(({ id }) => id === confirming)) confirming = undefined;
+        if (confirming && confirming !== "cut" && confirming !== "passwords" && !data.controllers.some(({ id }) => id === confirming)) confirming = undefined;
         if (data.controllers.length === 0 && confirming === "cut") confirming = undefined;
         controllerList.sync(data.controllers);
         controllersEmpty.show(data.controllers.length === 0);
@@ -525,16 +583,91 @@ export function mountDevices(host: Host) {
   });
   document.addEventListener("keydown", event => {
     if (event.key !== "Escape") return;
-    if (logWindow.hasAttribute("data-open")) closeLog();
+    if (guideWindow.hasAttribute("data-open")) closeGuide();
+    else if (logWindow.hasAttribute("data-open")) closeLog();
     else if (confirming) {
       confirming = undefined;
       render();
     }
   });
 
+  /** The steps for the user to do in Sharing, when Lazy Worker could not turn remote access on by itself. */
+  function renderGuide(): void {
+    const access = overview?.thisDevice.remoteAccess;
+    if (!access) return;
+    const off = access.remoteLogin === "off";
+    const picture = off && access.macosMajor !== null && access.macosMajor >= 13;
+    const steps: Message[] = ["remoteGuideOpen"];
+    if (off) steps.push(access.macosMajor !== null && access.macosMajor <= 12 ? "remoteGuideTick" : "remoteGuideSwitch");
+    steps.push("remoteGuideUser");
+    guideBody.replaceChildren(h("div", {},
+      h("ol", { class: "guide-steps" }, ...steps.map(step => h("li", {}, t(step)))),
+      picture && h("img", {
+        class: "guide-image", src: guideImage13, alt: t("remoteGuideImageAlt"), width: "470", height: "406",
+      })));
+  }
+
+  function openGuide(trigger: HTMLElement | undefined): void {
+    guideTrigger = trigger;
+    renderGuide();
+    guideWindow.setAttribute("data-open", "");
+    guideWindow.inert = false;
+    guideOpen.focus();
+  }
+
+  function closeGuide(restoreFocus = true): void {
+    if (!guideWindow.hasAttribute("data-open")) return;
+    guideWindow.removeAttribute("data-open");
+    guideWindow.inert = true;
+    if (restoreFocus && guideTrigger?.isConnected) guideTrigger.focus();
+  }
+
+  guideClose.addEventListener("click", () => closeGuide());
+  guideWindow.addEventListener("pointerdown", event => {
+    if (event.target === guideWindow) closeGuide();
+  });
+  guideOpen.addEventListener("click", () => { void openSharing(); });
+
+  async function openSharing(): Promise<void> {
+    try {
+      await desktop.openSharingSettings();
+    } catch (error) {
+      host.fail(error);
+    }
+  }
+
+  /** One administrator prompt does it all. When the system does not let it finish, the guide shows what to do by hand. */
+  async function enableAccess(trigger: HTMLElement): Promise<void> {
+    if (enabling) return;
+    enabling = true;
+    render();
+    let guide = false;
+    try {
+      await desktop.enableRemoteAccess();
+    } catch (error) {
+      if (error === "remoteLoginStillOff" || error === "userStillNotAllowed") guide = true;
+      // A cancelled prompt is the user's own choice, so it shows nothing.
+      else if (error !== "adminCanceled") host.fail(error);
+    }
+    enabling = false;
+    await refresh();
+    if (guide) openGuide(trigger);
+  }
+
+  async function allowPasswords(): Promise<void> {
+    confirming = undefined;
+    try {
+      await desktop.allowPasswordLogin();
+    } catch (error) {
+      if (error !== "adminCanceled") host.fail(error);
+    }
+    await refresh();
+  }
+
   /** Leaving the view drops what waits for a second click and closes the log. */
   function reset(): void {
     closeLog(false);
+    closeGuide(false);
     if (confirming) {
       confirming = undefined;
       render();
@@ -720,7 +853,9 @@ export function mountDevices(host: Host) {
       // Keep the last list. A first failure still shows this device, without its details.
       overview ??= {
         thisDevice: {
-          name: "", kind: "desktop", remoteAccess: "unknown", pairing: "closed", controllers: [],
+          name: "", kind: "desktop",
+          remoteAccess: { remoteLogin: "off", passwordLogin: "unknown", userAllowed: null, managedFile: false, macosMajor: null },
+          pairing: "closed", controllers: [],
           socket: { listening: true, error: null }, actions: [],
         },
         devices: [],
