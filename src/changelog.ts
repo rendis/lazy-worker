@@ -10,6 +10,18 @@ export type Release = { version: string; date: string; changes: readonly Change[
 
 export const releases: readonly Release[] = [
   {
+    version: "0.6.4",
+    date: "2026-11-23",
+    changes: [
+      { en: "Caffeinate asks one thing: keep the Mac awake on the charger, or always. Rare options moved to Advanced.",
+        es: "Caffeinate pregunta una sola cosa: mantener el Mac despierto con cargador, o siempre. Las opciones poco usadas pasaron a Avanzado." },
+      { en: "A new installation keeps the Mac awake on the charger only.",
+        es: "Una instalación nueva mantiene el Mac despierto solo con cargador." },
+      { en: "The closed-lid option now asks for the administrator password when it needs it.",
+        es: "La opción de la tapa cerrada ahora pide la contraseña de administrador cuando la necesita." },
+    ],
+  },
+  {
     version: "0.6.3",
     date: "2026-11-23",
     changes: [

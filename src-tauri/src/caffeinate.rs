@@ -60,11 +60,12 @@ pub struct CaffeinateFlags {
 
 impl Default for CaffeinateFlags {
     fn default() -> Self {
+        // A new installation stays awake on the charger and sleeps as usual on battery.
         Self {
-            i: true,
+            i: false,
             d: false,
             m: false,
-            s: false,
+            s: true,
             u: false,
         }
     }
@@ -264,13 +265,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn old_preferences_use_idle_sleep_defaults() {
+    fn preferences_without_caffeinate_settings_stay_awake_on_the_charger_only() {
         let settings: CaffeinateSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(
             serde_json::to_value(settings).unwrap(),
             serde_json::json!({
                 "mode": "untilStopped",
-                "flags": {"i": true, "d": false, "m": false, "s": false, "u": false},
+                "flags": {"i": false, "d": false, "m": false, "s": true, "u": false},
                 "seconds": 1800, "pid": null
             })
         );
@@ -306,7 +307,7 @@ mod tests {
         assert_eq!(settings.validate(), Err("caffeinateInvalidPid"));
         settings.pid = Some(i32::MAX as u32);
         assert_eq!(settings.validate(), Ok(()));
-        settings.flags.i = false;
+        settings.flags.s = false;
         assert_eq!(settings.validate(), Err("caffeinateNoFlags"));
     }
 

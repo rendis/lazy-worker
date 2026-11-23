@@ -85,7 +85,7 @@ export const defaults: Preferences = {
   seenVersion: null,
   caffeinate: {
     mode: "untilStopped",
-    flags: { i: true, d: false, m: false, s: false, u: false },
+    flags: { i: false, d: false, m: false, s: true, u: false },
     seconds: 1800,
     pid: null,
   },

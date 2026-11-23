@@ -14,6 +14,17 @@ export function mountCaffeinateForm() {
   const pid = form.querySelector<HTMLInputElement>("#caffeinate-pid")!;
   const preview = form.querySelector<HTMLElement>("#caffeinate-preview")!;
   const options = [...form.querySelectorAll<HTMLInputElement>("[data-caffeinate-option]")];
+  const power = [...form.querySelectorAll<HTMLInputElement>('input[name="caffeinate-power"]')];
+  const powerModes = form.querySelector<HTMLElement>(".caffeinate-power-modes")!;
+  const flag = (name: CaffeinateFlag) => options.find(option => option.dataset.caffeinateOption === name)!;
+  // The choice between the charger and always stands for two flags: `-s` works on the charger only, `-i` always.
+  form.addEventListener("input", event => {
+    const input = event.target as HTMLInputElement;
+    if (input.name !== "caffeinate-power") return;
+    flag("s").checked = input.value === "charger";
+    flag("i").checked = input.value === "always";
+    powerModes.dataset.selection = input.value;
+  });
   const controls = form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>("input, select, button");
   const picker = form.querySelector<HTMLElement>(".caffeinate-process-picker")!;
   const search = picker.querySelector<HTMLInputElement>("#caffeinate-process")!;
@@ -199,6 +210,11 @@ export function mountCaffeinateForm() {
     unit.value = useMinutes ? "minutes" : "seconds";
     pid.value = settings.pid === null ? "" : String(settings.pid);
     for (const option of options) option.checked = settings.flags[option.dataset.caffeinateOption as CaffeinateFlag];
+    // Saved settings with neither flag, or with both, keep the Mac awake always.
+    const charger = flag("s").checked && !flag("i").checked;
+    if (!charger) flag("i").checked = true;
+    for (const input of power) input.checked = input.value === (charger ? "charger" : "always");
+    powerModes.dataset.selection = charger ? "charger" : "always";
     render();
   }
 
