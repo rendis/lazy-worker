@@ -22,7 +22,7 @@ npm ci
 npm run tauri -- dev
 ```
 
-Use `npm run dev` to open the interface in a browser. Browser mode simulates module sessions and saves preferences in browser storage. The installed desktop app runs the native helper and schedule.
+Use `npm run dev` to open the interface in a browser. Browser mode simulates module sessions and saves preferences in browser storage. The installed desktop app runs the native helper and schedule. Add `?onboarding`, `?whatsnew`, `?update=<version>`, `?accessibility=granted` or `required`, or `?lid-external` to the address to see those states.
 
 Run the checks with `npm run build` and `cargo test --manifest-path src-tauri/Cargo.toml`. The [Check workflow](../.github/workflows/check.yml) runs the same checks on macOS for every pull request.
 
