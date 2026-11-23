@@ -204,3 +204,48 @@
 .guide-steps li + li { margin-top: 6px; }
 .guide-image { display: block; max-width: min(100%, 300px); height: auto; margin-inline: auto; border-radius: 10px; }
 .guide-actions { display: flex; justify-content: flex-end; }
+
+/* A device row asks before it forgets. Its own buttons sit above the toggle that covers the row. */
+.device-head [hidden], .pair-window [hidden] { display: none; }
+.device-head .device-confirm { position: relative; z-index: 2; margin-inline-start: 0; }
+/* The summary of the pairing window changes every second, so it keeps its width. */
+.pairing-state { min-inline-size: 26ch; text-align: end; font-variant-numeric: tabular-nums; }
+
+/* The Add device and Pair a device windows. */
+.pair-window { grid-template-rows: auto minmax(0, 1fr); width: min(560px, 100%); height: min(560px, 100%); }
+.pair-window header #add-device-back { margin-inline-start: 0; }
+.pair-body { min-height: 0; overflow-y: auto; padding-inline-end: 4px; }
+.pair-form .setting-row { grid-template-columns: 20px minmax(0, 1fr) auto; }
+.pair-form .setting-row > .field:not(.pair-field) { grid-column: 2; width: 100%; }
+.pair-window .collapse .setting-note, .pair-hint { padding: 8px 2px; }
+.pair-hint { margin: 0; }
+.found-row { width: 100%; border-inline: 0; border-top: 0; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; }
+.found-row:hover { background: var(--glass); }
+.found-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.pair-field { width: 190px; }
+.pair-code-field { width: 9.5ch; height: 40px; font-size: 22px; font-weight: 650; letter-spacing: .12em; text-align: center; }
+.icon-button[aria-busy="true"] .lucide { animation: rescan-spin 1s linear infinite; }
+@keyframes rescan-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .icon-button[aria-busy="true"] .lucide { animation: none; } }
+
+.pair-code-box { display: grid; justify-items: center; gap: 6px; padding: 16px 0 14px; border-bottom: 1px solid var(--hairline); text-align: center; }
+.pair-code {
+  font-size: 46px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  font-variant-numeric: tabular-nums;
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+.pair-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); margin: 0; }
+.pair-facts dt, .pair-facts dd { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 40px; margin: 0; padding: 8px 2px; border-bottom: 1px solid var(--hairline); font-size: 14px; }
+.pair-facts dt { padding-inline-end: 24px; color: var(--secondary); font-weight: 620; }
+.pair-facts dd { font-variant-numeric: tabular-nums; -webkit-user-select: text; user-select: text; overflow-wrap: anywhere; }
+/* The countdown reserves the width of its longest text. */
+.pair-time { display: inline-block; min-inline-size: 9ch; }
+.pair-window .guide-actions { padding-top: 14px; }
+.pair-result { display: grid; justify-items: center; gap: 12px; padding-top: 36px; text-align: center; }
+.pair-result-icon .lucide { width: 28px; height: 28px; color: var(--online); }
+.pair-result-text { margin: 0; font-size: 16px; font-weight: 650; overflow-wrap: anywhere; }
+.pair-result .guide-actions { padding-top: 6px; }

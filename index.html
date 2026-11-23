@@ -714,6 +714,27 @@
           </div>
         </section>
       </div>
+      <div class="log-overlay" id="add-device-window" inert>
+        <section class="log-window pair-window" role="dialog" aria-labelledby="add-device-title">
+          <header>
+            <button type="button" class="icon-button" id="add-device-back" data-label="back" aria-label="Back" hidden><i data-lucide="arrow-left"></i></button>
+            <i data-lucide="plus"></i>
+            <h2 id="add-device-title" data-text="addDevice">Add device</h2>
+            <button type="button" class="icon-button" id="add-device-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
+          </header>
+          <div class="pair-body" id="add-device-body"></div>
+        </section>
+      </div>
+      <div class="log-overlay" id="pair-device-window" inert>
+        <section class="log-window pair-window" role="dialog" aria-labelledby="pair-device-title">
+          <header>
+            <i data-lucide="lock-keyhole-open"></i>
+            <h2 id="pair-device-title" data-text="pairDeviceTitle">Pair a device</h2>
+            <button type="button" class="icon-button" id="pair-device-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
+          </header>
+          <div class="pair-body" id="pair-device-body"></div>
+        </section>
+      </div>
       <div class="log-overlay" id="changelog-window" inert>
         <section class="log-window changelog-window" role="dialog" aria-labelledby="changelog-title">
           <header>

@@ -203,6 +203,9 @@ pub struct ThisDevice {
     pub device: Device,
     pub remote_access: RemoteAccess,
     pub pairing: Pairing,
+    /// The user name of this process, which the Add device window offers as the first guess for
+    /// the account on the other device. Nothing when the system gives none.
+    pub account: Option<String>,
     pub controllers: Vec<Controller>,
     pub socket: Socket,
     pub actions: Vec<()>,
@@ -248,6 +251,10 @@ pub fn overview(stores: Stores, remote_access: RemoteAccess) -> Overview {
             device: platform::this_device(),
             remote_access,
             pairing: stores.pairing,
+            #[cfg(unix)]
+            account: crate::remote::pairing::current_account(),
+            #[cfg(not(unix))]
+            account: None,
             controllers: stores.controllers,
             socket: stores.socket,
             actions: Vec::new(),
@@ -322,6 +329,7 @@ mod tests {
                     expires: Some(1_800_000_000),
                     attempts_left: 2,
                 },
+                account: Some("me".into()),
                 controllers: Vec::new(),
                 socket: Socket::unavailable("x"),
                 actions: Vec::new(),
@@ -346,6 +354,7 @@ mod tests {
             serde_json::to_value(Pairing::closed()).unwrap(),
             serde_json::json!({"open": false, "expires": null, "attemptsLeft": 0})
         );
+        assert_eq!(value["thisDevice"]["account"], "me");
         assert_eq!(value["devices"], serde_json::json!([]));
         assert_eq!(value["thisDevice"]["socket"]["listening"], false);
         assert_eq!(value["thisDevice"]["socket"]["error"], "x");

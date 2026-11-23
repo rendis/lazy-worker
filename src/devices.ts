@@ -1,13 +1,13 @@
 import "./devices.css";
 import {
   desktop, type ActionSchedule, type Controller, type ControllerPermission, type DeviceKind, type DevicesOverview,
-  type RemoteApp, type RemoteDevice, type RemoteLogEntry, type RemoteTool, type SavedAction,
+  type DiscoveredDevice, type ProxyNetwork, type RemoteApp, type RemoteDevice, type RemoteLogEntry, type RemoteTool, type SavedAction,
 } from "./desktop";
 import guideImage13 from "./assets/guide/remote-login-13.png";
 import { messages, type Language, type Message } from "./messages";
 import { tools } from "./modules";
 import { h, icon, type Child } from "./proxy";
-import { age, formatClock, formatMoment, type AgeUnit } from "./time";
+import { age, formatClock, formatMoment, formatSession, type AgeUnit } from "./time";
 
 // Every name and text below comes from data that other devices will send, so it is only ever set as text.
 const openKey = "lazy-worker-devices-open";
@@ -29,6 +29,15 @@ const logOutcomes: Record<string, Message> = {
   ok: "remoteOutcomeOk", notPermitted: "remoteOutcomeNotPermitted", localOnly: "remoteOutcomeLocalOnly",
   notPaired: "remoteOutcomeNotPaired", badRequest: "remoteOutcomeBadRequest",
 };
+/** The codes that a failed pairing can end with, in plain words. Any other code shows the generic text. */
+const pairErrors: Record<string, Message> = {
+  wrongCode: "pairWrongCode", pairingCodeInvalid: "pairCodeShort", pairingClosed: "pairClosedThere", pairingBusy: "pairBusy",
+  pairingHostMismatch: "pairHostMismatch", pairingFailed: "pairFailed", pairingSaveFailed: "pairSaveFailed", pairingSelf: "pairSelf",
+  sshUnreachable: "pairUnreachable", sshDenied: "pairDenied", sshTimeout: "pairTimeout", pairingTimeout: "pairTimeout",
+  sshHostKeyChanged: "pairHostKeyChanged", sshHostKeyUnknown: "pairHostKeyUnknown", destinationInvalid: "addressInvalid",
+};
+/** After these the window does not let the user press Pair again until the user goes back or changes a field. */
+const stopErrors = new Set(["pairingHostMismatch", "sshHostKeyChanged"]);
 const kindIcons: Record<DeviceKind, string> = { laptop: "laptop", desktop: "monitor" };
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
@@ -38,6 +47,8 @@ type Host = {
   refreshIcons(): void;
   /** Shows the notice of a failed change. `error` is the code that the app sent, when it sent one. */
   fail(error: unknown): void;
+  /** Shows a message that is not a failure. */
+  notify(message: Message): void;
 };
 type Row<T> = { root: HTMLElement; update(item: T): void };
 type Item = { id: string; self: boolean; name: string; kind: DeviceKind; data: DevicesOverview["thisDevice"] | RemoteDevice };
@@ -93,6 +104,7 @@ export function mountDevices(host: Host) {
   let opened = readOpen();
   let built = false;
   let sequence = 0;
+  let shownLanguage: Language | undefined;
 
   function isOpen(key: string, fallback = false): boolean {
     return opened[key] ?? fallback;
@@ -120,6 +132,25 @@ export function mountDevices(host: Host) {
     setAttribute(root, "data-tip", text);
   }
 
+  /** Texts of the windows. They are set again when the language changes. */
+  const labelled: (() => void)[] = [];
+  function bind<T extends HTMLElement>(node: T, key: Message, attribute?: string): T {
+    const apply = (): void => {
+      if (attribute) setAttribute(node, attribute, t(key));
+      else setText(node, t(key));
+    };
+    apply();
+    labelled.push(apply);
+    return node;
+  }
+
+  function bindTip(control: { root: HTMLElement; button: HTMLButtonElement }, key: Message): void {
+    labelled.push(() => {
+      setTip(control.root, t(key));
+      setAttribute(control.button, "aria-label", t(key));
+    });
+  }
+
   /** An icon-only button with its name as a tip. The wrapper carries the tip, so a disabled button can still give a reason. */
   function iconButton(label: string, name: string, extra = "") {
     const button = h("button", { type: "button", class: `icon-button ${extra}`.trim(), "aria-label": label }, icon(name));
@@ -142,8 +173,9 @@ export function mountDevices(host: Host) {
   }
 
   /** A closed note that opens over a short time. The last text stays while it closes. */
-  function note(text: string) {
+  function note(text: string, warning = false) {
     const paragraph = h("p", { class: "setting-note" }, text);
+    if (warning) paragraph.setAttribute("data-warning", "");
     const root = h("div", { class: "collapse", inert: true }, h("div", {}, paragraph));
     return {
       root,
@@ -319,6 +351,18 @@ export function mountDevices(host: Host) {
     await refresh();
   }
 
+  async function forgetRemote(device: RemoteDevice): Promise<void> {
+    confirming = undefined;
+    try {
+      const { removeOnDevice } = await desktop.forgetDevice(device.id);
+      // This device cannot take its own key out of the other one, so the user has to do it there.
+      if (removeOnDevice) host.notify("forgetRemoveThere");
+    } catch (error) {
+      host.fail(error);
+    }
+    await refresh();
+  }
+
   function confirmButtons(yesLabel: string, yes: () => void, no: () => void) {
     const accept = iconButton(yesLabel, "check", "danger");
     const cancel = iconButton(t("cancel"), "x");
@@ -417,9 +461,11 @@ export function mountDevices(host: Host) {
       render();
       passwordButtons.cancel.button.focus();
     });
-    const pairingState = h("span", { class: "setting-note" });
+    const pairingState = h("span", { class: "setting-note pairing-state" });
     const pairing = iconButton(t("openPairing"), "lock-keyhole-open", "outlined");
     const pairingRow = settingRow("lock-keyhole", "pairing", pairingState, pairing.root);
+    pairing.button.setAttribute("aria-haspopup", "dialog");
+    pairing.button.addEventListener("click", () => openPairWindow(pairing.button));
 
     const socketNote = note("");
     const controllersEmpty = note(t("noControllers"));
@@ -494,13 +540,17 @@ export function mountDevices(host: Host) {
           if (off || noUser) renderGuide();
           else closeGuide(false);
         }
-        setText(pairingState, t(data.pairing.open ? "pairingOpen" : "pairingClosed"));
-        // The pairing screen and actions arrive in later steps, so the app shows them off until then.
+        setText(pairingState, data.pairing.open && data.pairing.expires !== null
+          ? fill(t("pairingOpenLeft"), { time: formatSession(data.pairing.expires - seconds()) }) : t("pairingClosed"));
+        const pairingName = t(data.pairing.open ? "showPairing" : "openPairing");
+        pairing.disable(needsTurnOn ? t("pairNeedsAccess") : undefined, pairingName);
+        setAttribute(pairing.button, "aria-label", needsTurnOn ? t("pairNeedsAccess") : pairingName);
+        // Saved actions arrive in a later step, so the app shows them off until then.
         const later = desktop.sampleDevices ? undefined : t("notAvailableYet");
-        pairing.disable(data.pairing.open ? t("pairingOpen") : later, t("openPairing"));
         addAction.disable(later, t("addAction"));
         log.disable(undefined, t("showLog"));
-        if (confirming && confirming !== "cut" && confirming !== "passwords" && !data.controllers.some(({ id }) => id === confirming)) confirming = undefined;
+        if (confirming && confirming !== "cut" && confirming !== "passwords" && !confirming.startsWith("forget:") &&
+          !data.controllers.some(({ id }) => id === confirming)) confirming = undefined;
         if (data.controllers.length === 0 && confirming === "cut") confirming = undefined;
         controllerList.sync(data.controllers);
         controllersEmpty.show(data.controllers.length === 0);
@@ -583,7 +633,9 @@ export function mountDevices(host: Host) {
   });
   document.addEventListener("keydown", event => {
     if (event.key !== "Escape") return;
-    if (guideWindow.hasAttribute("data-open")) closeGuide();
+    if (addOverlay.isOpen()) addOverlay.close();
+    else if (pairOverlay.isOpen()) pairOverlay.close();
+    else if (guideWindow.hasAttribute("data-open")) closeGuide();
     else if (logWindow.hasAttribute("data-open")) closeLog();
     else if (confirming) {
       confirming = undefined;
@@ -664,10 +716,514 @@ export function mountDevices(host: Host) {
     await refresh();
   }
 
-  /** Leaving the view drops what waits for a second click and closes the log. */
+  /** A line of a window: an icon, a label that follows the language, and the control at the end. */
+  function overlayRow(name: string, label: Message, tag: "div" | "label" = "div", ...end: Child[]) {
+    const text = h("span", { class: "setting-label" }, bind(h("span"), label));
+    return { text, root: h(tag, { class: "setting-row" }, icon(name), text, h("div", { class: "device-end" }, ...end)) };
+  }
+
+  /** A text field that keeps only what its alphabet allows as the user types, and the caret where it was. */
+  function filtered(input: HTMLInputElement, filter: (text: string) => string, changed: () => void): void {
+    input.addEventListener("input", () => {
+      const start = input.selectionStart ?? input.value.length;
+      const next = filter(input.value);
+      if (next !== input.value) {
+        const caret = filter(input.value.slice(0, start)).length;
+        input.value = next;
+        input.setSelectionRange(caret, caret);
+      }
+      changed();
+    });
+  }
+
+  /** The window that opens over the view. It restores the focus to what opened it. */
+  function overlay(shell: HTMLElement, closeButton: HTMLElement, onClose: () => void) {
+    let trigger: HTMLElement | undefined;
+    const api = {
+      isOpen: () => shell.hasAttribute("data-open"),
+      open(from: HTMLElement | undefined, focus: HTMLElement): void {
+        trigger = from;
+        shell.setAttribute("data-open", "");
+        shell.inert = false;
+        focus.focus();
+      },
+      close(restoreFocus = true): void {
+        if (!api.isOpen()) return;
+        shell.removeAttribute("data-open");
+        shell.inert = true;
+        onClose();
+        if (restoreFocus && trigger?.isConnected) trigger.focus();
+      },
+    };
+    closeButton.addEventListener("click", () => api.close());
+    shell.addEventListener("pointerdown", event => {
+      if (event.target === shell) api.close();
+    });
+    return api;
+  }
+
+  // ---- Add device: choose a device on this network or type its address, then pair with its code ----
+  const addWindow = document.getElementById("add-device-window")!;
+  const addBody = document.getElementById("add-device-body")!;
+  const addBack = document.getElementById("add-device-back") as HTMLButtonElement;
+  const addClose = document.getElementById("add-device-close") as HTMLButtonElement;
+  type Found = DiscoveredDevice & { id: string };
+  let found: Found[] = [];
+  let scanning = false;
+  let scanError: Message | undefined;
+  let scanSequence = 0;
+  let selected: { name: string; host: string; port: number } | undefined;
+  let pairBusy = false;
+  let pairLocked = false;
+  let pairErrorKey: Message | undefined;
+  /** Changes when the window closes or goes back, so the answer of an old pairing does not touch the new screen. */
+  let addAttempt = 0;
+
+  const rescan = iconButton(t("addSearchAgain"), "refresh-cw", "outlined");
+  bindTip(rescan, "addSearchAgain");
+  const foundNote = note("");
+  const foundRows = h("div", { class: "device-rows" });
+  const foundList = list<Found>(foundRows, device => JSON.stringify([host.language(), device.name, device.host, device.port]), foundRow);
+  const addressField = h("input", {
+    class: "field", type: "text", autocomplete: "off", autocapitalize: "off", spellcheck: "false", inputmode: "url",
+  });
+  bind(addressField, "addAddressPlaceholder", "placeholder");
+  bind(addressField, "addAddressLabel", "aria-label");
+  const addressNext = iconButton(t("continue"), "arrow-right", "confirm");
+  bindTip(addressNext, "continue");
+  addressNext.button.type = "submit";
+  const addressError = note("", true);
+  const addressForm = h("form", { class: "pair-form", novalidate: true },
+    h("div", { class: "setting-row" }, icon("network"), addressField, h("div", { class: "device-end" }, addressNext.root)),
+    addressError.root,
+    bind(h("p", { class: "setting-note pair-hint" }), "addAddressHint"));
+  const chooseStep = h("div", { class: "pair-step" },
+    h("div", { class: "device-subhead" }, bind(h("h3"), "addFound"), rescan.root),
+    foundNote.root, foundRows,
+    h("div", { class: "device-subhead" }, bind(h("h3"), "addEnterAddress")), addressForm);
+
+  const summaryName = h("strong");
+  const summaryWhere = h("span", { class: "setting-note" });
+  const accountField = h("input", {
+    class: "field pair-field", type: "text", autocomplete: "username", autocapitalize: "off", spellcheck: "false", maxlength: "32",
+  });
+  const accountInfo = h("span", { class: "tip option-info", tabindex: "0", role: "img" }, icon("info"));
+  bind(accountInfo, "addAccountHelp", "data-tip");
+  bind(accountInfo, "addAccountHelp", "aria-label");
+  const account = overlayRow("user-round", "addAccount", "label", accountField);
+  account.text.append(" ", accountInfo);
+  const accountError = note("", true);
+  const codeField = h("input", {
+    class: "field pair-code-field", type: "text", inputmode: "numeric", autocomplete: "one-time-code", spellcheck: "false",
+    placeholder: "000 000", "aria-describedby": "pair-code-hint",
+  });
+  const code = overlayRow("key-round", "addCode", "label", codeField);
+  const pairLabel = h("span");
+  const pairButton = h("button", { type: "submit", class: "access-action" }, icon("link"), pairLabel);
+  const pairError = note("", true);
+  pairError.root.setAttribute("aria-live", "polite");
+  const pairStep = h("form", { class: "pair-step pair-form", novalidate: true },
+    h("div", { class: "device-row" }, icon("monitor"), h("div", { class: "device-row-text" }, summaryName, summaryWhere)),
+    account.root, accountError.root, code.root,
+    bind(h("p", { class: "setting-note pair-hint", id: "pair-code-hint" }), "addCodeHint"),
+    pairError.root,
+    h("div", { class: "guide-actions" }, pairButton));
+  addBody.append(chooseStep, pairStep);
+
+  const addAccountValid = (text: string): boolean => /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,31}$/.test(text);
+  const accountFilter = (text: string): string => text.replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 32);
+  const addressFilter = (text: string): string => text.replace(/[^A-Za-z0-9.:\-[\]%]/g, "").slice(0, 80);
+  const digitsOf = (text: string): string => text.replace(/\D/g, "").slice(0, 6);
+  /** The code in two groups of three, as the other device shows it. */
+  const codeFilter = (text: string): string => {
+    const digits = digitsOf(text);
+    return digits.length > 3 ? `${digits.slice(0, 3)} ${digits.slice(3)}` : digits;
+  };
+
+  function foundRow(device: Found): Row<Found> {
+    const where = device.port === 22 ? device.host : `${device.host}:${device.port}`;
+    const root = h("button", { type: "button", class: "device-row found-row" },
+      kindIcon("desktop"),
+      h("div", { class: "device-row-text" }, h("strong", {}, device.name), h("span", { class: "setting-note" }, where)),
+      icon("chevron-right"));
+    root.addEventListener("click", () => choose({ name: device.name, host: device.host, port: device.port }));
+    return { root, update: () => undefined };
+  }
+
+  function settleIcons(): void {
+    if (built) {
+      built = false;
+      host.refreshIcons();
+    }
+  }
+
+  function renderFound(): void {
+    rescan.disable(scanning ? t("addSearching") : undefined, t("addSearchAgain"));
+    rescan.button.toggleAttribute("aria-busy", scanning);
+    foundList.sync(found);
+    const text = scanning && !found.length ? t("addSearching")
+      : scanError ? t(scanError) : found.length ? "" : t("addNoneFound");
+    if (text) foundNote.set(text);
+    foundNote.show(text !== "");
+    settleIcons();
+  }
+
+  async function scan(): Promise<void> {
+    const current = ++scanSequence;
+    scanning = true;
+    renderFound();
+    try {
+      const result = await desktop.discoverDevices();
+      if (current !== scanSequence) return;
+      found = result.map(device => ({ ...device, id: `${device.host}:${device.port}` }));
+      scanError = undefined;
+    } catch {
+      if (current !== scanSequence) return;
+      found = [];
+      scanError = "discoveryFailed";
+    }
+    scanning = false;
+    renderFound();
+  }
+
+  /** A name or an address, with an optional port. The app checks it again before it connects. */
+  function parseAddress(text: string): { host: string; port: number | null } | "invalid" | undefined {
+    const value = text.trim();
+    if (!value) return undefined;
+    const port = (digits: string): number | undefined =>
+      /^\d{1,5}$/.test(digits) && Number(digits) >= 1 && Number(digits) <= 65535 ? Number(digits) : undefined;
+    const v6 = (address: string): boolean =>
+      /^[0-9A-Fa-f:.]{2,45}(%[A-Za-z0-9]{1,15})?$/.test(address) && address.split(":").length > 2;
+    if (value.startsWith("[")) {
+      const end = value.indexOf("]");
+      if (end < 0 || !v6(value.slice(1, end))) return "invalid";
+      const rest = value.slice(end + 1);
+      if (!rest) return { host: value.slice(1, end), port: null };
+      const number = rest.startsWith(":") ? port(rest.slice(1)) : undefined;
+      return number === undefined ? "invalid" : { host: value.slice(1, end), port: number };
+    }
+    const colons = value.split(":").length - 1;
+    if (colons > 1) return v6(value) ? { host: value, port: null } : "invalid";
+    const [name, digits] = value.split(":");
+    const number = colons === 1 ? port(digits) : null;
+    if (number === undefined) return "invalid";
+    const labels = name.split(".");
+    const ipv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(name) && labels.every(label => Number(label) <= 255);
+    const dns = name.length <= 253 && !/^\d+$/.test(labels[labels.length - 1]) &&
+      labels.every(label => /^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(label));
+    return ipv4 || dns ? { host: name, port: number } : "invalid";
+  }
+
+  function renderAddress(): void {
+    const parsed = parseAddress(addressField.value);
+    const bad = parsed === "invalid";
+    addressField.toggleAttribute("aria-invalid", bad);
+    if (bad) addressError.set(t("addressInvalid"));
+    addressError.show(bad);
+    addressNext.disable(parsed === undefined || bad ? t(bad ? "addressInvalid" : "continue") : undefined, t("continue"));
+  }
+
+  function renderPairForm(): void {
+    const user = accountField.value;
+    const bad = user !== "" && !addAccountValid(user);
+    accountField.toggleAttribute("aria-invalid", bad);
+    if (bad) accountError.set(t("addAccountInvalid"));
+    accountError.show(bad);
+    if (pairErrorKey) pairError.set(t(pairErrorKey));
+    pairError.show(pairErrorKey !== undefined);
+    setText(pairLabel, t(pairBusy ? "addPairing" : "addPair"));
+    const ready = addAccountValid(user) && digitsOf(codeField.value).length === 6 && !pairBusy && !pairLocked;
+    if (pairButton.disabled !== !ready) pairButton.disabled = !ready;
+    pairButton.setAttribute("aria-busy", String(pairBusy));
+    for (const field of [accountField, codeField]) field.readOnly = pairBusy;
+    setText(summaryName, selected?.name ?? "");
+    setText(summaryWhere, selected ? (selected.port === 22 ? selected.host : `${selected.host}:${selected.port}`) : "");
+  }
+
+  function showStep(step: "choose" | "pair"): void {
+    chooseStep.hidden = step !== "choose";
+    pairStep.hidden = step !== "pair";
+    addBack.hidden = step === "choose";
+    renderPairForm();
+  }
+
+  function choose(device: { name: string; host: string; port: number }): void {
+    selected = device;
+    pairLocked = false;
+    pairErrorKey = undefined;
+    codeField.value = "";
+    if (!accountField.value) accountField.value = accountFilter(overview?.thisDevice.account ?? "");
+    showStep("pair");
+    (accountField.value ? codeField : accountField).focus();
+  }
+
+  function goBack(): void {
+    addAttempt += 1;
+    pairBusy = false;
+    selected = undefined;
+    codeField.value = "";
+    pairErrorKey = undefined;
+    showStep("choose");
+    addressField.focus();
+  }
+
+  const addOverlay = overlay(addWindow, addClose, () => {
+    scanSequence += 1;
+    scanning = false;
+    addAttempt += 1;
+    pairBusy = false;
+    selected = undefined;
+    addressField.value = "";
+    accountField.value = "";
+    codeField.value = "";
+    pairErrorKey = undefined;
+    showStep("choose");
+    renderAddress();
+  });
+
+  function openAdd(trigger: HTMLElement): void {
+    found = [];
+    scanError = undefined;
+    showStep("choose");
+    renderAddress();
+    addOverlay.open(trigger, addressField);
+    void scan();
+  }
+
+  async function submitPair(): Promise<void> {
+    if (!selected || pairBusy) return;
+    const target = selected;
+    const attempt = addAttempt;
+    pairBusy = true;
+    pairErrorKey = undefined;
+    renderPairForm();
+    try {
+      const device = await desktop.pairDevice(accountField.value, target.host, target.port === 22 ? null : target.port, digitsOf(codeField.value));
+      // The new device opens its row when it appears.
+      remember(`r:${device.id}`, true);
+      pairBusy = false;
+      if (attempt === addAttempt) addOverlay.close(false);
+      await refresh();
+      return;
+    } catch (error) {
+      pairBusy = false;
+      if (attempt !== addAttempt) return;
+      pairErrorKey = typeof error === "string" && Object.prototype.hasOwnProperty.call(pairErrors, error) ? pairErrors[error] : "pairGeneric";
+      // A device that cannot prove who it is ends the attempt here. Going back is the way to start again.
+      pairLocked = typeof error === "string" && stopErrors.has(error);
+      renderPairForm();
+      if (error === "wrongCode") {
+        codeField.focus();
+        codeField.select();
+      }
+    }
+  }
+
+  addBack.addEventListener("click", goBack);
+  rescan.button.addEventListener("click", () => { void scan(); });
+  addressForm.addEventListener("submit", event => {
+    event.preventDefault();
+    const parsed = parseAddress(addressField.value);
+    if (parsed && parsed !== "invalid") choose({ name: parsed.host, host: parsed.host, port: parsed.port ?? 22 });
+  });
+  pairStep.addEventListener("submit", event => {
+    event.preventDefault();
+    void submitPair();
+  });
+  filtered(addressField, addressFilter, renderAddress);
+  filtered(accountField, accountFilter, () => { pairLocked = false; renderPairForm(); });
+  filtered(codeField, codeFilter, () => { pairLocked = false; renderPairForm(); });
+
+  // ---- Pair a device: this device shows a code for ten minutes ----
+  const pairWindow = document.getElementById("pair-device-window")!;
+  const pairBody = document.getElementById("pair-device-body")!;
+  const pairClose = document.getElementById("pair-device-close") as HTMLButtonElement;
+  type Stage = "setup" | "open" | "done";
+  let stage: Stage = "setup";
+  let shown: { code: string; account: string; expires: number } | undefined;
+  let baseline = new Set<string>();
+  let outcomeName: string | undefined;
+  let opening = false;
+  let openFailed = false;
+  let reach: ProxyNetwork | undefined;
+  const grant = { control: true, applications: false, actions: false };
+
+  function permissionSwitch(id: keyof typeof grant, iconName: string, label: Message) {
+    const input = h("input", { type: "checkbox", switch: true, role: "switch" });
+    input.checked = grant[id];
+    input.addEventListener("change", () => { grant[id] = input.checked; });
+    const row = overlayRow(iconName, label, "label", h("span", { class: "switch" }, input, h("span", { "aria-hidden": "true" })));
+    return { root: row.root, input };
+  }
+  const switches = [
+    permissionSwitch("control", "layout-grid", "permControl"),
+    permissionSwitch("applications", "app-window", "permApplications"),
+    permissionSwitch("actions", "play", "permActions"),
+  ];
+  const openLabel = h("span");
+  const openButton = h("button", { type: "button", class: "access-action" }, icon("lock-keyhole-open"), openLabel);
+  const openError = note("", true);
+  const setupStage = h("div", { class: "pair-step" },
+    h("div", { class: "device-subhead" }, bind(h("h3"), "pairPermissionsTitle")),
+    ...switches.map(({ root }) => root),
+    bind(h("p", { class: "setting-note pair-hint" }), "pairShellNever"),
+    openError.root,
+    h("div", { class: "guide-actions" }, openButton));
+
+  const codeText = h("output", { class: "pair-code" });
+  const codeHidden = bind(h("p", { class: "setting-note" }), "pairCodeHidden");
+  const accountText = h("dd");
+  const reachText = h("dd", { class: "pair-reach" });
+  const timeText = h("span", { class: "pair-time" });
+  const attemptsText = h("dd");
+  const closeLabel = h("span");
+  const closePairingButton = h("button", { type: "button", class: "access-action" }, icon("hand"), closeLabel);
+  const fact = (label: Message, ...value: Child[]) => [bind(h("dt"), label), ...value];
+  const openStage = h("div", { class: "pair-step" },
+    h("div", { class: "pair-code-box" },
+      bind(h("p", { class: "setting-note" }), "pairCodeLabel"), codeText, codeHidden,
+      bind(h("p", { class: "setting-note" }), "pairCodeCopyHint")),
+    h("dl", { class: "pair-facts" },
+      ...fact("pairAccountLabel", accountText), ...fact("pairReachLabel", reachText),
+      ...fact("pairTimeLeft", h("dd", {}, timeText)), ...fact("pairAttemptsLeft", attemptsText)),
+    h("div", { class: "guide-actions" }, closePairingButton));
+
+  const resultIcon = h("span", { class: "pair-result-icon" }, icon("check"));
+  const resultText = h("p", { class: "pair-result-text", role: "status" });
+  const doneButton = h("button", { type: "button", class: "access-action" }, icon("check"), bind(h("span"), "pairDone"));
+  const doneStage = h("div", { class: "pair-step pair-result" }, resultIcon, resultText, h("div", { class: "guide-actions" }, doneButton));
+  pairBody.append(setupStage, openStage, doneStage);
+
+  const pairOverlay = overlay(pairWindow, pairClose, () => {
+    stage = "setup";
+    outcomeName = undefined;
+    openFailed = false;
+    Object.assign(grant, { control: true, applications: false, actions: false });
+    switches.forEach(({ input }, index) => { input.checked = index === 0; });
+    renderPairWindow();
+  });
+
+  function ids(): Set<string> {
+    return new Set((overview?.thisDevice.controllers ?? []).map(({ id }) => id));
+  }
+
+  function renderPairWindow(): void {
+    const state = overview?.thisDevice.pairing;
+    if (state) {
+      if (stage === "setup" && state.open && pairOverlay.isOpen()) stage = "open";
+      if (stage === "open" && !state.open && !opening) {
+        // The window ended: its time ran out, the code was entered, or the attempts ran out.
+        const added = (overview?.thisDevice.controllers ?? []).filter(({ id }) => !baseline.has(id));
+        outcomeName = added.length ? added[added.length - 1].name : undefined;
+        stage = "done";
+      }
+    }
+    setupStage.hidden = stage !== "setup";
+    openStage.hidden = stage !== "open";
+    doneStage.hidden = stage !== "done";
+    setText(openLabel, t(opening ? "pairOpening" : "pairOpenFor"));
+    if (openButton.disabled !== opening) openButton.disabled = opening;
+    openButton.setAttribute("aria-busy", String(opening));
+    if (openFailed) openError.set(t("pairOpenFailed"));
+    openError.show(openFailed);
+    setText(closeLabel, t("pairClosePairing"));
+    if (state && stage === "open") {
+      const current = shown && shown.expires === state.expires ? shown : undefined;
+      setText(codeText, current ? codeFilter(current.code) : "");
+      codeText.hidden = !current;
+      codeHidden.hidden = Boolean(current);
+      setText(accountText, current?.account ?? overview?.thisDevice.account ?? "—");
+      const names = [reach?.hostname, ...(reach?.addresses ?? [])].filter((name): name is string => Boolean(name));
+      reachText.replaceChildren(...(names.length ? names.map(name => h("span", {}, name)) : [h("span", {}, "—")]));
+      setText(timeText, formatSession((state.expires ?? 0) - seconds()));
+      setText(attemptsText, String(state.attemptsLeft));
+    }
+    resultIcon.hidden = outcomeName === undefined;
+    setText(resultText, outcomeName === undefined ? t("pairEnded") : fill(t("pairPaired"), { name: outcomeName }));
+    settleIcons();
+  }
+
+  function openPairWindow(trigger: HTMLElement): void {
+    stage = overview?.thisDevice.pairing.open ? "open" : "setup";
+    baseline = ids();
+    openFailed = false;
+    reach = undefined;
+    void desktop.getProxyNetwork().then(network => {
+      reach = network;
+      renderPairWindow();
+    }, () => undefined);
+    renderPairWindow();
+    pairOverlay.open(trigger, stage === "open" ? closePairingButton : openButton);
+    syncTicker();
+  }
+
+  async function startPairing(): Promise<void> {
+    if (opening) return;
+    opening = true;
+    openFailed = false;
+    baseline = ids();
+    renderPairWindow();
+    try {
+      shown = await desktop.openPairing({ ...grant });
+      stage = "open";
+    } catch {
+      openFailed = true;
+    }
+    await refresh();
+    opening = false;
+    renderPairWindow();
+    if (stage === "open") closePairingButton.focus();
+  }
+
+  async function stopPairing(): Promise<void> {
+    try {
+      await desktop.closePairing();
+    } catch (error) {
+      host.fail(error);
+    }
+    outcomeName = undefined;
+    stage = "done";
+    await refresh();
+    renderPairWindow();
+    doneButton.focus();
+  }
+
+  openButton.addEventListener("click", () => { void startPairing(); });
+  closePairingButton.addEventListener("click", () => { void stopPairing(); });
+  doneButton.addEventListener("click", () => pairOverlay.close());
+
+  /** While a pairing window is open, the view asks the app once a second, so the countdown and the outcome stay true. */
+  let ticker: number | undefined;
+  function syncTicker(): void {
+    const visible = !deviceList.closest("[hidden]");
+    const needed = visible && (pairOverlay.isOpen() || overview?.thisDevice.pairing.open === true);
+    if (needed && ticker === undefined) {
+      ticker = window.setInterval(() => {
+        if (deviceList.closest("[hidden]")) syncTicker();
+        else void refresh();
+      }, 1000);
+    } else if (!needed && ticker !== undefined) {
+      window.clearInterval(ticker);
+      ticker = undefined;
+    }
+  }
+
+  /** Puts the words of the windows in the language of the interface. */
+  function retranslate(): void {
+    for (const apply of labelled) apply();
+    renderFound();
+    renderAddress();
+    renderPairForm();
+    renderPairWindow();
+  }
+
+  /** Leaving the view drops what waits for a second click, closes the windows, and drops what was typed in them. */
   function reset(): void {
     closeLog(false);
     closeGuide(false);
+    addOverlay.close(false);
+    pairOverlay.close(false);
+    syncTicker();
     if (confirming) {
       confirming = undefined;
       render();
@@ -797,10 +1353,25 @@ export function mountDevices(host: Host) {
     const name = h("strong", {}, item.name || t("thisDevice"));
     const state = h("span", { class: "device-state" });
     const open = iconButton(t("openInterface"), "square-arrow-out-up-right", "outlined");
+    const forget = iconButton(t("forgetDevice"), "user-minus");
+    const remote = item.self ? undefined : item.data as RemoteDevice;
+    const { accept, cancel } = confirmButtons(t("forgetAccept"), () => { if (remote) void forgetRemote(remote); }, () => {
+      confirming = undefined;
+      render();
+      forget.button.focus();
+    });
+    const confirm = h("div", { class: "device-confirm", hidden: true },
+      h("span", { class: "setting-note" }, t("forgetConfirm")), accept.root, cancel.root);
+    forget.button.addEventListener("click", () => {
+      if (!remote) return;
+      confirming = `forget:${remote.id}`;
+      render();
+      cancel.button.focus();
+    });
     const head = h("div", { class: "device-head" },
       kindIcon(item.kind),
       h("span", { class: "device-name" }, name, item.self && h("span", { class: "device-badge" }, t("thisDevice"))),
-      !item.self && state, !item.self && open.root, chevron());
+      !item.self && state, !item.self && open.root, !item.self && forget.root, !item.self && confirm, chevron());
     const content = item.self ? thisDeviceBody() : remoteBody(item.data as RemoteDevice);
     const body = h("div", { class: "collapse" }, content.root);
     disclosure(item.id, head, name, body, item.self);
@@ -813,6 +1384,11 @@ export function mountDevices(host: Host) {
           return;
         }
         const device = current.data as RemoteDevice;
+        const asking = confirming === `forget:${device.id}`;
+        state.hidden = asking;
+        open.root.hidden = asking;
+        forget.root.hidden = asking;
+        confirm.hidden = !asking;
         state.toggleAttribute("data-on", device.online === true);
         setText(state, t(device.online === true ? "deviceOnline" : "deviceOffline"));
         open.disable(device.online === true ? (desktop.sampleDevices ? undefined : t("notAvailableYet")) : t("deviceOfflineTip"), t("openInterface"));
@@ -826,10 +1402,8 @@ export function mountDevices(host: Host) {
   function render(): void {
     if (!overview) return;
     const { thisDevice } = overview;
-    // Adding a device arrives in a later step. The preview shows the button as it will look.
-    addButton.disabled = !desktop.sampleDevices;
-    if (desktop.sampleDevices) addTip.removeAttribute("data-tip");
-    else setTip(addTip, t("notAvailableYet"));
+    addTip.removeAttribute("data-tip");
+    if (confirming?.startsWith("forget:") && !overview.devices.some(({ id }) => `forget:${id}` === confirming)) confirming = undefined;
     devices.sync([
       { id: "this", self: true, name: thisDevice.name, kind: thisDevice.kind, data: thisDevice },
       ...overview.devices.map(device => ({
@@ -837,6 +1411,13 @@ export function mountDevices(host: Host) {
       })),
     ]);
     if (logWindow.hasAttribute("data-open")) renderLog();
+    if (shownLanguage !== host.language()) {
+      shownLanguage = host.language();
+      retranslate();
+    } else {
+      renderPairWindow();
+    }
+    syncTicker();
     if (built) {
       built = false;
       host.refreshIcons();
@@ -855,7 +1436,7 @@ export function mountDevices(host: Host) {
         thisDevice: {
           name: "", kind: "desktop",
           remoteAccess: { remoteLogin: "off", passwordLogin: "unknown", userAllowed: null, managedFile: false, macosMajor: null },
-          pairing: { open: false, expires: null, attemptsLeft: 0 }, controllers: [],
+          pairing: { open: false, expires: null, attemptsLeft: 0 }, account: null, controllers: [],
           socket: { listening: true, error: null }, actions: [],
         },
         devices: [],
@@ -863,6 +1444,11 @@ export function mountDevices(host: Host) {
     }
     render();
   }
+
+  addButton.setAttribute("aria-haspopup", "dialog");
+  addButton.addEventListener("click", () => openAdd(addButton));
+  addButton.disabled = false;
+  host.refreshIcons();
 
   return { refresh, render, reset };
 }

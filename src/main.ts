@@ -1,8 +1,8 @@
 import "./style.css";
 import {
-  Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronDown, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
-  Cpu, createIcons, Database, ExternalLink, EyeOff, Globe, Hand, Hash, Hourglass, Infinity as InfinityIcon, Info, Laptop, LaptopMinimal, LayoutGrid, Link, List, LockKeyhole, LockKeyholeOpen,
-  Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, Moon, MousePointer2, Pencil, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
+  Activity, AppWindow, ArrowLeft, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronDown, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
+  Cpu, createIcons, Database, ExternalLink, EyeOff, Globe, Hand, Hash, Hourglass, Infinity as InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LockKeyhole, LockKeyholeOpen,
+  Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, Moon, MousePointer2, Network, Pencil, Play, PlugZap, Plus, Power, RefreshCw, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
   Shield, ShieldCheck, Sparkles, Square, SquareArrowOutUpRight, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserMinus, UserRound, X, Zap,
 } from "lucide";
 import { mountCaffeinateForm } from "./caffeinate-form";
@@ -30,9 +30,9 @@ const updateToolOrder = mountTools();
 function renderIcons(): void {
   createIcons({
     icons: {
-      Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronDown, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
-      Cpu, Database, ExternalLink, EyeOff, Globe, Hand, Hash, Hourglass, Infinity: InfinityIcon, Info, Laptop, LaptopMinimal, LayoutGrid, Link, List, LockKeyhole, LockKeyholeOpen,
-      Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, Moon, MousePointer2, Pencil, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server,
+      Activity, AppWindow, ArrowLeft, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronDown, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
+      Cpu, Database, ExternalLink, EyeOff, Globe, Hand, Hash, Hourglass, Infinity: InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LockKeyhole, LockKeyholeOpen,
+      Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, Moon, MousePointer2, Network, Pencil, Play, PlugZap, Plus, Power, RefreshCw, Rocket, RotateCcw, ScrollText, Search, Server,
       Settings, Shield, ShieldCheck, Sparkles, Square, SquareArrowOutUpRight, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserMinus, UserRound, X, Zap,
     },
     attrs: { "aria-hidden": "true", "stroke-width": 1.75 },
@@ -306,6 +306,10 @@ const devices = mountDevices({
     feedback.devices = errorMessage(error, "remoteChangeFailed");
     renderFeedback();
   },
+  notify(message) {
+    feedback.devices = message;
+    renderFeedback();
+  },
 });
 
 function renderFeedback(): void {
@@ -347,7 +351,7 @@ function renderFeedback(): void {
     const titleText = translate(title);
     const canOpenAccessibility = !unsupported && lines.some(({ message }) =>
       message === "permissionRequired" || message === "accessibilityRequestFailed");
-    const informational = lines.every(({ message }) => message === "saved");
+    const informational = lines.every(({ message }) => message === "saved" || message === "forgetRemoveThere");
     if (!canOpenAccessibility && document.activeElement === noticeAccessibility) view.querySelector("h1")?.focus();
     noticeAccessibility.toggleAttribute("hidden", !canOpenAccessibility);
     setAttribute(noticeRegion, "data-tone", informational ? "info" : "error");

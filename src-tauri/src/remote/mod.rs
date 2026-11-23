@@ -7,6 +7,7 @@ pub mod access;
 pub mod authorized_keys;
 pub mod controlled;
 pub mod destination;
+pub mod discovery;
 pub mod helper;
 pub mod identity;
 pub mod known_hosts;

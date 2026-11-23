@@ -103,6 +103,7 @@ pub enum Request {
     GetProxyLog,
     GetDevices,
     GetRemoteLog,
+    DiscoverDevices,
     DetectProxyApps,
     ListCaffeinateProcesses,
     CheckForUpdate,
@@ -193,6 +194,7 @@ impl Request {
             }
             Self::GetDevices
             | Self::GetRemoteLog
+            | Self::DiscoverDevices
             | Self::SetPeerPermissions { .. }
             | Self::RemovePeer { .. }
             | Self::OpenPairing { .. }
@@ -228,6 +230,7 @@ impl Request {
             | Self::GetProxyLog
             | Self::GetDevices
             | Self::GetRemoteLog
+            | Self::DiscoverDevices
             | Self::DetectProxyApps
             | Self::ListCaffeinateProcesses => true,
             Self::CheckForUpdate
@@ -427,6 +430,16 @@ async fn run(
                 .await
                 .map_err(|_| "sharingSettingsFailed")?
                 .map(|()| Value::Null);
+            #[cfg(not(unix))]
+            Err("unsupported")
+        }
+        Request::DiscoverDevices => {
+            #[cfg(unix)]
+            return json(
+                tauri::async_runtime::spawn_blocking(crate::remote::discovery::discover)
+                    .await
+                    .map_err(|_| "workerUnavailable")??,
+            );
             #[cfg(not(unix))]
             Err("unsupported")
         }

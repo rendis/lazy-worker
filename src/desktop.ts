@@ -145,6 +145,8 @@ export type RemoteAccess = {
 export type PairingState = { open: boolean; expires: number | null; attemptsLeft: number };
 /** What this device shows while it waits for another one to pair. `account` is the name the other device types. */
 export type OpenedPairing = { code: string; account: string; expires: number };
+/** A device that announced an SSH server on this network. */
+export type DiscoveredDevice = { name: string; host: string; port: number };
 export type PairingPermissions = Pick<Controller["permissions"], "control" | "applications" | "actions">;
 export type DevicesOverview = {
   thisDevice: {
@@ -153,6 +155,8 @@ export type DevicesOverview = {
     kind: DeviceKind;
     remoteAccess: RemoteAccess;
     pairing: PairingState;
+    /** The user name on this device, as a first guess for the account on another one. */
+    account: string | null;
     controllers: Controller[];
     /** Whether this device can receive requests, and an error code when it cannot. */
     socket: { listening: boolean; error: string | null };
@@ -333,6 +337,21 @@ function updatePreviewCaffeinateSession(settings: CaffeinateSettings): void {
 /** The controllers and the log of a preview. A change lasts until the page reloads. */
 let previewControllers: Controller[] | undefined;
 const previewPairing: PairingState = { open: false, expires: null, attemptsLeft: 0 };
+/** A preview shows a device pairing with this one with `?pair-in`, six seconds after the window opens. */
+let previewPairingOpened = 0;
+/** The window ends by itself, as on the device. */
+function settlePreviewPairing(now: number): void {
+  if (!previewPairing.open) return;
+  if (previewQuery.has("pair-in") && now - previewPairingOpened >= 6) {
+    previewControllerList().push({
+      id: "mini", name: "Mac mini de la sala", kind: "desktop", lastAccess: null, connected: false,
+      permissions: { control: true, applications: false, actions: false, shell: false },
+    });
+    Object.assign(previewPairing, { open: false, expires: null, attemptsLeft: 0 });
+  } else if (previewPairing.expires !== null && previewPairing.expires <= now) {
+    Object.assign(previewPairing, { open: false, expires: null, attemptsLeft: 0 });
+  }
+}
 /** Devices that a preview paired with, so the list shows them. */
 const previewDeviceAdditions: RemoteDevice[] = [];
 let previewLog: RemoteLogEntry[] | undefined;
@@ -391,6 +410,7 @@ if (previewQuery.has("macos")) previewAccess.macosMajor = Number(previewQuery.ge
 /** The sample list a preview shows, so the whole Devices view can be checked. Times follow the clock. */
 function previewDevices(): DevicesOverview {
   const now = Math.floor(Date.now() / 1000);
+  settlePreviewPairing(now);
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   tomorrow.setHours(2, 0, 0, 0);
@@ -406,6 +426,7 @@ function previewDevices(): DevicesOverview {
   return {
     thisDevice: {
       name: "MacBook Pro", kind: "laptop", remoteAccess: { ...previewAccess }, pairing: { ...previewPairing },
+      account: "reynaldo",
       controllers: previewControllerList().map(controller => ({
         ...controller, permissions: { ...controller.permissions },
       })),
@@ -597,12 +618,22 @@ export const desktop = {
     if (!controller) throw "notPaired";
     controller.permissions = { ...controller.permissions, ...permissions };
   },
+  /** The devices on this network that announce an SSH server, other than this one. */
+  async discoverDevices(): Promise<DiscoveredDevice[]> {
+    if (native) return call("discoverDevices");
+    await new Promise(resolve => setTimeout(resolve, 1400));
+    return [
+      { name: "iMac del estudio", host: "imac-del-estudio.local", port: 22 },
+      { name: "Mac mini de la sala", host: "mac-mini-de-la-sala.local", port: 22 },
+    ];
+  },
   /** Opens a window of ten minutes and returns the code to show. The permissions are those this device grants. */
   async openPairing(permissions: PairingPermissions): Promise<OpenedPairing> {
     if (native) return call("openPairing", { ...permissions });
     const expires = Math.floor(Date.now() / 1000) + 600;
+    previewPairingOpened = Math.floor(Date.now() / 1000);
     Object.assign(previewPairing, { open: true, expires, attemptsLeft: 3 });
-    return { code: "482915", account: "reynaldo", expires };
+    return { code: "482913", account: "reynaldo", expires };
   },
   async closePairing(): Promise<void> {
     if (native) return call("closePairing");
@@ -613,7 +644,8 @@ export const desktop = {
     if (native) return call("pairDevice", { user, host, port, code });
     await new Promise(resolve => setTimeout(resolve, 900));
     if (!/^\d{6}$/.test(code)) throw "pairingCodeInvalid";
-    if (code === "000000") throw "wrongCode";
+    // A preview takes one code, so a wrong one can be tried too.
+    if (code !== "123456") throw "wrongCode";
     const device: RemoteDevice = {
       id: Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join(""),
       name: host, kind: "desktop", user, host, port: port ?? 22, added: Math.floor(Date.now() / 1000), online: true,
