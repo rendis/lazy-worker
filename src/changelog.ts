@@ -10,6 +10,14 @@ export type Release = { version: string; date: string; changes: readonly Change[
 
 export const releases: readonly Release[] = [
   {
+    version: "0.6.2",
+    date: "2026-11-23",
+    changes: [
+      { en: "The installer shows Miga and where to drag the app.",
+        es: "El instalador muestra a Miga y adónde arrastrar la app." },
+    ],
+  },
+  {
     version: "0.6.1",
     date: "2026-11-23",
     changes: [
