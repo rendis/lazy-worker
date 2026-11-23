@@ -37,7 +37,7 @@
 - Put `data-tip` on a wrapper when a disabled button must say why it is off. Use an icon button with a tip for a secondary row action.
 - Give each built-in proxy tool an `app` and a `code` command. List App first and use it as the default. Find a desktop app by its bundle identifier.
 - Keep the proxy request log in memory with a fixed size. Drop the oldest entry first and clear the log when the server stops.
-- Show a live list, such as the proxy requests, in a `.log-overlay` window over the view, so the layout under it does not move.
+- Show a live list, such as the proxy requests, in a `.log-overlay` window over the view, so the layout under it does not move. Keep the overlay row at the overlay's own height, so a long list scrolls inside the window and never makes the panel scroll.
 - Show at most three entries of a list inside a row. Put the rest behind a count that opens the full list in that window.
 - Filter a field as the user types when its value has a fixed alphabet, and show its error in the row's own note.
 - Center the macOS window buttons in the 42 px title bar through `trafficLightPosition`. Its `y` plus the 16 px button height gives the height of the band that centers them.

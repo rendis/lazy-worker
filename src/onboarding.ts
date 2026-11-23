@@ -23,6 +23,7 @@ export function mountOnboarding({ translate, accessibility, openAccessibility, o
   const covered = () => [...workspace.children].filter(child => child !== root && !child.classList.contains("notification-stack"));
   const permission = root.querySelector<HTMLButtonElement>("#onboarding-permission")!;
   const permissionState = root.querySelector<HTMLElement>("#onboarding-permission-state")!;
+  const guide = root.querySelector<HTMLElement>("#onboarding-permission-guide")!;
   const clips = [...root.querySelectorAll<HTMLVideoElement>("[data-tool-clip]")];
   let index = 0;
   let watch: number | undefined;
@@ -34,9 +35,20 @@ export function mountOnboarding({ translate, accessibility, openAccessibility, o
     clip.poster = media.poster;
   }
 
+  function missingPermission(): boolean {
+    const state = accessibility();
+    return state === "required" || state === "unavailable";
+  }
+
+  function setGuide(open: boolean): void {
+    guide.toggleAttribute("data-open", open);
+    guide.inert = !open;
+  }
+
   /** Follows what the app learns while the setup is open, such as a granted permission. */
   function sync(): void {
     const state = accessibility();
+    if (!missingPermission()) setGuide(false);
     permissionState.textContent = translate(state === "granted" ? "accessibilityGranted"
       : state === "unsupported" ? "onboardingPermissionPreview" : "onboardingPermissionMissing");
     permissionState.toggleAttribute("data-granted", state === "granted");
@@ -108,7 +120,16 @@ export function mountOnboarding({ translate, accessibility, openAccessibility, o
   }
 
   for (const mirror of mirrors) {
-    if (mirror.dataset.mirrorWhen !== "leave") mirror.addEventListener("change", () => push(mirror));
+    if (mirror.dataset.mirrorWhen === "leave") continue;
+    mirror.addEventListener("change", () => {
+      // Without the permission the option cannot turn on. The guide says why and shows what to do.
+      if (mirror.dataset.mirror === "hide-while-sharing" && mirror.checked && missingPermission()) {
+        mirror.checked = false;
+        setGuide(true);
+        return;
+      }
+      push(mirror);
+    });
   }
   back.addEventListener("click", () => show(index - 1));
   next.addEventListener("click", () => {
@@ -117,7 +138,10 @@ export function mountOnboarding({ translate, accessibility, openAccessibility, o
     else show(index + 1);
   });
   skip.addEventListener("click", close);
-  permission.addEventListener("click", openAccessibility);
+  permission.addEventListener("click", () => {
+    setGuide(true);
+    openAccessibility();
+  });
 
   return {
     render,

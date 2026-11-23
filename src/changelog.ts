@@ -10,6 +10,18 @@ export type Release = { version: string; date: string; changes: readonly Change[
 
 export const releases: readonly Release[] = [
   {
+    version: "0.6.1",
+    date: "2026-11-23",
+    changes: [
+      { en: "The setup guide opens at once, with no other view before it, and its buttons stay in place.",
+        es: "La guía de configuración se abre al instante, sin otra vista antes, y sus botones no se mueven." },
+      { en: "The setup guide shows how to grant the Accessibility permission.",
+        es: "La guía de configuración muestra cómo conceder el permiso de Accesibilidad." },
+      { en: "What’s new opens in the center and no longer makes the panel scroll.",
+        es: "Novedades se abre en el centro y ya no hace que el panel se desplace." },
+    ],
+  },
+  {
     version: "0.6.0",
     date: "2026-11-23",
     changes: [

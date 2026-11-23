@@ -332,7 +332,8 @@ export const desktop = {
     if (native) return invoke("launch_proxy_app", { id });
   },
   async getActivityAccessibility(): Promise<ActivityAccessibility> {
-    return native ? invoke("get_activity_accessibility") : "unsupported";
+    // A preview shows a missing permission with `?accessibility=required`.
+    return native ? invoke("get_activity_accessibility") : (previewQuery.get("accessibility") as ActivityAccessibility | null) ?? "unsupported";
   },
   async requestActivityAccessibility(): Promise<void> {
     if (native) return invoke("request_activity_accessibility");

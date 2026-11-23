@@ -2,7 +2,7 @@ import "./style.css";
 import {
   Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
   Cpu, createIcons, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Infinity as InfinityIcon, Info, Laptop, LaptopMinimal, LayoutGrid, Link, LockKeyhole,
-  Maximize2, MessageSquare, Monitor, Moon, Pencil, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
+  Maximize2, Megaphone, MessageSquare, Monitor, Moon, MousePointer2, Pencil, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
   Shield, Sparkles, Square, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserRound, X, Zap,
 } from "lucide";
 import { mountCaffeinateForm } from "./caffeinate-form";
@@ -31,7 +31,7 @@ function renderIcons(): void {
     icons: {
       Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
       Cpu, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Infinity: InfinityIcon, Info, Laptop, LaptopMinimal, LayoutGrid, Link, LockKeyhole,
-      Maximize2, MessageSquare, Monitor, Moon, Pencil, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server,
+      Maximize2, Megaphone, MessageSquare, Monitor, Moon, MousePointer2, Pencil, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server,
       Settings, Shield, Sparkles, Square, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserRound, X, Zap,
     },
     attrs: { "aria-hidden": "true", "stroke-width": 1.75 },
@@ -204,7 +204,7 @@ const onboarding = mountOnboarding({
 const lidModes = element("caffeinate-lid");
 const lidChoices = [...lidModes.querySelectorAll<HTMLInputElement>("input")];
 const lidCollapse = element("caffeinate-lid-collapse");
-const lidNote = element("caffeinate-lid-note");
+const lidNote = element("lid-note");
 const lidNotes: Record<Exclude<LidMode, "sleep">, Message> = { charger: "caffeinateLidChargerNote", always: "caffeinateLidAlwaysNote" };
 let lidStatus: LidStatus | undefined;
 let lidPending: LidMode | undefined;
@@ -219,7 +219,7 @@ function renderLid(): void {
   lidModes.dataset.selection = shown;
   // The note keeps its last text while it closes.
   if (shown !== "sleep") setText(lidNote, translate(lidStatus?.external && !lidPending ? "caffeinateLidExternalNote" : lidNotes[shown]));
-  element("caffeinate-lid-note-box").toggleAttribute("data-warning", shown === "always");
+  element("lid-note-box").toggleAttribute("data-warning", shown === "always");
   lidCollapse.toggleAttribute("data-open", shown !== "sleep");
   lidCollapse.inert = shown === "sleep";
 }

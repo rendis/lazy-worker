@@ -1379,7 +1379,10 @@ h1:focus { outline: none; }
   z-index: 4;
   inset: 0 0 0 180px;
   display: grid;
+  /* One row of the overlay's own height. A row sized by its content would grow past the panel with a long list. */
+  grid-template-rows: minmax(0, 1fr);
   place-items: center;
+  overflow: hidden;
   padding: 22px var(--content-inset);
   background: rgba(10, 18, 26, .32);
   opacity: 0;
@@ -1624,9 +1627,10 @@ h1:focus { outline: none; }
   animation: view-enter .24s ease-out;
 }
 .onboarding[hidden] { display: none; }
-.onboarding-card { display: grid; grid-template-rows: auto 1fr auto; width: min(620px, 100%); height: min(520px, 100%); }
-.onboarding-mark { margin-bottom: 18px; border-radius: 12px; }
-.onboarding-steps { min-height: 0; }
+/* A column with the footer pinned to the bottom, so the buttons stay in place on every step. */
+.onboarding-card { display: flex; flex-direction: column; width: min(620px, 100%); height: min(520px, 100%); }
+.onboarding-mark { flex: none; align-self: flex-start; margin-bottom: 18px; border-radius: 12px; }
+.onboarding-steps { flex: 1; min-height: 0; }
 .onboarding-step:not([hidden]) { animation: onboarding-forward .26s var(--selection-easing); }
 .onboarding[data-direction="back"] .onboarding-step:not([hidden]) { animation-name: onboarding-back; }
 @keyframes onboarding-forward {
@@ -1646,7 +1650,7 @@ h1:focus { outline: none; }
 .onboarding .setting-row .segments button { gap: 5px; }
 .onboarding .setting-row .segments .lucide { width: 15px; height: 15px; }
 .onboarding-option { display: grid; gap: 2px; min-width: 0; }
-.onboarding-footer { display: flex; align-items: center; gap: 12px; padding-top: 18px; }
+.onboarding-footer { display: flex; flex: none; align-items: center; gap: 12px; padding-top: 18px; }
 .onboarding-progress { display: flex; gap: 6px; margin-inline-end: auto; }
 .onboarding-progress span {
   width: 7px;
@@ -1715,7 +1719,7 @@ h1:focus { outline: none; }
 .caffeinate-lid-modes[data-selection="always"] { --segment-position: 2; }
 .caffeinate-lid .setting-row { border-bottom: 0; }
 .caffeinate-lid { padding-bottom: 10px; border-bottom: 1px solid var(--hairline); }
-.caffeinate-lid-note {
+.choice-note {
   display: flex;
   align-items: center;
   gap: 9px;
@@ -1725,7 +1729,7 @@ h1:focus { outline: none; }
   border-radius: 9px;
   transition: background-color .2s ease, border-color .2s ease, color .2s ease;
 }
-.caffeinate-lid-note .lucide {
+.choice-note .lucide {
   flex: none;
   width: 0;
   height: 18px;
@@ -1734,15 +1738,92 @@ h1:focus { outline: none; }
   opacity: 0;
   transition: width .2s ease, margin .2s ease, opacity .2s ease;
 }
-.caffeinate-lid-note[data-warning] {
+.choice-note[data-warning] {
   border-color: var(--warning-border);
   background: var(--warning-panel);
   color: var(--text);
   font-weight: 680;
 }
-.caffeinate-lid-note[data-warning] .lucide { width: 18px; margin-inline-end: 0; opacity: 1; }
+.choice-note[data-warning] .lucide { width: 18px; margin-inline-end: 0; opacity: 1; }
 .caffeinate-lid .setting-label { white-space: nowrap; }
 
 /* The panel fades in once the app knows its language and whether the setup guide opens. */
 .workspace { transition: opacity .22s ease; }
 .workspace[data-booting] { opacity: 0; pointer-events: none; transition: none; }
+
+/* A small moving picture of the macOS Accessibility list: the pointer turns Lazy Worker on. */
+.permission-guide-note { align-items: center; gap: 14px; margin-top: 10px; margin-inline-start: 0; font-weight: 620; }
+.permission-guide-note > .lucide { display: none; }
+.permission-demo {
+  position: relative;
+  display: grid;
+  flex: none;
+  gap: 5px;
+  width: 190px;
+  padding: 8px 10px 9px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 11px;
+}
+.permission-demo-title { color: var(--secondary); font-size: 10px; font-weight: 700; letter-spacing: .02em; }
+.permission-demo-row { display: flex; align-items: center; gap: 6px; height: 20px; }
+.permission-demo-row img { border-radius: 4px; }
+.permission-demo-row strong { font-weight: 700; }
+.permission-demo-icon { width: 16px; height: 16px; border-radius: 4px; background: var(--track); }
+.permission-demo-line { width: 62px; height: 6px; border-radius: 3px; background: var(--track); }
+.permission-demo-switch {
+  position: relative;
+  width: 26px;
+  height: 15px;
+  margin-inline-start: auto;
+  border-radius: 8px;
+  background: var(--track);
+}
+.permission-demo-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .3);
+}
+.permission-demo-switch[data-target] { animation: permission-track 3.6s ease infinite; }
+.permission-demo-switch[data-target]::after { animation: permission-knob 3.6s ease infinite; }
+.permission-demo > .lucide {
+  position: absolute;
+  right: 12px;
+  bottom: 2px;
+  width: 15px;
+  height: 15px;
+  color: var(--text);
+  fill: var(--panel);
+  animation: permission-pointer 3.6s ease infinite;
+}
+@keyframes permission-pointer {
+  0%, 8% { transform: translate(-96px, 16px); opacity: 0; }
+  16% { opacity: 1; }
+  40%, 46% { transform: translate(0, 0) scale(1); opacity: 1; }
+  50% { transform: translate(0, 0) scale(.82); }
+  56%, 88% { transform: translate(0, 0) scale(1); opacity: 1; }
+  100% { transform: translate(0, 0); opacity: 0; }
+}
+@keyframes permission-track {
+  0%, 50% { background: var(--track); }
+  60%, 92% { background: var(--online); }
+  100% { background: var(--track); }
+}
+@keyframes permission-knob {
+  0%, 50% { transform: translateX(0); }
+  60%, 92% { transform: translateX(11px); }
+  100% { transform: translateX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .permission-demo-switch[data-target], .permission-demo-switch[data-target]::after, .permission-demo > .lucide { animation: none; }
+  .permission-demo-switch[data-target] { background: var(--online); }
+  .permission-demo-switch[data-target]::after { transform: translateX(11px); }
+}

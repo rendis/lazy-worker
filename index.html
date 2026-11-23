@@ -242,7 +242,7 @@
                 </div>
                 <div class="collapse" id="caffeinate-lid-collapse" inert>
                   <div>
-                    <p class="setting-note caffeinate-lid-note" id="caffeinate-lid-note-box" role="status"><i data-lucide="triangle-alert" aria-hidden="true"></i><span id="caffeinate-lid-note"></span></p>
+                    <p class="setting-note choice-note" id="lid-note-box" role="status"><i data-lucide="triangle-alert" aria-hidden="true"></i><span id="lid-note"></span></p>
                   </div>
                 </div>
               </section>
@@ -552,6 +552,19 @@
                 </span>
                 <span class="switch"><input type="checkbox" role="switch" data-mirror="hide-while-sharing" /><span aria-hidden="true"></span></span>
               </label>
+              <div class="collapse" id="onboarding-permission-guide" inert>
+                <div>
+                  <div class="setting-note choice-note permission-guide-note" data-warning role="status">
+                    <div class="permission-demo" aria-hidden="true">
+                      <span class="permission-demo-title" data-text="accessibility">Accessibility</span>
+                      <span class="permission-demo-row" data-other><span class="permission-demo-icon"></span><span class="permission-demo-line"></span><span class="permission-demo-switch"></span></span>
+                      <span class="permission-demo-row"><img src="/src/assets/logo.png" width="16" height="16" alt="" draggable="false" /><strong>Lazy Worker</strong><span class="permission-demo-switch" data-target></span></span>
+                      <i data-lucide="mouse-pointer-2"></i>
+                    </div>
+                    <span data-text="onboardingPermissionNeeded">This option needs the Accessibility permission. Select Open Accessibility, find Lazy Worker in the list, and turn it on.</span>
+                  </div>
+                </div>
+              </div>
               <p class="setting-note onboarding-later" data-text="onboardingLater">You can skip this step and grant the permission later in Settings.</p>
             </div>
             <div class="onboarding-step" data-step="tools" hidden>
@@ -628,7 +641,7 @@
       <div class="log-overlay" id="changelog-window" inert>
         <section class="log-window changelog-window" role="dialog" aria-labelledby="changelog-title">
           <header>
-            <i data-lucide="sparkles"></i>
+            <i data-lucide="megaphone"></i>
             <h2 id="changelog-title" data-text="whatsNew">What’s new</h2>
             <button type="button" class="icon-button" id="changelog-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
           </header>
