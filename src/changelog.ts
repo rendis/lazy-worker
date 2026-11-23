@@ -10,6 +10,14 @@ export type Release = { version: string; date: string; changes: readonly Change[
 
 export const releases: readonly Release[] = [
   {
+    version: "0.6.9",
+    date: "2026-11-23",
+    changes: [
+      { en: "Start selected and Stop selected sit beside the Tools title, so the cards stay still when you start or stop a tool.",
+        es: "Iniciar selección y Apagar selección están junto al título Herramientas, así las tarjetas no se mueven al iniciar o detener una herramienta." },
+    ],
+  },
+  {
     version: "0.6.8",
     date: "2026-11-23",
     changes: [
