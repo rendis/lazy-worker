@@ -26,6 +26,7 @@
 - Store a proxy command as a template where `{server}` stands for the server address. Store `null` for an unchanged built-in command. Save a command of the user's own exactly as written, and ask for the server address only when the command names it.
 - Ask before an action that cannot be undone, in the place where the user started it.
 - Treat proxy clients as apps to open, with no running state. Start selected opens the marked ones. Stop selected leaves them open.
+- Reach other devices only through `remote::ssh` with our own `-F` config, a validated `Destination`, and `--` before the host. Never pass user text as ssh options or as the remote command.
 - Run the proxy server on standard threads in `src-tauri/src/proxy/server.rs`. Admit only the local network when the allow list is empty. Refuse targets on the server's own machine.
 - Keep the built-in client commands equal in `src/proxy.ts` and `src-tauri/src/proxy/apps.rs`. Launch a client from its saved id, and check the server address before it enters a command.
 - Keep the element of a rendered list row and update it in place, so its switch, selector, and disclosure can animate. Rebuild a row only when its name, icon, or language changes. Open a new row and close a removed one over a short time, so the rows under it move instead of jumping.

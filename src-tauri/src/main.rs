@@ -7,6 +7,8 @@ mod dispatch;
 mod lid;
 mod preferences;
 mod proxy;
+#[cfg(unix)]
+mod remote;
 mod resume;
 
 #[cfg(target_os = "macos")]
