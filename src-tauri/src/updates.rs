@@ -1,14 +1,30 @@
-use std::{sync::Mutex, thread, time::Duration};
+use std::{
+    sync::Mutex,
+    thread,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+use serde::Serialize;
 
 use tauri::{async_runtime, AppHandle, Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
-const CHECK_INTERVAL: Duration = Duration::from_secs(4 * 60 * 60);
+const CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
+// A failed check, such as one made while offline, is repeated sooner.
+const RETRY_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Default)]
 struct Updates {
     available: Option<Update>,
     installing: bool,
+    /// Seconds since the Unix epoch of the last check that got an answer.
+    checked: Option<u64>,
+}
+
+#[derive(Serialize)]
+pub struct UpdateStatus {
+    version: Option<String>,
+    checked: Option<u64>,
 }
 
 pub fn start(app: &AppHandle) {
@@ -27,10 +43,11 @@ pub fn start(app: &AppHandle) {
 
     let app = app.clone();
     thread::spawn(move || loop {
-        if async_runtime::block_on(check(&app)).is_err() {
+        let checked = async_runtime::block_on(check(&app)).is_ok();
+        if !checked {
             eprintln!("Could not check for an update");
         }
-        thread::sleep(CHECK_INTERVAL);
+        thread::sleep(if checked { CHECK_INTERVAL } else { RETRY_INTERVAL });
     });
 }
 
@@ -47,6 +64,10 @@ async fn check(app: &AppHandle) -> tauri_plugin_updater::Result<()> {
         if state.installing {
             return Ok(());
         }
+        state.checked = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .ok()
+            .map(|time| time.as_secs());
         let changed = state.available.as_ref().map(|update| &update.version)
             != available.as_ref().map(|update| &update.version);
         state.available = available;
@@ -66,10 +87,22 @@ pub fn has_update(app: &AppHandle) -> bool {
 }
 
 #[tauri::command]
-pub fn get_available_update(app: AppHandle) -> Option<String> {
-    let state = app.try_state::<Mutex<Updates>>()?;
-    let state = state.lock().ok()?;
-    Some(state.available.as_ref()?.version.clone())
+pub fn get_update_status(app: AppHandle) -> UpdateStatus {
+    let state = app.try_state::<Mutex<Updates>>();
+    let state = state.as_ref().and_then(|state| state.lock().ok());
+    UpdateStatus {
+        version: state
+            .as_ref()
+            .and_then(|state| state.available.as_ref())
+            .map(|update| update.version.clone()),
+        checked: state.as_ref().and_then(|state| state.checked),
+    }
+}
+
+#[tauri::command]
+pub async fn check_for_update(app: AppHandle) -> Result<UpdateStatus, &'static str> {
+    check(&app).await.map_err(|_| "updateCheckFailed")?;
+    Ok(get_update_status(app))
 }
 
 #[tauri::command]

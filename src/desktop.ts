@@ -42,6 +42,8 @@ export type ProxyLogEntry = {
   target: string;
   outcome: "ok" | "denied" | "blocked" | "unreachable" | "invalid";
 };
+/** `checked` is the time of the last check that got an answer, in seconds since the Unix epoch. */
+export type UpdateStatus = { version: string | null; checked: number | null };
 export type ProxyInstalls = { claudeCode: boolean; claudeApp: boolean; codexCode: boolean; codexApp: boolean };
 export type Preferences = {
   language: Language | "system";
@@ -106,6 +108,7 @@ type PreviewSession = {
   caffeinate?: CaffeinateSettings;
 };
 const native = isTauri();
+let previewUpdate: UpdateStatus = { version: null, checked: null };
 const macApp = native && navigator.userAgent.includes("Macintosh");
 const previewKey = "lazy-worker-preview-preferences";
 const previewSessions = new Map<ToolId, PreviewSession>();
@@ -222,6 +225,7 @@ function updatePreviewCaffeinateSession(settings: CaffeinateSettings): void {
 export const desktop = {
   macApp,
   showWindowTitlebar: !native || macApp,
+  showUpdateCheck: !native || macApp,
   showPresentationPrivacy: !native || macApp,
   async getVersion(): Promise<string> {
     return native ? getVersion() : previewVersion;
@@ -321,8 +325,14 @@ export const desktop = {
   async requestActivityAccessibility(): Promise<void> {
     if (native) return invoke("request_activity_accessibility");
   },
-  async getAvailableUpdate(): Promise<string | null> {
-    return macApp ? invoke("get_available_update") : null;
+  async getUpdateStatus(): Promise<UpdateStatus> {
+    return macApp ? invoke("get_update_status") : previewUpdate;
+  },
+  async checkForUpdate(): Promise<UpdateStatus> {
+    if (macApp) return invoke("check_for_update");
+    await new Promise(resolve => setTimeout(resolve, 700));
+    previewUpdate = { version: null, checked: Math.floor(Date.now() / 1000) };
+    return previewUpdate;
   },
   async onAvailableUpdate(refresh: () => void): Promise<void> {
     if (macApp) await listen("available-update-changed", refresh);

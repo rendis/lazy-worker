@@ -344,7 +344,9 @@ fn main() {
             #[cfg(target_os = "macos")]
             login_launch::set_login_launch,
             #[cfg(target_os = "macos")]
-            updates::get_available_update,
+            updates::get_update_status,
+            #[cfg(target_os = "macos")]
+            updates::check_for_update,
             #[cfg(target_os = "macos")]
             updates::restart_to_update
         ])

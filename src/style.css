@@ -854,11 +854,18 @@ h1:focus { outline: none; }
 .settings-update .accessibility-button { margin-top: 6px; }
 .settings-version {
   grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   color: var(--secondary);
   font-size: 12px;
-  text-align: end;
   transition: color var(--theme-ink-motion, 0s);
 }
+.settings-version p { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-version .text-link { font-size: 12px; transition: opacity .16s ease; }
+.settings-version .text-link[aria-disabled="true"] { opacity: .5; cursor: default; }
+#update-check-status:not(:empty)::before { content: " · "; }
 .permissions-heading { display: flex; align-items: center; gap: 9px; }
 .permissions-heading h2 { font-size: 14px; font-weight: 700; }
 #accessibility-status {

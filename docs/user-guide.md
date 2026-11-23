@@ -87,4 +87,4 @@ If Activity still reports a permission error while Lazy Worker is enabled, selec
 
 ## Updates
 
-Lazy Worker checks GitHub Releases at launch and every four hours. A new version appears in the menu and in the panel. Choose **Later** to keep working and find the update again in Settings. **Restart to update** downloads and verifies the package, then replaces and restarts Lazy Worker. Restarting ends active sessions.
+Lazy Worker checks GitHub Releases at launch and every hour. It also checks when you open the panel and the last check is older than 15 minutes. After a check that fails, for example with no network, it tries again in five minutes. **Settings** shows the time of the last check beside the version, and **Check for updates** checks at once. A new version appears in the menu and in the panel. Choose **Later** to keep working and find the update again in Settings. **Restart to update** downloads and verifies the package, then replaces and restarts Lazy Worker. Restarting ends active sessions.

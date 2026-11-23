@@ -442,9 +442,12 @@
               <p id="settings-update-description" class="notice-description"></p>
               <button class="accessibility-button" id="settings-update-restart" type="button" data-text="restartToUpdate" aria-describedby="settings-update-description">Restart to update</button>
             </section>
-            <p class="settings-version" id="settings-version" hidden>
-              <span data-text="appVersion">Version</span> <span id="app-version"></span>
-            </p>
+            <div class="settings-version" id="settings-version" hidden>
+              <p>
+                <span data-text="appVersion">Version</span> <span id="app-version"></span><span id="update-check-status" role="status"></span>
+              </p>
+              <button class="text-link" id="update-check" type="button" data-text="checkForUpdates" hidden>Check for updates</button>
+            </div>
           </div>
         </div>
       </main>
