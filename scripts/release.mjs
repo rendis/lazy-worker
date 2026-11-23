@@ -111,7 +111,11 @@ if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
   fail("give a version such as 0.5.0, or use --dry-run to rehearse the current version.");
 }
 if (!dryRun && !summary) fail('give one line for the update notice: --summary "What changed".');
-if (!dryRun && compareVersions(version, current) <= 0) fail(`${version} is not newer than ${current}.`);
+// A release that stopped after its version commit continues from that commit when it runs again.
+const resuming = !dryRun && version === current
+  && run("git", ["log", "origin/main..HEAD", "--format=%s"], { quiet: true }).split("\n").includes(`chore: release ${version}`)
+  && !run("git", ["tag", "--list", `v${version}`], { quiet: true });
+if (!dryRun && !resuming && compareVersions(version, current) <= 0) fail(`${version} is not newer than ${current}.`);
 if (dryRun && version !== current) fail("a dry run rehearses the current version, so give no other version.");
 
 const localFile = path.join(root, ".release.local.json");
@@ -210,7 +214,10 @@ run("cargo", ["test", "--quiet", "--manifest-path", "src-tauri/Cargo.toml"], { e
 
 // ---------------------------------------------------------------------------------------------- version
 
-if (!dryRun) {
+if (resuming) {
+  step(`Continue the release of ${version}`);
+  console.log("The version commit of an earlier run is here and is not on GitHub yet. This run goes on from it.");
+} else if (!dryRun) {
   step(`Set the version to ${version}`);
   for (const [file, text, count] of versionFiles) {
     const content = read(file);
@@ -296,7 +303,12 @@ for (const { arch, platform } of targets) {
   const intact = run("codesign", ["--verify", "--deep", "--strict", copy], { quiet: true, allowFailure: true }) !== undefined
     && run("xcrun", ["stapler", "validate", "-q", copy], { quiet: true, allowFailure: true }) !== undefined
     && fs.existsSync(path.join(mounted, ".background.tiff"));
-  run("hdiutil", ["detach", "-quiet", mounted], { quiet: true });
+  // Spotlight or a security scan can hold a new volume for a moment, so the eject is tried again before it is forced.
+  const ejected = [1, 2, 3, 4, 5].some(attempt => {
+    if (attempt > 1) run("sleep", ["2"]);
+    return run("hdiutil", ["detach", "-quiet", mounted], { quiet: true, allowFailure: true }) !== undefined;
+  });
+  if (!ejected) run("hdiutil", ["detach", "-quiet", "-force", mounted], { quiet: true });
   if (!intact) fail(`the ${arch} disk image lost the app's signature, its notarization ticket, or its background.`);
   run("codesign", ["--sign", local.signingIdentity, "--timestamp", diskImage(arch)], { quiet: true });
   notarize(diskImage(arch), diskImage(arch), `the ${arch} disk image`);

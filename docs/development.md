@@ -64,6 +64,8 @@ Run it on a clean `main`. It does these steps in order and stops at the first on
 
 Review the draft and publish it. Installed copies see the update once the release is published.
 
+If the command stops after step 3, fix the cause and run it again with the same version. It continues from its version commit, which is not on GitHub until the last step.
+
 Use `npm run release -- --dry-run` to rehearse the current version. A dry run does steps 1, 2 and 4 to 7, and changes nothing in the repository or on GitHub.
 
 The command needs [uv](https://docs.astral.sh/uv/) on your `PATH`. Its `uvx` runs `dmgbuild`, the tool that builds the disk image, at the version the command pins.
