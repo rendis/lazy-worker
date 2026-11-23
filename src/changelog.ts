@@ -10,6 +10,14 @@ export type Release = { version: string; date: string; changes: readonly Change[
 
 export const releases: readonly Release[] = [
   {
+    version: "0.6.8",
+    date: "2026-11-23",
+    changes: [
+      { en: "The rows in Tools have more room at their edges.",
+        es: "Las filas de Herramientas tienen más espacio en sus bordes." },
+    ],
+  },
+  {
     version: "0.6.7",
     date: "2026-11-23",
     changes: [
