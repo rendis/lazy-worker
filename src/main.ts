@@ -1093,6 +1093,8 @@ async function initialize(): Promise<void> {
     if (news.length) changelog.open(news);
     else markVersionSeen();
   }
+  // The panel stays hidden until here, so a new installation never shows the tools before the setup guide.
+  delete element("onboarding").closest<HTMLElement>(".workspace")!.dataset.booting;
   void updates.start();
   await refreshStatus();
   refreshPermissions();

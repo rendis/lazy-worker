@@ -1742,3 +1742,7 @@ h1:focus { outline: none; }
 }
 .caffeinate-lid-note[data-warning] .lucide { width: 18px; margin-inline-end: 0; opacity: 1; }
 .caffeinate-lid .setting-label { white-space: nowrap; }
+
+/* The panel fades in once the app knows its language and whether the setup guide opens. */
+.workspace { transition: opacity .22s ease; }
+.workspace[data-booting] { opacity: 0; pointer-events: none; transition: none; }

@@ -64,6 +64,7 @@
 - Set `APPLE_SIGNING_IDENTITY` to the Developer ID Application identity for release builds. Verify the app and its Activity helper against that certificate in both architecture bundles.
 - Run every update check through `check` in `src-tauri/src/updates.rs`, so the time of the last check in Settings stays true. A release needs a few minutes to reach the update address, so keep the automatic checks frequent.
 - Add the changes of a release to `src/changelog.ts` before the release, in English and Spanish, for a user who is not technical. Give a change that adds a tool its `tool`. The release command stops without that entry.
+- Keep the panel hidden through `data-booting` on `.workspace` until the app has loaded its preferences and chosen its first view, so no view shows for an instant before another one.
 - Show the setup guide on a new installation only, which is a launch without saved preferences. Record the version the user has seen in `seenVersion` when the guide or What’s new closes.
 - Build each setup guide control on the control of the same setting in Settings: the same `data-` attribute, or `data-mirror` with the id of that control. Give `data-mirror-when="leave"` to a control that changes the system, so it applies when the user leaves its step.
 - Record the running tools through `resume::remember` before an update restarts the app, and start them from `resume::take` at launch in place of startup Quick start. Leave proxy clients alone there, because they are still open.
