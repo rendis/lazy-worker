@@ -755,6 +755,12 @@ h1:focus { outline: none; }
 .caffeinate-process-list li span:last-child { flex: none; color: var(--secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
 .caffeinate-option { grid-template-columns: 20px minmax(0, 1fr) auto auto; cursor: pointer; }
 .caffeinate-option code { color: var(--secondary); font-size: 12px; }
+.option-name { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.option-info { flex: none; border-radius: 50%; color: var(--secondary); cursor: help; transition: color .16s ease; }
+.option-info:is(:hover, :focus-visible) { color: var(--text); }
+.option-info .lucide { width: 15px; height: 15px; }
+/* The tip opens to the right, because the icon sits near the left edge of the view. */
+.option-info[data-tip]::after { right: auto; left: -4px; }
 .command-preview { margin: 14px 2px 0; }
 .command-preview summary {
   display: inline-flex;

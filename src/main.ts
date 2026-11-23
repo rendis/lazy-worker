@@ -63,6 +63,9 @@ const languageButtons = document.querySelectorAll<HTMLButtonElement>("[data-lang
 const themeButtons = document.querySelectorAll<HTMLButtonElement>("[data-theme-choice]");
 const translated = document.querySelectorAll<HTMLElement>("[data-text]");
 const accessibleLabels = document.querySelectorAll<HTMLElement>("[data-label]");
+const translatedTips = document.querySelectorAll<HTMLElement>("[data-tip-text]");
+// A tip inside a label must not switch the option of that label.
+translatedTips.forEach(node => node.addEventListener("click", event => event.preventDefault()));
 const main = document.querySelector("main")!;
 const noticeRegion = element("notice-region");
 const noticeTitle = element("notice-title");
@@ -499,6 +502,11 @@ function renderPreferences(previous?: Preferences): void {
     document.documentElement.lang = language;
     translated.forEach(node => setText(node, translate(node.dataset.text as Message)));
     accessibleLabels.forEach(node => setAttribute(node, "aria-label", translate(node.dataset.label as Message)));
+    translatedTips.forEach(node => {
+      const tip = translate(node.dataset.tipText as Message);
+      setAttribute(node, "data-tip", tip);
+      setAttribute(node, "aria-label", tip);
+    });
     setAttribute(element("tool-navigation"), "aria-label", translate("tools"));
     activityPower.removeAttribute("aria-labelledby");
     setAttribute(activityPower, "aria-label", translate("activitySession"));
