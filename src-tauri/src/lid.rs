@@ -85,10 +85,16 @@ impl Lid {
         }
     }
 
+    /// True when this app turned the system switch on and must turn it off again.
+    pub fn managed(&self) -> bool {
+        self.managed
+    }
+
     /// Brings the system switch in line with the mode. Call it on every clock tick.
-    pub fn reconcile(&mut self, mode: LidMode, caffeinate_active: bool) {
+    /// Returns false when the switch had to change and macOS refused.
+    pub fn reconcile(&mut self, mode: LidMode, caffeinate_active: bool) -> bool {
         if !platform::SUPPORTED {
-            return;
+            return true;
         }
         if mode == LidMode::Charger && caffeinate_active {
             if self.ticks == 0 {
@@ -102,12 +108,20 @@ impl Lid {
         let wanted = wanted(mode, caffeinate_active, self.on_charger);
         if wanted && !self.managed {
             // A switch that is already on belongs to the user. Leave it as it is.
-            if !platform::sleep_disabled() && platform::set_sleep_disabled(true).is_ok() {
-                self.set_managed(true);
+            if platform::sleep_disabled() {
+                return true;
             }
-        } else if !wanted && self.managed && platform::set_sleep_disabled(false).is_ok() {
+            if platform::set_sleep_disabled(true).is_err() {
+                return false;
+            }
+            self.set_managed(true);
+        } else if !wanted && self.managed {
+            if platform::set_sleep_disabled(false).is_err() {
+                return false;
+            }
             self.set_managed(false);
         }
+        true
     }
 
     fn set_managed(&mut self, managed: bool) {
@@ -149,12 +163,10 @@ mod platform {
         output(PMSET, &["-g", "batt"]).is_some_and(|source| source.contains("AC Power"))
     }
 
+    /// True when the rule is installed.
+    /// `sudo -l` cannot answer this: it also succeeds for a command that still needs a password.
     pub fn authorized() -> bool {
-        output(
-            "/usr/bin/sudo",
-            &["-n", "-l", PMSET, "-a", "disablesleep", "1"],
-        )
-        .is_some()
+        std::path::Path::new(RULE).exists()
     }
 
     pub fn set_sleep_disabled(disabled: bool) -> Result<(), ()> {

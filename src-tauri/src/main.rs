@@ -79,10 +79,10 @@ impl Tools {
     }
 
     /// Applies the closed-lid choice to the system for the current Caffeinate state.
-    fn reconcile_lid(&mut self) {
+    fn reconcile_lid(&mut self) -> bool {
         let mode = self.activity.preferences().lid_awake;
         let active = self.caffeinate.status().mode != "off";
-        self.lid.reconcile(mode, active);
+        self.lid.reconcile(mode, active)
     }
 
     fn set_active(&mut self, tool: ToolId, active: bool) {
@@ -317,13 +317,12 @@ async fn set_lid_mode(
     controller: State<'_, Controller>,
     mode: lid::LidMode,
 ) -> Result<lid::Status, &'static str> {
-    let external = controller
-        .lock()
-        .map_err(|_| "workerUnavailable")?
-        .lid
-        .status()
-        .external;
-    if mode != lid::LidMode::Sleep || external {
+    // A choice of Sleep still changes the system when the switch is on, by the user or by this app.
+    let changes_system = {
+        let tools = controller.lock().map_err(|_| "workerUnavailable")?;
+        mode != lid::LidMode::Sleep || tools.lid.status().external || tools.lid.managed()
+    };
+    if changes_system {
         // The administrator prompt can stay open for a long time, so it runs without the lock.
         tauri::async_runtime::spawn_blocking(lid::Lid::authorize)
             .await
@@ -334,7 +333,9 @@ async fn set_lid_mode(
     preferences.lid_awake = mode;
     tools.activity.save_preferences(preferences)?;
     tools.lid.adopt();
-    tools.reconcile_lid();
+    if !tools.reconcile_lid() {
+        return Err("lidChangeFailed");
+    }
     Ok(tools.lid.status())
 }
 
