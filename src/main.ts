@@ -301,7 +301,7 @@ function renderFeedback(): void {
   const unsupported = accessibility === "unsupported";
   const permissionPending = desktop.macApp && accessibility === "required";
   settingsPreferences.toggleAttribute("data-permission-pending", permissionPending);
-  settingsPreferences.toggleAttribute("data-permission-granted", desktop.macApp && accessibility === "granted");
+  settingsPreferences.toggleAttribute("data-permission-granted", accessibility === "granted");
   settingsPermissionDot.hidden = !permissionPending;
   settingsPermissionState.hidden = !permissionPending;
   permissionFeatures.hidden = !permissionPending;

@@ -10,6 +10,18 @@ export type Release = { version: string; date: string; changes: readonly Change[
 
 export const releases: readonly Release[] = [
   {
+    version: "0.6.6",
+    date: "2026-11-23",
+    changes: [
+      { en: "Restart to update installs the latest version, so one restart is enough.",
+        es: "Reiniciar para actualizar instala la última versión, así basta un solo reinicio." },
+      { en: "Settings no longer scrolls over empty space.",
+        es: "Ajustes ya no se desplaza sobre un espacio vacío." },
+      { en: "A granted Accessibility permission shows in green.",
+        es: "El permiso de Accesibilidad concedido se muestra en verde." },
+    ],
+  },
+  {
     version: "0.6.5",
     date: "2026-11-23",
     changes: [
