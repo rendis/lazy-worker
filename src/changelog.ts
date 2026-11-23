@@ -10,6 +10,19 @@ export type Release = { version: string; date: string; changes: readonly Change[
 
 export const releases: readonly Release[] = [
   {
+    version: "0.6.3",
+    date: "2026-11-23",
+    changes: [
+      { en: "Lazy Worker opens in your theme at once, with its mark while it loads.",
+        es: "Lazy Worker se abre con tu tema desde el primer instante, con su marca mientras carga." },
+      { en: "Caffeinate shows its keep-awake options side by side, so the view needs no scroll.",
+        es: "Caffeinate muestra sus opciones para mantener despierto una junto a otra, sin tener que desplazarse." },
+      { en: "The setup guide highlights the button that opens Accessibility.",
+        es: "La guía de configuración resalta el botón que abre Accesibilidad." },
+      { en: "The AI group in Tools starts closed.", es: "El grupo IA en Herramientas empieza cerrado." },
+    ],
+  },
+  {
     version: "0.6.2",
     date: "2026-11-23",
     changes: [

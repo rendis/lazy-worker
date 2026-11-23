@@ -753,8 +753,6 @@ h1:focus { outline: none; }
 .caffeinate-process-list li:hover, .caffeinate-process-list li[aria-selected="true"] { background: var(--selected); color: var(--selected-ink); }
 .caffeinate-process-list li span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .caffeinate-process-list li span:last-child { flex: none; color: var(--secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
-.caffeinate-option { grid-template-columns: 20px minmax(0, 1fr) auto auto; cursor: pointer; }
-.caffeinate-option code { color: var(--secondary); font-size: 12px; }
 .option-name { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .option-info { flex: none; border-radius: 50%; color: var(--secondary); cursor: help; transition: color .16s ease; }
 .option-info:is(:hover, :focus-visible) { color: var(--text); }
@@ -1827,3 +1825,56 @@ h1:focus { outline: none; }
   .permission-demo-switch[data-target] { background: var(--online); }
   .permission-demo-switch[data-target]::after { transform: translateX(11px); }
 }
+
+/* The brand mark holds the panel while it loads, in place of an empty window. */
+.boot-mark {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .2s ease;
+}
+.boot-mark img { border-radius: 16px; }
+.workspace[data-booting] + .boot-mark { opacity: 1; transition: none; }
+
+/* A button the user must press next draws the eye with a slow ring. */
+.onboarding-button[data-attention] { animation: attention-ring 1.8s ease-out infinite; }
+@keyframes attention-ring {
+  0% { box-shadow: 0 0 0 0 var(--attention); }
+  70%, 100% { box-shadow: 0 0 0 9px transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-button[data-attention] { animation: none; box-shadow: 0 0 0 3px var(--attention); }
+}
+
+/* On/off options that belong together stand side by side as tiles, so the view needs no scroll. */
+.option-tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; padding: 8px 2px 14px; border-bottom: 1px solid var(--hairline); }
+.option-tile.tip { display: block; cursor: pointer; }
+.option-tile input { position: absolute; opacity: 0; pointer-events: none; }
+.option-tile-face {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--glass);
+  color: var(--secondary);
+  font-size: 13px;
+  font-weight: 680;
+  transition: background-color var(--selection-duration) var(--selection-easing), border-color .2s ease, color .2s ease;
+}
+.option-tile-face .lucide { width: 16px; height: 16px; }
+.option-tile-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.option-tile-face code { font-size: 11px; opacity: .7; }
+.option-tile:hover .option-tile-face { color: var(--text); }
+.option-tile input:checked + .option-tile-face { border-color: transparent; background: var(--choice); color: var(--choice-ink); }
+.option-tile input:focus-visible + .option-tile-face { outline: 2px solid var(--control-accent); outline-offset: 2px; }
+.option-tile input:disabled + .option-tile-face { opacity: .55; cursor: default; }
+/* A tip of the first tiles opens to the right, because they sit near the left edge. */
+.option-tile.tip:nth-child(-n+3)[data-tip]::after { right: auto; left: 0; }

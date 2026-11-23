@@ -53,6 +53,9 @@ export function mountOnboarding({ translate, accessibility, openAccessibility, o
       : state === "unsupported" ? "onboardingPermissionPreview" : "onboardingPermissionMissing");
     permissionState.toggleAttribute("data-granted", state === "granted");
     permission.disabled = state === "granted" || state === "unsupported" || state === undefined;
+    // While the permission is missing, this button is the next thing to do, so it stands out.
+    permission.classList.toggle("primary", missingPermission());
+    permission.toggleAttribute("data-attention", missingPermission());
     for (const mirror of mirrors) {
       if (mirror.dataset.mirrorWhen === "leave") continue;
       const setting = target(mirror);

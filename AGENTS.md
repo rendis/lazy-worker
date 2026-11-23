@@ -17,7 +17,7 @@
 - Format every time the interface shows through `src/time.ts`. Use `formatSession` for a running or remaining session, `age` for the time since an event, and `formatMoment` for when an event happened.
 - A tool can stay on for weeks. Add a new time format in `src/time.ts`, state its longest text there, and reserve that width where it shows. Check it at zero, at one day, and at several weeks.
 - Give each module a help popover with one plain paragraph and its `-loop.mp4` clip and poster from `src/assets/clips`. The clay workshop export writes them there, because its renders folder stays out of git.
-- Lay out module settings as `.setting-row` lines with an icon, a label, and the control at the end. Use `.segments` for exclusive choices and `.switch` for on/off options. Give each option of a named choice an icon beside its word through `.segment-icons`.
+- Lay out module settings as `.setting-row` lines with an icon, a label, and the control at the end. Use `.segments` for exclusive choices and `.switch` for on/off options. Put several on/off options that belong together in one row of `.option-tiles`, each with a short name, an icon, and its explanation as a tip, so the view needs no scroll. Give each option of a named choice an icon beside its word through `.segment-icons`.
 - Mark Quick start with the bolt switch only. Its hint states when the tool starts, based on the startup setting.
 - Give a module that sits under a broader sidebar section a `section` in `src/modules.ts`, and a `row` when its Tools row belongs to a group.
 - Keep proxy logic in `src/proxy.ts` and reach the system only through `desktop`. Give each `desktop` proxy call a browser-preview result.
@@ -64,6 +64,8 @@
 - Set `APPLE_SIGNING_IDENTITY` to the Developer ID Application identity for release builds. Verify the app and its Activity helper against that certificate in both architecture bundles.
 - Run every update check through `check` in `src-tauri/src/updates.rs`, so the time of the last check in Settings stays true. A release needs a few minutes to reach the update address, so keep the automatic checks frequent.
 - Add the changes of a release to `src/changelog.ts` before the release, in English and Spanish, for a user who is not technical. Give a change that adds a tool its `tool`. The release command stops without that entry.
+- Set the theme in `public/boot.js`, which runs before the first paint, and show the brand mark while the panel loads. The app saves the chosen theme for that script.
+- Mark the button the user must press next with `data-attention`, such as Open Accessibility while the permission is missing.
 - Keep the panel hidden through `data-booting` on `.workspace` until the app has loaded its preferences and chosen its first view, so no view shows for an instant before another one.
 - Show the setup guide on a new installation only, which is a launch without saved preferences. Record the version the user has seen in `seenVersion` when the guide or What’s new closes.
 - Build each setup guide control on the control of the same setting in Settings: the same `data-` attribute, or `data-mirror` with the id of that control. Give `data-mirror-when="leave"` to a control that changes the system, so it applies when the user leaves its step.

@@ -67,7 +67,9 @@ const translated = document.querySelectorAll<HTMLElement>("[data-text]");
 const accessibleLabels = document.querySelectorAll<HTMLElement>("[data-label]");
 const translatedTips = document.querySelectorAll<HTMLElement>("[data-tip-text]");
 // A tip inside a label must not switch the option of that label.
-translatedTips.forEach(node => node.addEventListener("click", event => event.preventDefault()));
+translatedTips.forEach(node => {
+  if (node.classList.contains("option-info")) node.addEventListener("click", event => event.preventDefault());
+});
 const main = document.querySelector("main")!;
 const noticeRegion = element("notice-region");
 const noticeTitle = element("notice-title");
@@ -536,6 +538,14 @@ function renderTheme(animate: boolean): void {
   const theme = preferences.theme === "system"
     ? (systemAppearance.matches ? "dark" : "light")
     : preferences.theme;
+  // The boot script reads this before the first paint of the next launch.
+  if (loaded) {
+    try {
+      localStorage.setItem("lazy-worker-theme", preferences.theme);
+    } catch {
+      // Without storage, the next launch starts with the system theme.
+    }
+  }
   if (document.documentElement.dataset.theme === theme) return;
   if (animate) document.documentElement.setAttribute("data-theme-transition", "");
   document.documentElement.dataset.theme = theme;
@@ -568,7 +578,9 @@ function renderPreferences(previous?: Preferences): void {
     translatedTips.forEach(node => {
       const tip = translate(node.dataset.tipText as Message);
       setAttribute(node, "data-tip", tip);
-      setAttribute(node, "aria-label", tip);
+      // An info icon has no text of its own. A tile keeps its name and gets the tip as its description.
+      if (node.classList.contains("option-info")) setAttribute(node, "aria-label", tip);
+      else node.querySelector("input")?.setAttribute("aria-description", tip);
     });
     setAttribute(element("tool-navigation"), "aria-label", translate("tools"));
     activityPower.removeAttribute("aria-labelledby");

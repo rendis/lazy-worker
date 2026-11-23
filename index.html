@@ -6,6 +6,7 @@
     <meta name="color-scheme" content="light dark" />
     <title>Lazy Worker</title>
     <link rel="icon" type="image/png" href="/src/assets/logo.png" />
+    <script src="/boot.js"></script>
   </head>
   <body>
     <header id="window-titlebar" class="window-titlebar" data-tauri-drag-region hidden>
@@ -50,14 +51,14 @@
               <div class="catalog-heading" aria-hidden="true" hidden></div>
             </div>
             <div class="tool-group">
-              <button type="button" class="tool-group-toggle" id="ai-group-toggle" aria-expanded="true" aria-controls="ai-group-body">
+              <button type="button" class="tool-group-toggle" id="ai-group-toggle" aria-expanded="false" aria-controls="ai-group-body">
                 <span class="tool-name">
                   <i class="tool-icon" data-lucide="sparkles"></i><strong data-text="ai">AI</strong>
                   <i class="tool-group-chevron" data-lucide="chevron-right"></i>
                 </span>
                 <span class="tool-group-count" id="ai-group-count"></span>
               </button>
-              <div class="collapse" id="ai-group-body" data-open>
+              <div class="collapse" id="ai-group-body" inert>
                 <div class="tool-group-rows">
                   <div id="ai-group-rows"></div>
                   <div id="ai-group-apps"></div>
@@ -189,31 +190,38 @@
 
               <section class="caffeinate-options" aria-labelledby="caffeinate-options-heading">
                 <h2 class="section-label" id="caffeinate-options-heading" data-text="caffeinateOptions">Sleep options</h2>
-                <label class="setting-row caffeinate-option">
-                  <i data-lucide="laptop"></i><span class="option-name"><span class="setting-label" data-text="caffeinateIdle">Prevent system idle sleep</span><span class="tip option-info" tabindex="0" role="img" data-tip-text="caffeinateIdleHelp"><i data-lucide="info" aria-hidden="true"></i></span></span>
-                  <code aria-hidden="true">-i</code>
-                  <span class="switch"><input type="checkbox" role="switch" data-caffeinate-option="i" checked /><span aria-hidden="true"></span></span>
-                </label>
-                <label class="setting-row caffeinate-option">
-                  <i data-lucide="monitor"></i><span class="option-name"><span class="setting-label" data-text="caffeinateDisplay">Prevent display sleep</span><span class="tip option-info" tabindex="0" role="img" data-tip-text="caffeinateDisplayHelp"><i data-lucide="info" aria-hidden="true"></i></span></span>
-                  <code aria-hidden="true">-d</code>
-                  <span class="switch"><input type="checkbox" role="switch" data-caffeinate-option="d" /><span aria-hidden="true"></span></span>
-                </label>
-                <label class="setting-row caffeinate-option">
-                  <i data-lucide="database"></i><span class="option-name"><span class="setting-label" data-text="caffeinateDisk">Prevent disk idle sleep</span><span class="tip option-info" tabindex="0" role="img" data-tip-text="caffeinateDiskHelp"><i data-lucide="info" aria-hidden="true"></i></span></span>
-                  <code aria-hidden="true">-m</code>
-                  <span class="switch"><input type="checkbox" role="switch" data-caffeinate-option="m" /><span aria-hidden="true"></span></span>
-                </label>
-                <label class="setting-row caffeinate-option">
-                  <i data-lucide="power"></i><span class="option-name"><span class="setting-label" data-text="caffeinateSystem">Prevent system sleep on AC power</span><span class="tip option-info" tabindex="0" role="img" data-tip-text="caffeinateSystemHelp"><i data-lucide="info" aria-hidden="true"></i></span></span>
-                  <code aria-hidden="true">-s</code>
-                  <span class="switch"><input type="checkbox" role="switch" data-caffeinate-option="s" /><span aria-hidden="true"></span></span>
-                </label>
-                <label class="setting-row caffeinate-option">
-                  <i data-lucide="user-round"></i><span class="option-name"><span class="setting-label" data-text="caffeinateUser">Declare user active</span><span class="tip option-info" tabindex="0" role="img" data-tip-text="caffeinateUserHelp"><i data-lucide="info" aria-hidden="true"></i></span></span>
-                  <code aria-hidden="true">-u</code>
-                  <span class="switch"><input type="checkbox" role="switch" data-caffeinate-option="u" /><span aria-hidden="true"></span></span>
-                </label>
+                <div class="option-tiles" role="group" aria-labelledby="caffeinate-options-heading">
+                  <label class="option-tile tip" data-tip-text="caffeinateIdleHelp">
+                    <input type="checkbox" data-caffeinate-option="i" checked />
+                    <span class="option-tile-face">
+                      <i data-lucide="laptop"></i><span class="option-tile-name" data-text="caffeinateIdleShort"></span><code aria-hidden="true">-i</code>
+                    </span>
+                  </label>
+                  <label class="option-tile tip" data-tip-text="caffeinateDisplayHelp">
+                    <input type="checkbox" data-caffeinate-option="d" />
+                    <span class="option-tile-face">
+                      <i data-lucide="monitor"></i><span class="option-tile-name" data-text="caffeinateDisplayShort"></span><code aria-hidden="true">-d</code>
+                    </span>
+                  </label>
+                  <label class="option-tile tip" data-tip-text="caffeinateDiskHelp">
+                    <input type="checkbox" data-caffeinate-option="m" />
+                    <span class="option-tile-face">
+                      <i data-lucide="database"></i><span class="option-tile-name" data-text="caffeinateDiskShort"></span><code aria-hidden="true">-m</code>
+                    </span>
+                  </label>
+                  <label class="option-tile tip" data-tip-text="caffeinateSystemHelp">
+                    <input type="checkbox" data-caffeinate-option="s" />
+                    <span class="option-tile-face">
+                      <i data-lucide="power"></i><span class="option-tile-name" data-text="caffeinateSystemShort"></span><code aria-hidden="true">-s</code>
+                    </span>
+                  </label>
+                  <label class="option-tile tip" data-tip-text="caffeinateUserHelp">
+                    <input type="checkbox" data-caffeinate-option="u" />
+                    <span class="option-tile-face">
+                      <i data-lucide="user-round"></i><span class="option-tile-name" data-text="caffeinateUserShort"></span><code aria-hidden="true">-u</code>
+                    </span>
+                  </label>
+                </div>
               </section>
 
               <section class="caffeinate-lid" aria-labelledby="caffeinate-lid-heading">
@@ -694,7 +702,7 @@
       <span class="visually-hidden" id="notice-announcement" role="status" aria-atomic="true"></span>
       <span class="visually-hidden" id="update-announcement" role="status" aria-atomic="true"></span>
     </div>
-
+    <div class="boot-mark" aria-hidden="true"><img src="/src/assets/logo.png" width="64" height="64" alt="" draggable="false" /></div>
     <template id="tool-nav-template">
       <button class="nav-button tool-nav-button" type="button"><i></i><span></span></button>
     </template>
