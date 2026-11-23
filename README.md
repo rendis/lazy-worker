@@ -13,6 +13,7 @@ Small tools that keep locks and limits out of your way.</p>
 
 <p align="center">
   <a href="#tools">Tools</a> ·
+  <a href="#what-each-tool-can-do">What each tool can do</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="#features">Features</a> ·
   <a href="#install">Install</a> ·
@@ -69,6 +70,49 @@ Sends your AI tools' traffic through another computer on your network, when this
 [Proxy in the user guide →](docs/user-guide.md#proxy)
 
 <br clear="all">
+<br>
+
+## What each tool can do
+
+This is the full list for each tool. The [user guide](docs/user-guide.md) shows how to use each item.
+
+<!-- Capability list. Add one for each new tool, and one line for each new function. -->
+
+**Activity**
+
+- Moves the pointer briefly after 45 seconds without input, and at most once every 45 seconds. It waits while you use the Mac.
+- Keeps the Mac from idle sleep while it runs.
+- Runs for 15 minutes, 30 minutes, one hour, or until you stop it.
+- Runs on a daily schedule with a start and an end time. A schedule can span midnight.
+- Shows the time left or the time elapsed in its header.
+- Needs the Accessibility permission. It records no keystrokes.
+
+**Caffeinate**
+
+- Prevents sleep with the macOS `caffeinate` utility. You choose what stays awake: the display, the system when idle, the system on AC power, or the disk.
+- Can declare the user active.
+- Runs until you stop it, for a set duration, or while a process you choose stays open. Choose the process from a list or enter its PID.
+- Saves each change automatically and applies it to a running session.
+
+**AI Proxy**
+
+- Works in one of two roles. A **Server** shares its connection. A **Client** opens AI tools through a server.
+- Server: runs an HTTP and HTTPS forward proxy inside the app, on a port you choose. It needs no other software.
+- Server: shows its addresses to copy, as an IP address and as a `.local` name.
+- Server: accepts only computers on your local network, or only the IP addresses you list under **Access**. It never connects to services on its own computer.
+- Server: lists the computers that use it, with their open connections and the time since their last activity.
+- Server: shows each request as it arrives. It keeps the last 200 in memory and clears them when it stops.
+- Client: checks that the server answers at the address you enter.
+- Client: opens Claude or Codex through the server, as the desktop app or as the command-line tool. It detects which ones are installed.
+- Client: shows the command behind each tool. You can copy it, edit it, or restore it.
+- Client: runs commands of your own for other tools, each with a name and an icon. `{server}` stands for the server address.
+
+**Every tool**
+
+- Starts and stops from the panel or from the menu bar, and keeps running with the panel closed.
+- Joins Quick start, which starts your selected tools together, by hand or when Lazy Worker opens.
+- Shows a timer for its session and a short help clip.
+
 <br>
 
 ## How it works

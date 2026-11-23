@@ -39,7 +39,7 @@ A new tool touches the same places every time. Use this list, and see [AGENTS.md
 3. **Keep the system behind an adapter.** Reach system APIs only from a platform adapter, with an unsupported-platform fallback. Shared scheduling and preferences must work without the adapter.
 4. **Show times through `src/time.ts`.** A tool can stay on for weeks.
 5. **Make its clip.** Build an episode in the [clay workshop](docs/design/clay-workshop/README.md), run `npm run export -- <tool>` there, and add the clip and poster to the tool's help in `src/modules.ts`.
-6. **Document it.** Add a section to the [user guide](docs/user-guide.md). Copy the tool block in the [README](README.md), switch the clip to the other side, and link it to the new section.
+6. **Document it.** Add a section to the [user guide](docs/user-guide.md). Copy the tool block in the [README](README.md), switch the clip to the other side, and link it to the new section. List what the tool can do under **What each tool can do** there, one line for each function. A change that adds a function to a tool adds its line too.
 7. **Record what you learned.** Add one line to [AGENTS.md](AGENTS.md) for each new project rule.
 
 ### Where a tool is registered
