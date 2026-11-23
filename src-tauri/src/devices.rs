@@ -60,10 +60,71 @@ impl RemoteAccess {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Serialize)]
+/// Whether this device lets another one pair with it now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub enum Pairing {
-    Closed,
+pub struct Pairing {
+    pub open: bool,
+    /// Unix seconds when the window closes, or nothing while it is closed.
+    pub expires: Option<u64>,
+    pub attempts_left: u8,
+}
+
+impl Pairing {
+    pub fn closed() -> Self {
+        Self {
+            open: false,
+            expires: None,
+            attempts_left: 0,
+        }
+    }
+}
+
+/// A device that this one controls, as the Devices view shows it. The lists after `online` come
+/// in later steps and are empty until then.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Remote {
+    pub id: String,
+    pub name: String,
+    pub kind: Kind,
+    pub user: String,
+    pub host: String,
+    pub port: u16,
+    pub added: u64,
+    /// Nothing until the first reachability check ends.
+    pub online: Option<bool>,
+    pub tools: Vec<()>,
+    pub apps: RemoteApps,
+    pub actions: Vec<()>,
+    pub shell: Option<()>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct RemoteApps {
+    pub pinned: Vec<()>,
+    pub total: u32,
+    pub open: u32,
+}
+
+#[cfg(unix)]
+impl Remote {
+    pub fn new(device: &crate::remote::controlled::Controlled, online: Option<bool>) -> Self {
+        Self {
+            id: device.id.clone(),
+            name: device.name.clone(),
+            kind: device.kind,
+            user: device.user.clone(),
+            host: device.host.clone(),
+            port: device.port,
+            added: device.added,
+            online,
+            tools: Vec::new(),
+            apps: RemoteApps::default(),
+            actions: Vec::new(),
+            shell: None,
+        }
+    }
 }
 
 /// A device that may control this one, as the Devices view shows it.
@@ -132,7 +193,7 @@ impl Socket {
 #[serde(rename_all = "camelCase")]
 pub struct Overview {
     pub this_device: ThisDevice,
-    pub devices: Vec<()>,
+    pub devices: Vec<Remote>,
 }
 
 #[derive(Serialize)]
@@ -166,18 +227,32 @@ mod platform {
     }
 }
 
+/// What the Devices view reads from the stores, before the system is asked anything.
+pub struct Stores {
+    pub controllers: Vec<Controller>,
+    pub socket: Socket,
+    pub pairing: Pairing,
+    pub devices: Vec<Remote>,
+}
+
+/// This device by its name and kind. It runs commands, so call it off the main thread.
+#[cfg(unix)]
+pub fn this_device() -> Device {
+    platform::this_device()
+}
+
 /// Reads the system, so call it off the main thread.
-pub fn overview(controllers: Vec<Controller>, socket: Socket, remote_access: RemoteAccess) -> Overview {
+pub fn overview(stores: Stores, remote_access: RemoteAccess) -> Overview {
     Overview {
         this_device: ThisDevice {
             device: platform::this_device(),
             remote_access,
-            pairing: Pairing::Closed,
-            controllers,
-            socket,
+            pairing: stores.pairing,
+            controllers: stores.controllers,
+            socket: stores.socket,
             actions: Vec::new(),
         },
-        devices: Vec::new(),
+        devices: stores.devices,
     }
 }
 
@@ -242,7 +317,11 @@ mod tests {
                     managed_file: true,
                     macos_major: Some(26),
                 },
-                pairing: Pairing::Closed,
+                pairing: Pairing {
+                    open: true,
+                    expires: Some(1_800_000_000),
+                    attempts_left: 2,
+                },
                 controllers: Vec::new(),
                 socket: Socket::unavailable("x"),
                 actions: Vec::new(),
@@ -259,7 +338,14 @@ mod tests {
                 "macosMajor": 26
             })
         );
-        assert_eq!(value["thisDevice"]["pairing"], "closed");
+        assert_eq!(
+            value["thisDevice"]["pairing"],
+            serde_json::json!({"open": true, "expires": 1_800_000_000u64, "attemptsLeft": 2})
+        );
+        assert_eq!(
+            serde_json::to_value(Pairing::closed()).unwrap(),
+            serde_json::json!({"open": false, "expires": null, "attemptsLeft": 0})
+        );
         assert_eq!(value["devices"], serde_json::json!([]));
         assert_eq!(value["thisDevice"]["socket"]["listening"], false);
         assert_eq!(value["thisDevice"]["socket"]["error"], "x");

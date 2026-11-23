@@ -67,7 +67,7 @@ fn remote_login_on() -> bool {
 }
 
 /// The user of this process, or nothing when the name is not one that is safe to pass on.
-fn current_user() -> Option<String> {
+pub(super) fn current_user() -> Option<String> {
     let output = tool("/usr/bin/id")
         .arg("-un")
         .stdin(Stdio::null())

@@ -2,15 +2,19 @@
 //!
 //! The code here builds on three rules. We read no SSH configuration of the user. We trust only
 //! the keys we pinned. Text from outside never becomes an SSH option or a remote command.
-#![cfg_attr(not(test), allow(dead_code))] // The callers arrive with pairing.
 
 pub mod access;
 pub mod authorized_keys;
+pub mod controlled;
 pub mod destination;
 pub mod helper;
 pub mod identity;
 pub mod known_hosts;
 pub mod log;
+pub mod pair_client;
+pub mod pake;
+pub mod pairing;
+pub mod pairing_key;
 pub mod peers;
 pub mod server;
 pub mod service;
@@ -75,6 +79,20 @@ impl Layout {
 
     pub fn peers_file(&self) -> PathBuf {
         self.remote.join("peers.json")
+    }
+
+    /// The devices that this one controls.
+    pub fn devices_file(&self) -> PathBuf {
+        self.remote.join("devices.json")
+    }
+
+    /// The fixed pairing key, written before a pairing because ssh wants a private file.
+    pub fn pairing_key_file(&self) -> PathBuf {
+        self.remote.join("pairing_key")
+    }
+
+    pub fn pairing_config_file(&self) -> PathBuf {
+        self.remote.join("ssh_config_pair")
     }
 
     pub fn socket_file(&self) -> PathBuf {

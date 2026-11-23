@@ -117,7 +117,14 @@ export type RemoteDevice = {
   id: string;
   name: string;
   kind: DeviceKind;
-  online: boolean;
+  /** The address that pairing found. The account is the one the other device named. */
+  user: string;
+  host: string;
+  port: number;
+  /** Unix seconds when the pairing ended. */
+  added: number;
+  /** `null` until the first reachability check ends. */
+  online: boolean | null;
   tools: RemoteTool[];
   /** `pinned` holds the apps the user chose to see first. `total` and `open` count every app on the device. */
   apps: { pinned: RemoteApp[]; total: number; open: number };
@@ -134,13 +141,18 @@ export type RemoteAccess = {
   managedFile: boolean;
   macosMajor: number | null;
 };
+/** Whether this device lets another one pair with it. `expires` is Unix seconds. */
+export type PairingState = { open: boolean; expires: number | null; attemptsLeft: number };
+/** What this device shows while it waits for another one to pair. `account` is the name the other device types. */
+export type OpenedPairing = { code: string; account: string; expires: number };
+export type PairingPermissions = Pick<Controller["permissions"], "control" | "applications" | "actions">;
 export type DevicesOverview = {
   thisDevice: {
     /** Empty when the system gives no name. */
     name: string;
     kind: DeviceKind;
     remoteAccess: RemoteAccess;
-    pairing: "closed" | "open";
+    pairing: PairingState;
     controllers: Controller[];
     /** Whether this device can receive requests, and an error code when it cannot. */
     socket: { listening: boolean; error: string | null };
@@ -320,6 +332,9 @@ function updatePreviewCaffeinateSession(settings: CaffeinateSettings): void {
 
 /** The controllers and the log of a preview. A change lasts until the page reloads. */
 let previewControllers: Controller[] | undefined;
+const previewPairing: PairingState = { open: false, expires: null, attemptsLeft: 0 };
+/** Devices that a preview paired with, so the list shows them. */
+const previewDeviceAdditions: RemoteDevice[] = [];
 let previewLog: RemoteLogEntry[] | undefined;
 
 function sampleControllers(now: number): Controller[] {
@@ -390,7 +405,7 @@ function previewDevices(): DevicesOverview {
   };
   return {
     thisDevice: {
-      name: "MacBook Pro", kind: "laptop", remoteAccess: { ...previewAccess }, pairing: "closed",
+      name: "MacBook Pro", kind: "laptop", remoteAccess: { ...previewAccess }, pairing: { ...previewPairing },
       controllers: previewControllerList().map(controller => ({
         ...controller, permissions: { ...controller.permissions },
       })),
@@ -406,6 +421,7 @@ function previewDevices(): DevicesOverview {
     devices: [
       {
         id: "studio", name: "iMac del estudio", kind: "desktop", online: true,
+        user: "studio", host: "imac-del-estudio.local", port: 22, added: now - 12 * 86400,
         tools: [{ id: "activity", running: true }, { id: "caffeinate", running: false }],
         apps: {
           total: 27, open: 2,
@@ -420,8 +436,10 @@ function previewDevices(): DevicesOverview {
       },
       {
         id: "old", name: "MacBook Air de la oficina con un nombre muy largo para probar el ajuste", kind: "laptop",
+        user: "oficina", host: "192.168.1.40", port: 22, added: now - 90 * 86400,
         online: false, tools: [], apps: { pinned: [], total: 0, open: 0 }, actions: [], shell: null,
       },
+      ...previewDeviceAdditions.map(device => ({ ...device })),
     ],
   };
 }
@@ -578,6 +596,38 @@ export const desktop = {
     const controller = previewControllerList().find(item => item.id === id);
     if (!controller) throw "notPaired";
     controller.permissions = { ...controller.permissions, ...permissions };
+  },
+  /** Opens a window of ten minutes and returns the code to show. The permissions are those this device grants. */
+  async openPairing(permissions: PairingPermissions): Promise<OpenedPairing> {
+    if (native) return call("openPairing", { ...permissions });
+    const expires = Math.floor(Date.now() / 1000) + 600;
+    Object.assign(previewPairing, { open: true, expires, attemptsLeft: 3 });
+    return { code: "482915", account: "reynaldo", expires };
+  },
+  async closePairing(): Promise<void> {
+    if (native) return call("closePairing");
+    Object.assign(previewPairing, { open: false, expires: null, attemptsLeft: 0 });
+  },
+  /** Pairs with the device at the address, using the code it shows. It can take up to a minute. */
+  async pairDevice(user: string, host: string, port: number | null, code: string): Promise<RemoteDevice> {
+    if (native) return call("pairDevice", { user, host, port, code });
+    await new Promise(resolve => setTimeout(resolve, 900));
+    if (!/^\d{6}$/.test(code)) throw "pairingCodeInvalid";
+    if (code === "000000") throw "wrongCode";
+    const device: RemoteDevice = {
+      id: Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join(""),
+      name: host, kind: "desktop", user, host, port: port ?? 22, added: Math.floor(Date.now() / 1000), online: true,
+      tools: [], apps: { pinned: [], total: 0, open: 0 }, actions: [], shell: null,
+    };
+    previewDeviceAdditions.push(device);
+    return device;
+  },
+  /** `removeOnDevice` is true: this device cannot take its own key out of the other one. */
+  async forgetDevice(id: string): Promise<{ removeOnDevice: boolean }> {
+    if (native) return call("forgetDevice", { id });
+    const index = previewDeviceAdditions.findIndex(device => device.id === id);
+    if (index >= 0) previewDeviceAdditions.splice(index, 1);
+    return { removeOnDevice: true };
   },
   async removePeer(id: string): Promise<void> {
     if (native) return call("removePeer", { id });

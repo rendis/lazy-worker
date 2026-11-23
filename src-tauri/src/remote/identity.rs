@@ -43,6 +43,7 @@ pub struct Identity {
     pub device_id: DeviceId,
     /// `ssh-ed25519 <base64>`, with no comment.
     pub public_key: String,
+    #[cfg_attr(not(test), allow(dead_code))] // The Devices view reads it in a later step.
     pub backup: BackupExclusion,
 }
 
@@ -68,6 +69,11 @@ fn load_or_create_device_id(path: &Path) -> Result<DeviceId, &'static str> {
     // A second writer may have won the race, so read back the stored one.
     let text = read_small(path)?.ok_or("remoteIo")?;
     DeviceId::parse(text.trim_end_matches('\n'))
+}
+
+/// A new random id, for a name that lives only for a moment.
+pub(super) fn random_id() -> Result<DeviceId, &'static str> {
+    DeviceId::parse(&random_hex()?)
 }
 
 fn random_hex() -> Result<String, &'static str> {

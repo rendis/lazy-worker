@@ -26,6 +26,7 @@ const SSH: &str = "/usr/bin/ssh";
 /// What the remote side runs. The words are fixed here and never come from the caller's text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RemoteCommand {
+    #[cfg_attr(not(test), allow(dead_code))] // Used by the step that sends requests over ssh.
     Dispatch,
     Pair,
 }
@@ -39,13 +40,33 @@ impl RemoteCommand {
     }
 }
 
+/// Which key and which connection sharing a config file sets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Profile {
+    /// The key of this device, with a master connection shared by the calls of one peer.
+    Device,
+    /// The fixed pairing key alone, and a new connection each time. The key of this device is
+    /// never offered to a host that pairing has not yet bound to its device.
+    Pairing,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
     Remote(RemoteCommand),
     /// Ask the multiplexing master of the destination to exit.
     ControlExit,
     /// Print the settings that would apply, and connect to nothing.
-    PrintConfig,
+    PrintConfig(Profile),
+}
+
+impl Mode {
+    fn profile(self) -> Profile {
+        match self {
+            Self::Remote(RemoteCommand::Pair) => Profile::Pairing,
+            Self::PrintConfig(profile) => profile,
+            Self::Remote(RemoteCommand::Dispatch) | Self::ControlExit => Profile::Device,
+        }
+    }
 }
 
 /// One option of our config file.
@@ -75,7 +96,11 @@ fn quote(path: &Path, suffix: &str) -> Result<String, &'static str> {
     Ok(format!("\"{}{suffix}\"", text.replace('%', "%%")))
 }
 
-fn options(layout: &Layout) -> Result<Vec<Opt>, &'static str> {
+fn options(layout: &Layout, profile: Profile) -> Result<Vec<Opt>, &'static str> {
+    let identity = match profile {
+        Profile::Device => layout.private_key(),
+        Profile::Pairing => layout.pairing_key_file(),
+    };
     let mut list = vec![
         opt("BatchMode", "yes", true),
         opt("StrictHostKeyChecking", "yes", true),
@@ -90,7 +115,7 @@ fn options(layout: &Layout) -> Result<Vec<Opt>, &'static str> {
         opt("HashKnownHosts", "no", false),
         Opt {
             name: "IdentityFile",
-            value: quote(&layout.private_key(), "")?,
+            value: quote(&identity, "")?,
             required: true,
         },
         opt("IdentitiesOnly", "yes", true),
@@ -114,14 +139,14 @@ fn options(layout: &Layout) -> Result<Vec<Opt>, &'static str> {
         opt("ServerAliveInterval", "15", false),
         opt("ServerAliveCountMax", "2", false),
     ];
-    match layout.control_dir() {
-        Some(directory) => {
+    match (profile, layout.control_dir()) {
+        (Profile::Device, Some(directory)) => {
             // The socket path is passed per call, named by the peer. See `build`.
             quote(directory, "")?;
             list.push(opt("ControlMaster", "auto", false));
             list.push(opt("ControlPersist", "60", false));
         }
-        None => list.push(opt("ControlMaster", "no", true)),
+        _ => list.push(opt("ControlMaster", "no", true)),
     }
     list.push(opt("LogLevel", "ERROR", false));
     list.push(opt("VisualHostKey", "no", false));
@@ -129,9 +154,13 @@ fn options(layout: &Layout) -> Result<Vec<Opt>, &'static str> {
 }
 
 /// The text of the config file, without the options named in `dropped` (lowercase).
-fn render_config(layout: &Layout, dropped: &[String]) -> Result<String, &'static str> {
+fn render_config(
+    layout: &Layout,
+    profile: Profile,
+    dropped: &[String],
+) -> Result<String, &'static str> {
     let mut text = String::from("# Written by Lazy Worker. Changes are replaced.\nHost *\n");
-    for option in options(layout)? {
+    for option in options(layout, profile)? {
         if !dropped
             .iter()
             .any(|name| name.eq_ignore_ascii_case(option.name))
@@ -163,12 +192,25 @@ fn rejected_options(stderr: &str) -> Vec<String> {
 /// Writes our config file. The local ssh checks it first (`ssh -G`), and an option that it does
 /// not know is left out. Returns the names that were left out, in lowercase. A missing option
 /// that guards the rules is an error instead.
+#[cfg_attr(not(test), allow(dead_code))] // Used by the step that sends requests over ssh.
 pub fn write_config(layout: &Layout) -> Result<Vec<String>, &'static str> {
+    write_profile(layout, Profile::Device)
+}
+
+/// Writes the config file of a pairing. It offers the pairing key only.
+pub fn write_pairing_config(layout: &Layout) -> Result<Vec<String>, &'static str> {
+    write_profile(layout, Profile::Pairing)
+}
+
+fn write_profile(layout: &Layout, profile: Profile) -> Result<Vec<String>, &'static str> {
     let mut dropped: Vec<String> = Vec::new();
-    let path = layout.config_file();
+    let path = match profile {
+        Profile::Device => layout.config_file(),
+        Profile::Pairing => layout.pairing_config_file(),
+    };
     for _ in 0..32 {
-        let temp = write_temp(&path, render_config(layout, &dropped)?.as_bytes())?;
-        let stderr = match probe(layout, &temp) {
+        let temp = write_temp(&path, render_config(layout, profile, &dropped)?.as_bytes())?;
+        let stderr = match probe(layout, profile, &temp) {
             Ok(stderr) => stderr,
             Err(code) => {
                 let _ = fs::remove_file(&temp);
@@ -186,7 +228,7 @@ pub fn write_config(layout: &Layout) -> Result<Vec<String>, &'static str> {
             };
         }
         let _ = fs::remove_file(&temp);
-        let known = options(layout)?;
+        let known = options(layout, profile)?;
         for name in rejected {
             let Some(option) = known
                 .iter()
@@ -207,11 +249,11 @@ pub fn write_config(layout: &Layout) -> Result<Vec<String>, &'static str> {
 
 /// Runs `ssh -G` on a candidate file. Gives its error text, or a code when ssh cannot be run or
 /// fails for a reason other than an unknown option.
-fn probe(layout: &Layout, candidate: &Path) -> Result<String, &'static str> {
+fn probe(layout: &Layout, profile: Profile, candidate: &Path) -> Result<String, &'static str> {
     let peer = DeviceId::parse(&"0".repeat(32))?;
     let destination = Destination::new("probe", "example.invalid", None)?;
     // The same arguments as a real call, with the candidate in place of our config file.
-    let mut args: Vec<_> = build(layout, &destination, &peer, Mode::PrintConfig)?
+    let mut args: Vec<_> = build(layout, &destination, &peer, Mode::PrintConfig(profile))?
         .get_args()
         .map(ToOwned::to_owned)
         .collect();
@@ -250,15 +292,20 @@ fn build(
     peer: &DeviceId,
     mode: Mode,
 ) -> Result<Command, &'static str> {
+    let profile = mode.profile();
     let mut command = tool(SSH);
     command
         .arg("-F")
-        .arg(layout.config_file())
+        .arg(match profile {
+            Profile::Device => layout.config_file(),
+            Profile::Pairing => layout.pairing_config_file(),
+        })
         .arg("-o")
         .arg(format!("HostKeyAlias={}", known_hosts::alias(peer)));
     // One socket per peer, so a live master never carries a request meant for another device
-    // that took over the address. The name is the validated id, with no `%` token in it.
-    if let Some(directory) = layout.control_dir() {
+    // that took over the address. The name is the validated id, with no `%` token in it. A
+    // pairing shares no connection.
+    if let (Profile::Device, Some(directory)) = (profile, layout.control_dir()) {
         command.arg("-o").arg(format!(
             "ControlPath={}",
             quote(directory, &format!("/{}", peer.as_str()))?
@@ -269,7 +316,7 @@ fn build(
         Mode::ControlExit => {
             command.args(["-O", "exit"]);
         }
-        Mode::PrintConfig => {
+        Mode::PrintConfig(_) => {
             command.arg("-G");
         }
     }
@@ -319,10 +366,12 @@ pub fn stop_master(
 
 pub(super) struct Completed {
     pub success: bool,
+    #[cfg_attr(not(test), allow(dead_code))] // Read by `run`.
     pub code: Option<i32>,
     pub stdout: Vec<u8>,
     pub stderr: String,
     pub timed_out: bool,
+    #[cfg_attr(not(test), allow(dead_code))] // Read by `run`.
     pub truncated: bool,
 }
 
@@ -421,6 +470,7 @@ pub(super) fn execute(
 
 /// Runs a command built by this module and returns its stdout. The error is a code only. The
 /// text of stderr is never passed on.
+#[cfg_attr(not(test), allow(dead_code))] // Used by the step that sends requests over ssh.
 pub fn run(command: Command, input: &[u8], timeout: Duration) -> Result<Vec<u8>, &'static str> {
     let done = execute(command, input, timeout)?;
     if done.timed_out {
@@ -488,7 +538,7 @@ mod tests {
             "/Users/me/Library/Application Support/app 100%/remote",
             Some("/tmp/lw-501"),
         );
-        let text = render_config(&layout, &[]).unwrap();
+        let text = render_config(&layout, Profile::Device, &[]).unwrap();
         assert!(text.contains(
             "    IdentityFile \"/Users/me/Library/Application Support/app 100%%/remote/id_ed25519\"\n"
         ));
@@ -501,8 +551,23 @@ mod tests {
     }
 
     #[test]
+    fn the_pairing_config_offers_the_pairing_key_alone_and_shares_no_connection() {
+        let layout = layout_at("/r s/100%", Some("/tmp/lw-501"));
+        let text = render_config(&layout, Profile::Pairing, &[]).unwrap();
+        assert_eq!(text.matches("IdentityFile").count(), 1);
+        assert!(text.contains("    IdentityFile \"/r s/100%%/pairing_key\"\n"));
+        assert!(!text.contains("id_ed25519"));
+        assert!(text.contains("    IdentitiesOnly yes\n"));
+        assert!(text.contains("    ControlMaster no\n"));
+        assert!(!text.contains("ControlPersist") && !text.contains("ControlPath"));
+        for kept in ["BatchMode yes", "StrictHostKeyChecking yes", "PasswordAuthentication no"] {
+            assert!(text.contains(kept), "{kept}");
+        }
+    }
+
+    #[test]
     fn config_without_a_socket_path_turns_multiplexing_off() {
-        let text = render_config(&layout_at("/r", None), &[]).unwrap();
+        let text = render_config(&layout_at("/r", None), Profile::Device, &[]).unwrap();
         assert!(text.contains("    ControlMaster no\n"));
         assert!(!text.contains("ControlPath") && !text.contains("ControlPersist"));
     }
@@ -520,7 +585,7 @@ mod tests {
             "/a\rb",
         ] {
             assert_eq!(
-                render_config(&layout_at(path, None), &[]).unwrap_err(),
+                render_config(&layout_at(path, None), Profile::Device, &[]).unwrap_err(),
                 "configPathInvalid",
                 "{path:?}"
             );
@@ -534,7 +599,7 @@ mod tests {
             "usekeychain".to_owned(),
             "KBDINTERACTIVEAUTHENTICATION".to_owned(),
         ];
-        let text = render_config(&layout, &dropped).unwrap();
+        let text = render_config(&layout, Profile::Device, &dropped).unwrap();
         assert!(!text.contains("UseKeychain") && !text.contains("KbdInteractive"));
         assert!(
             text.contains("BatchMode yes") && text.contains("ChallengeResponseAuthentication no")
@@ -588,12 +653,29 @@ mod tests {
             args(Mode::Remote(RemoteCommand::Dispatch)),
             expect(&[], Some("dispatch"))
         );
-        assert_eq!(
-            args(Mode::Remote(RemoteCommand::Pair)),
-            expect(&[], Some("pair"))
-        );
         assert_eq!(args(Mode::ControlExit), expect(&["-O", "exit"], None));
-        assert_eq!(args(Mode::PrintConfig), expect(&["-G"], None));
+        assert_eq!(
+            args(Mode::PrintConfig(Profile::Device)),
+            expect(&["-G"], None)
+        );
+        // A pairing has its own config file and no socket path.
+        let pairing: Vec<String> = [
+            "-F",
+            "/r s/ssh_config_pair",
+            "-o",
+            &format!("HostKeyAlias=lw-{}", "ab".repeat(16)),
+            "-l",
+            "me",
+            "-p",
+            "2222",
+            "--",
+            "fe80::1%en0",
+            "pair",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(args(Mode::Remote(RemoteCommand::Pair)), pairing);
         let command = command(&layout, &destination, &peer(), RemoteCommand::Dispatch).unwrap();
         assert_eq!(command.get_program(), OsStr::new("/usr/bin/ssh"));
         let mut names: Vec<_> = command
@@ -735,7 +817,7 @@ mod tests {
         eprintln!("dropped by the local ssh: {dropped:?}");
         let destination = Destination::new("user", "example.invalid", Some(22)).unwrap();
         let output = run(
-            build(&layout, &destination, &peer(), Mode::PrintConfig).unwrap(),
+            build(&layout, &destination, &peer(), Mode::PrintConfig(Profile::Device)).unwrap(),
             b"",
             Duration::from_secs(5),
         )
@@ -766,6 +848,41 @@ mod tests {
             known.contains("100% remote/known_hosts") && !known.contains("%%"),
             "{known}"
         );
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn local_ssh_accepts_the_pairing_config() {
+        if !Path::new(SSH).exists() {
+            return;
+        }
+        let base = scratch("ssh pair");
+        let remote = base.join("100% remote");
+        ensure_private_dir(&remote).unwrap();
+        let layout = Layout::for_paths(remote, Some(PathBuf::from("/tmp/lw-test-control")));
+        write_pairing_config(&layout).unwrap();
+        let destination = Destination::new("user", "example.invalid", Some(22)).unwrap();
+        let output = run(
+            build(&layout, &destination, &peer(), Mode::PrintConfig(Profile::Pairing)).unwrap(),
+            b"",
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        let text = String::from_utf8(output).unwrap();
+        let identities: Vec<&str> = text
+            .lines()
+            .filter(|line| line.starts_with("identityfile "))
+            .collect();
+        assert_eq!(identities.len(), 1, "{text}");
+        // `ssh -G` shows the identity file before it expands `%%`.
+        assert!(identities[0].contains("100%% remote/pairing_key"), "{text}");
+        for expected in ["identitiesonly yes", "controlmaster false", "stricthostkeychecking true"] {
+            assert!(
+                text.lines().any(|line| line.starts_with(expected)),
+                "missing {expected}\n{text}"
+            );
+        }
+        assert!(!text.lines().any(|line| line.starts_with("controlpath /")), "{text}");
         fs::remove_dir_all(base).unwrap();
     }
 

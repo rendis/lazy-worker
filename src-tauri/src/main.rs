@@ -155,7 +155,7 @@ fn remember_running(app: &tauri::AppHandle) {
 }
 
 fn main() {
-    // Started by sshd as `remote --peer <id>`: relay lines and exit, before any window code.
+    // Started by sshd as `remote --peer <id>` or `remote --pair`: relay lines and exit, before any window code.
     #[cfg(unix)]
     if let Some(code) = remote::helper::run_if_requested() {
         std::process::exit(code);

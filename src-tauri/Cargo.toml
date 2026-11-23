@@ -22,3 +22,12 @@ plist = "1"
 png = "0.18"
 tauri = { version = "~2.12.7", features = ["tray-icon"] }
 tauri-plugin-updater = "2.14.1"
+
+[target.'cfg(unix)'.dependencies]
+base64 = "0.22"
+hkdf = "0.12"
+hmac = "0.12"
+# RustCrypto's spake2 has not had an independent audit.
+spake2 = "0.4.0"
+rand_core = { version = "0.6", features = ["getrandom"] }
+sha2 = "0.10"

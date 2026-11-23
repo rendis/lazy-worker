@@ -7,7 +7,10 @@
 use super::{
     identity::DeviceId,
     log::{Entry, Log},
-    our_uid, peer_uid,
+    our_uid,
+    pake::SESSION_TIMEOUT,
+    pairing::Pairing,
+    peer_uid,
     peers::Peers,
     wire::{error_line, read_line, LineError, MAX_REQUEST_LINE},
 };
@@ -17,7 +20,7 @@ use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    io::{BufReader, Write},
+    io::{BufReader, Cursor, Read, Write},
     os::unix::{
         fs::{FileTypeExt, MetadataExt, PermissionsExt},
         net::{UnixListener, UnixStream},
@@ -28,7 +31,7 @@ use std::{
         Arc, Mutex,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 pub const MAX_CONNECTIONS: usize = 16;
@@ -49,10 +52,32 @@ struct Hello {
     hello: HelloBody,
 }
 
+/// A paired device names itself with `peer`. A device that is pairing says `pair: true`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct HelloBody {
-    peer: String,
+    peer: Option<String>,
+    pair: Option<bool>,
+}
+
+/// The registered name of a pairing connection. It is not a device id, so it never matches a peer.
+const PAIRING_CONNECTION: &str = "pairing";
+
+/// A stream that ends its reads at a fixed time, whatever the other side does.
+struct Deadlined {
+    stream: UnixStream,
+    deadline: Instant,
+}
+
+impl Read for Deadlined {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let left = self.deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(std::io::ErrorKind::TimedOut.into());
+        }
+        self.stream.set_read_timeout(Some(left))?;
+        self.stream.read(buffer)
+    }
 }
 
 #[derive(Deserialize)]
@@ -70,6 +95,7 @@ struct Connections {
 struct Shared {
     peers: Arc<Peers>,
     log: Arc<Log>,
+    pairing: Arc<Pairing>,
     handler: Box<dyn Handler>,
     connections: Mutex<Connections>,
     live: AtomicUsize,
@@ -121,6 +147,7 @@ impl Server {
         path: PathBuf,
         peers: Arc<Peers>,
         log: Arc<Log>,
+        pairing: Arc<Pairing>,
         handler: impl Handler,
     ) -> Result<Self, &'static str> {
         if path.as_os_str().len() > SOCKET_PATH_MAX {
@@ -144,6 +171,7 @@ impl Server {
         let shared = Arc::new(Shared {
             peers,
             log,
+            pairing,
             handler: Box::new(handler),
             connections: Mutex::new(Connections::default()),
             live: AtomicUsize::new(0),
@@ -217,6 +245,26 @@ fn accept(listener: UnixListener, shared: Arc<Shared>) {
     }
 }
 
+/// Lists the connection, so that cutting a device or stopping the server ends it.
+fn register(shared: &Shared, slot: &mut Slot, name: &str, stream: UnixStream) {
+    let mut open = shared.lock();
+    open.next += 1;
+    let key = open.next;
+    open.open.insert(key, (name.to_owned(), stream));
+    slot.id = Some(key);
+}
+
+/// Runs one pairing session. It has `SESSION_TIMEOUT` in all, from the first line on.
+fn serve_pairing(reader: BufReader<UnixStream>, mut writer: UnixStream, shared: &Shared) {
+    // The start message may have come in the same read as the hello, so keep what is buffered.
+    let buffered = reader.buffer().to_vec();
+    let stream = reader.into_inner();
+    let deadline = Instant::now() + SESSION_TIMEOUT;
+    let _ = writer.set_write_timeout(Some(SESSION_TIMEOUT));
+    let mut input = BufReader::new(Cursor::new(buffered).chain(Deadlined { stream, deadline }));
+    shared.pairing.serve(&mut input, &mut writer);
+}
+
 fn connection(stream: UnixStream, mut slot: Slot) {
     // Only our own user may talk to the app. The socket mode already says so, and this checks it.
     if peer_uid(&stream) != Some(our_uid()) {
@@ -241,22 +289,23 @@ fn connection(stream: UnixStream, mut slot: Slot) {
         _ => return,
     };
     let Ok(Hello {
-        hello: HelloBody { peer },
+        hello: HelloBody { peer, pair },
     }) = serde_json::from_slice(&hello)
     else {
         return reply(&mut writer, "badHello");
     };
-    let id = match DeviceId::parse(&peer) {
-        Ok(id) if shared.peers.get(id.as_str()).is_some() => id.as_str().to_owned(),
-        _ => return reply(&mut writer, "notPaired"),
+    let id = match (peer, pair) {
+        (Some(peer), None) => match DeviceId::parse(&peer) {
+            Ok(id) if shared.peers.get(id.as_str()).is_some() => id.as_str().to_owned(),
+            _ => return reply(&mut writer, "notPaired"),
+        },
+        (None, Some(true)) => {
+            register(&shared, &mut slot, PAIRING_CONNECTION, registered);
+            return serve_pairing(reader, writer, &shared);
+        }
+        _ => return reply(&mut writer, "badHello"),
     };
-    {
-        let mut open = shared.lock();
-        open.next += 1;
-        let key = open.next;
-        open.open.insert(key, (id.clone(), registered));
-        slot.id = Some(key);
-    }
+    register(&shared, &mut slot, &id, registered);
     let _ = reader.get_ref().set_read_timeout(Some(IDLE));
 
     loop {
@@ -326,6 +375,14 @@ mod tests {
         },
     };
     use std::{io::BufRead, sync::atomic::AtomicU32};
+    use crate::{
+        devices::Kind,
+        remote::{
+            authorized_keys::AuthorizedKeys,
+            pake::{testing::HOST_KEY, Own},
+            peers::{testing::KEY, PeerPermissions},
+        },
+    };
 
     /// A handler that runs the dispatcher's own permission check, then answers without an app.
     struct Fake;
@@ -342,6 +399,7 @@ mod tests {
         socket: PathBuf,
         peers: Arc<Peers>,
         log: Arc<Log>,
+        pairing: Arc<Pairing>,
         server: Server,
     }
 
@@ -366,12 +424,37 @@ mod tests {
         let peers = Arc::new(Peers::open(dir.join("peers.json")).unwrap());
         let log = Arc::new(Log::open(dir.join("log.jsonl")).unwrap());
         let socket = dir.join("app.sock");
-        let server = Server::start(socket.clone(), peers.clone(), log.clone(), Fake).unwrap();
+        let host_key_file = dir.join("host.pub");
+        fs::write(&host_key_file, format!("{HOST_KEY}\n")).unwrap();
+        let pairing = Arc::new(Pairing::for_test(
+            peers.clone(),
+            log.clone(),
+            AuthorizedKeys::new(dir.clone(), PathBuf::from("/Applications/L.app/lw")),
+            Arc::new(|| {
+                Ok(Own {
+                    id: DeviceId::parse(ID_B).unwrap(),
+                    name: "Studio".into(),
+                    kind: Kind::Desktop,
+                    public_key: KEY.into(),
+                })
+            }),
+            host_key_file,
+            Duration::from_secs(600),
+        ));
+        let server = Server::start(
+            socket.clone(),
+            peers.clone(),
+            log.clone(),
+            pairing.clone(),
+            Fake,
+        )
+        .unwrap();
         Setup {
             dir,
             socket,
             peers,
             log,
+            pairing,
             server,
         }
     }
@@ -547,6 +630,9 @@ mod tests {
             "not json\n",
             "{\"request\":{}}\n",
             "{\"hello\":{\"peer\":\"x\"},\"more\":1}\n",
+            "{\"hello\":{}}\n",
+            "{\"hello\":{\"pair\":false}}\n",
+            "{\"hello\":{\"peer\":\"x\",\"pair\":true}}\n",
         ] {
             let mut stream = UnixStream::connect(&setup.socket).unwrap();
             stream
@@ -613,6 +699,7 @@ mod tests {
             setup.socket.clone(),
             setup.peers.clone(),
             setup.log.clone(),
+            setup.pairing.clone(),
             Fake,
         );
         assert!(again.is_ok(), "the old socket file is replaced");
@@ -620,7 +707,13 @@ mod tests {
         // A file that is not a socket is never removed.
         let other = setup.dir.join("other.sock");
         fs::write(&other, "x").unwrap();
-        let busy = Server::start(other.clone(), setup.peers.clone(), setup.log.clone(), Fake);
+        let busy = Server::start(
+            other.clone(),
+            setup.peers.clone(),
+            setup.log.clone(),
+            setup.pairing.clone(),
+            Fake,
+        );
         assert_eq!(busy.err(), Some("socketPathBusy"));
         assert_eq!(fs::read_to_string(other).unwrap(), "x");
     }
@@ -629,7 +722,13 @@ mod tests {
     fn a_path_that_is_too_long_stops_the_server() {
         let setup = setup("long");
         let long = setup.dir.join("x".repeat(100)).join("app.sock");
-        let result = Server::start(long, setup.peers.clone(), setup.log.clone(), Fake);
+        let result = Server::start(
+            long,
+            setup.peers.clone(),
+            setup.log.clone(),
+            setup.pairing.clone(),
+            Fake,
+        );
         assert_eq!(result.err(), Some("socketPathTooLong"));
     }
 
@@ -643,6 +742,7 @@ mod tests {
             open.join("a.sock"),
             setup.peers.clone(),
             setup.log.clone(),
+            setup.pairing.clone(),
             Fake,
         );
         assert_eq!(result.err(), Some("remoteDirInvalid"));
@@ -676,7 +776,7 @@ mod tests {
             serde_json::json!({"request": status()}),
             serde_json::json!({"request": {"command": "getDevices"}})
         );
-        let id = DeviceId::parse(ID_A).unwrap();
+        let id = helper::Role::Peer(DeviceId::parse(ID_A).unwrap());
         let code = helper::session(
             &setup.socket,
             &id,
@@ -694,7 +794,7 @@ mod tests {
     fn the_helper_ends_with_an_error_for_an_oversize_line_and_for_an_unknown_peer() {
         let setup = setup("relay-bad");
         setup.pair(ID_A, true, false);
-        let id = DeviceId::parse(ID_A).unwrap();
+        let id = helper::Role::Peer(DeviceId::parse(ID_A).unwrap());
         let sink = Sink::default();
         let mut big = vec![b'a'; MAX_REQUEST_LINE + 1];
         big.push(b'\n');
@@ -707,7 +807,7 @@ mod tests {
         assert_eq!(code, helper::EXIT_TOO_LONG);
         assert!(sink.text().contains("lineTooLong"));
 
-        let stranger = DeviceId::parse(ID_B).unwrap();
+        let stranger = helper::Role::Peer(DeviceId::parse(ID_B).unwrap());
         let sink = Sink::default();
         let code = helper::session(
             &setup.socket,
@@ -717,5 +817,70 @@ mod tests {
         );
         assert_eq!(code, 0);
         assert_eq!(sink.text(), "{\"error\":\"notPaired\"}\n");
+    }
+
+    /// Connects as a device that is pairing, and sends the lines.
+    fn pairing_talk(setup: &Setup, lines: &[&str]) -> Vec<String> {
+        let mut stream = UnixStream::connect(&setup.socket).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        writeln!(stream, "{{\"hello\":{{\"pair\":true}}}}").unwrap();
+        for line in lines {
+            writeln!(stream, "{line}").unwrap();
+        }
+        let mut answers = Vec::new();
+        let mut line = String::new();
+        while reader.read_line(&mut line).unwrap_or(0) > 0 {
+            answers.push(line.trim().to_owned());
+            line.clear();
+        }
+        answers
+    }
+
+    #[test]
+    fn a_pair_hello_is_served_only_while_a_window_is_open() {
+        let setup = setup("pair-hello");
+        assert_eq!(
+            pairing_talk(&setup, &[]),
+            [r#"{"error":"pairingClosed"}"#]
+        );
+        setup
+            .pairing
+            .open(PeerPermissions::default())
+            .unwrap();
+        // The session runs, and a line that is not a start message ends it.
+        assert_eq!(
+            pairing_talk(&setup, &["{\"request\":{}}"]),
+            [r#"{"error":"badMessage"}"#]
+        );
+        // A pairing connection is not a device, and no peer is needed for it.
+        assert!(setup.server.connected().is_empty());
+        setup.pairing.close().unwrap();
+        assert_eq!(
+            pairing_talk(&setup, &[]),
+            [r#"{"error":"pairingClosed"}"#]
+        );
+    }
+
+    #[test]
+    fn a_pairing_session_ends_when_the_server_stops() {
+        let setup = setup("pair-stop");
+        setup
+            .pairing
+            .open(PeerPermissions::default())
+            .unwrap();
+        let stream = UnixStream::connect(&setup.socket).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut writer = stream.try_clone().unwrap();
+        writeln!(writer, "{{\"hello\":{{\"pair\":true}}}}").unwrap();
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(setup.server.connected().len(), 1);
+        setup.server.close_all();
+        let mut reader = BufReader::new(stream);
+        assert!(at_end(&mut reader));
     }
 }

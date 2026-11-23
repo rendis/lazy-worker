@@ -30,6 +30,7 @@ impl Destination {
         })
     }
 
+    #[cfg_attr(not(test), allow(dead_code))] // Used by the step that sends requests over ssh.
     /// Parses `user@host`, `user@host:port`, `user@[v6]` and `user@[v6]:port`. Nothing else.
     pub fn parse(text: &str) -> Result<Self, &'static str> {
         let (user, rest) = text.split_once('@').ok_or("destinationInvalid")?;
@@ -61,7 +62,7 @@ impl fmt::Display for Destination {
     }
 }
 
-fn valid_user(user: &str) -> bool {
+pub fn valid_user(user: &str) -> bool {
     (1..=32).contains(&user.len())
         && user
             .bytes()
@@ -70,6 +71,7 @@ fn valid_user(user: &str) -> bool {
 }
 
 /// Splits the host from an optional port.
+#[cfg_attr(not(test), allow(dead_code))] // Used by `Destination::parse`.
 fn split_port(text: &str) -> Result<(&str, Option<u16>), &'static str> {
     if let Some(rest) = text.strip_prefix('[') {
         let (inner, after) = rest.split_once(']').ok_or("destinationInvalid")?;
@@ -98,6 +100,7 @@ fn split_port(text: &str) -> Result<(&str, Option<u16>), &'static str> {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))] // Used by `Destination::parse`.
 fn parse_port(text: &str) -> Result<u16, &'static str> {
     if text.is_empty() || text.len() > 5 || !text.bytes().all(|byte| byte.is_ascii_digit()) {
         return Err("destinationInvalid");

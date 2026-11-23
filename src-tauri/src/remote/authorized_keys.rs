@@ -7,6 +7,7 @@
 use super::{
     identity::{parse_public_key, DeviceId},
     our_uid,
+    pairing_key,
     peers::{validate_network, Peer},
     write_atomic,
 };
@@ -32,6 +33,8 @@ pub const DEFAULT_NETWORKS: [&str; 7] = [
 ];
 
 const COMMENT_PREFIX: &str = "lazy-worker:";
+/// The name that stands in the managed comment of the pairing line, where a peer has its id.
+pub const PAIRING: &str = "pairing";
 const MAX_FILE: u64 = 1024 * 1024;
 
 /// Serializes the read, change, and write of the file inside this process.
@@ -65,16 +68,9 @@ pub fn render(
     let id = DeviceId::parse(id)?;
     let key = parse_public_key(public_key)?;
     let helper = check_helper(helper)?;
-    let mut allowed: Vec<&str> = DEFAULT_NETWORKS.to_vec();
-    for network in networks {
-        validate_network(network)?;
-        if !allowed.contains(&network.as_str()) {
-            allowed.push(network);
-        }
-    }
     Ok(format!(
         "restrict,from=\"{}\",command=\"\\\"{}\\\" remote --peer {}\" {} {}{}",
-        allowed.join(","),
+        allowed_networks(networks)?.join(","),
         helper,
         id.as_str(),
         key,
@@ -83,12 +79,52 @@ pub fn render(
     ))
 }
 
-/// The id of a managed line: its last word is `lazy-worker:<id>`.
+/// The text that `expiry-time` takes: `YYYYMMDDHHMM` in the local time of the target. sshd
+/// reads a value with no `Z` as local time, so the caller passes a local time. The window end
+/// plus one minute, cut to the minute, is never before the end.
+pub fn expiry_time<Zone: chrono::TimeZone>(end_plus_grace: &chrono::DateTime<Zone>) -> String
+where
+    Zone::Offset: std::fmt::Display,
+{
+    end_plus_grace.format("%Y%m%d%H%M").to_string()
+}
+
+/// The line that lets the fixed pairing key run `remote --pair`, from the same networks as a
+/// peer line, until `expiry` (see `expiry_time`).
+pub fn render_pairing(
+    networks: &[String],
+    helper: &Path,
+    expiry: &str,
+) -> Result<String, &'static str> {
+    let helper = check_helper(helper)?;
+    let digits = expiry.len() == 12 && expiry.bytes().all(|byte| byte.is_ascii_digit());
+    if !digits {
+        return Err("expiryInvalid");
+    }
+    Ok(format!(
+        "restrict,from=\"{}\",expiry-time=\"{expiry}\",command=\"\\\"{helper}\\\" remote --pair\" {} {COMMENT_PREFIX}{PAIRING}",
+        allowed_networks(networks)?.join(","),
+        pairing_key::PUBLIC,
+    ))
+}
+
+fn allowed_networks(networks: &[String]) -> Result<Vec<&str>, &'static str> {
+    let mut allowed: Vec<&str> = DEFAULT_NETWORKS.to_vec();
+    for network in networks {
+        validate_network(network)?;
+        if !allowed.contains(&network.as_str()) {
+            allowed.push(network);
+        }
+    }
+    Ok(allowed)
+}
+
+/// The key of a managed line: its last word is `lazy-worker:<id>`, or `lazy-worker:pairing`.
 fn managed_id(line: &[u8]) -> Option<&str> {
     let text = std::str::from_utf8(line).ok()?;
     let word = text.split_whitespace().next_back()?;
     let id = word.strip_prefix(COMMENT_PREFIX)?;
-    DeviceId::parse(id).ok().map(|_| id)
+    (id == PAIRING || DeviceId::parse(id).is_ok()).then_some(id)
 }
 
 enum Others {
@@ -122,6 +158,20 @@ impl AuthorizedKeys {
     pub fn remove(&self, id: &str) -> Result<(), &'static str> {
         DeviceId::parse(id)?;
         self.rewrite(BTreeMap::from([(id.to_owned(), None)]), Others::Keep)
+    }
+
+    /// Adds the pairing line, or replaces the one that is there.
+    pub fn install_pairing(&self, networks: &[String], expiry: &str) -> Result<(), &'static str> {
+        let line = render_pairing(networks, &self.helper, expiry)?;
+        self.rewrite(
+            BTreeMap::from([(PAIRING.to_owned(), Some(line))]),
+            Others::Keep,
+        )
+    }
+
+    /// Removes the pairing line. Succeeds when there is none.
+    pub fn remove_pairing(&self) -> Result<(), &'static str> {
+        self.rewrite(BTreeMap::from([(PAIRING.to_owned(), None)]), Others::Keep)
     }
 
     pub fn remove_all(&self) -> Result<(), &'static str> {
@@ -184,6 +234,12 @@ impl AuthorizedKeys {
         others: Others,
     ) -> Result<(), &'static str> {
         let _guard = FILE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        // A removal has nothing to do where there is no `~/.ssh`, and it must not make one.
+        if wanted.values().all(Option::is_none)
+            && matches!(fs::symlink_metadata(self.ssh_dir()), Err(error) if error.kind() == ErrorKind::NotFound)
+        {
+            return Ok(());
+        }
         self.prepare_dir()?;
         let original = self.read()?;
         let mut output: Vec<u8> = Vec::with_capacity(original.len() + 512);
@@ -261,6 +317,79 @@ command=\"\\\"{HELPER}\\\" remote --peer {ID_A}\" {KEY} lazy-worker:{ID_A}"
         // An extra network that is already a default is not listed twice.
         let again = render(ID_A, KEY, &["10.0.0.0/8".into()], Path::new(HELPER)).unwrap();
         assert_eq!(again.matches("10.0.0.0/8").count(), 1);
+    }
+
+    #[test]
+    fn the_pairing_line_has_the_exact_text() {
+        let line = render_pairing(
+            &["203.0.113.0/24".into()],
+            Path::new(HELPER),
+            "202611231215",
+        )
+        .unwrap();
+        let expected = format!(
+            "restrict,from=\"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,100.64.0.0/10,fc00::/7,fe80::/10,203.0.113.0/24\",\
+expiry-time=\"202611231215\",command=\"\\\"{HELPER}\\\" remote --pair\" {} lazy-worker:pairing",
+            pairing_key::PUBLIC
+        );
+        assert_eq!(line, expected);
+        assert!(!line.contains("pty") && !line.contains("remote --peer"));
+        for bad in ["", "2026", "20261123121", "2026112312155", "2026-11-23 12", "20261123121x"] {
+            assert_eq!(
+                render_pairing(&[], Path::new(HELPER), bad),
+                Err("expiryInvalid"),
+                "{bad:?}"
+            );
+        }
+        assert_eq!(
+            render_pairing(&[], Path::new("/a/b\"c"), "202611231215"),
+            Err("helperPathInvalid")
+        );
+    }
+
+    #[test]
+    fn the_expiry_time_is_local_year_to_minute() {
+        use chrono::{FixedOffset, TimeZone};
+        let zone = FixedOffset::west_opt(5 * 3600).unwrap();
+        let moment = zone.with_ymd_and_hms(2026, 1, 2, 3, 4, 59).unwrap();
+        assert_eq!(expiry_time(&moment), "202601020304");
+        let night = zone.with_ymd_and_hms(2026, 12, 31, 23, 59, 0).unwrap();
+        assert_eq!(expiry_time(&night), "202612312359");
+    }
+
+    #[test]
+    fn the_pairing_line_is_managed_like_a_peer_line_and_removed_with_them() {
+        let (home, keys) = keys("ak-pairing");
+        fs::create_dir(home.join(".ssh")).unwrap();
+        fs::set_permissions(home.join(".ssh"), fs::Permissions::from_mode(0o700)).unwrap();
+        let foreign: &[u8] = b"ssh-ed25519 AAAA mine\n";
+        fs::write(home.join(".ssh/authorized_keys"), foreign).unwrap();
+        keys.install(&peer(ID_A, "A"), &[]).unwrap();
+        keys.install_pairing(&[], "202611231215").unwrap();
+        let text = String::from_utf8(contents(&home)).unwrap();
+        assert!(text.starts_with("ssh-ed25519 AAAA mine\n"));
+        assert_eq!(text.matches("remote --pair").count(), 1);
+        // A second window replaces the line in place.
+        keys.install_pairing(&["203.0.113.0/24".into()], "202611231300").unwrap();
+        let text = String::from_utf8(contents(&home)).unwrap();
+        assert_eq!(text.matches("remote --pair").count(), 1);
+        assert!(text.contains("202611231300") && !text.contains("202611231215"));
+        keys.remove_pairing().unwrap();
+        let text = String::from_utf8(contents(&home)).unwrap();
+        assert!(!text.contains("remote --pair") && text.contains(ID_A));
+        keys.remove_pairing().unwrap();
+        keys.install_pairing(&[], "202611231215").unwrap();
+        keys.remove_all().unwrap();
+        assert_eq!(contents(&home), foreign);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn removing_the_pairing_line_does_not_make_the_ssh_directory() {
+        let (home, keys) = keys("ak-pairing-none");
+        keys.remove_pairing().unwrap();
+        assert!(!home.join(".ssh").exists());
+        fs::remove_dir_all(home).unwrap();
     }
 
     #[test]

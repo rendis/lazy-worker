@@ -64,6 +64,7 @@
 - Keep both the Tauri bundle and Swift helper deployment targets at macOS 12.0. Keep the frontend build target compatible with Monterey's WebKit.
 - Use `npm run build` and `cargo test --manifest-path src-tauri/Cargo.toml` for changes to the shared app. Use the Intel bundle command in the [development guide](docs/development.md#build-for-macos) for changes to macOS integration.
 - Verify the packaged helper and Accessibility permission on Monterey before reporting hardware compatibility. Verify presence in the target app separately from process status.
+- Keep the pairing key in `src-tauri/src/remote/pairing_key.rs` public on purpose: it reaches only `remote --pair`, and only while a pairing window is open. The 6-digit code that SPAKE2 checks is the secret. The target saves nothing before it checks the controller's confirmation, and the controller saves nothing before it checks the target's.
 
 ## macOS releases
 

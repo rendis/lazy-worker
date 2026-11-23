@@ -1,4 +1,4 @@
-//! What runs when sshd starts `<app> remote --peer <id>`.
+//! What runs when sshd starts `<app> remote --peer <id>` or `<app> remote --pair`.
 //!
 //! The helper relays bounded lines between its input and the app socket, and nothing else. It
 //! starts before any window code, it passes nothing to a shell, and it prints no detail to stderr.
@@ -46,40 +46,49 @@ pub fn run_if_requested() -> Option<i32> {
     let command = std::env::var("SSH_ORIGINAL_COMMAND").ok();
     let home = std::env::var_os("HOME").map(PathBuf::from);
     Some(
-        match (
-            parse_args(&args[2..]),
-            check_command(command.as_deref()),
-            home,
-        ) {
-            (Ok(peer), Ok(()), Some(home)) if home.is_absolute() => {
-                session(&socket_path(&home), &peer, std::io::stdin(), output)
-            }
-            (Err(code), ..) | (_, Err(code), _) => {
+        match parse_args(&args[2..]).and_then(|role| {
+            check_command(&role, command.as_deref())?;
+            Ok(role)
+        }) {
+            Ok(role) => match home {
+                Some(home) if home.is_absolute() => {
+                    session(&socket_path(&home), &role, std::io::stdin(), output)
+                }
+                _ => {
+                    output.line(&error_line("remoteUnavailable"));
+                    EXIT_REFUSED
+                }
+            },
+            Err(code) => {
                 output.line(&error_line(code));
-                EXIT_REFUSED
-            }
-            _ => {
-                output.line(&error_line("remoteUnavailable"));
                 EXIT_REFUSED
             }
         },
     )
 }
 
-/// The arguments after `remote`: exactly `--peer <id>`.
-pub fn parse_args(args: &[OsString]) -> Result<DeviceId, &'static str> {
+/// Who the helper speaks for: a paired device, or a device that is pairing.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Role {
+    Peer(DeviceId),
+    Pair,
+}
+
+/// The arguments after `remote`: exactly `--peer <id>` or exactly `--pair`.
+pub fn parse_args(args: &[OsString]) -> Result<Role, &'static str> {
     match args {
-        [flag, id] if flag == "--peer" => {
-            DeviceId::parse(id.to_str().ok_or("argumentsInvalid")?).map_err(|_| "argumentsInvalid")
-        }
+        [flag, id] if flag == "--peer" => DeviceId::parse(id.to_str().ok_or("argumentsInvalid")?)
+            .map(Role::Peer)
+            .map_err(|_| "argumentsInvalid"),
+        [flag] if flag == "--pair" => Ok(Role::Pair),
         _ => Err("argumentsInvalid"),
     }
 }
 
-/// The one command the helper serves. Pairing and the shell come in later steps.
-pub fn check_command(original: Option<&str>) -> Result<(), &'static str> {
-    match original {
-        Some("dispatch") => Ok(()),
+/// The one command that each role may run. The shell comes in a later step.
+pub fn check_command(role: &Role, original: Option<&str>) -> Result<(), &'static str> {
+    match (role, original) {
+        (Role::Peer(_), Some("dispatch")) | (Role::Pair, Some("pair")) => Ok(()),
         _ => Err("commandNotAllowed"),
     }
 }
@@ -131,10 +140,18 @@ fn check_socket(socket: &Path) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// The first line for the app: who is on the other end.
+fn hello(role: &Role) -> serde_json::Value {
+    match role {
+        Role::Peer(peer) => serde_json::json!({ "hello": { "peer": peer.as_str() } }),
+        Role::Pair => serde_json::json!({ "hello": { "pair": true } }),
+    }
+}
+
 /// Relays between `input` and the app socket until one side ends. Returns the exit code.
 pub fn session(
     socket: &Path,
-    peer: &DeviceId,
+    role: &Role,
     input: impl Read + Send + 'static,
     output: Output,
 ) -> i32 {
@@ -163,10 +180,7 @@ pub fn session(
     let (Ok(mut writer), Ok(reader)) = (stream.try_clone(), stream.try_clone()) else {
         return fail("remoteUnavailable", EXIT_APP_NOT_RUNNING);
     };
-    let hello = format!(
-        "{}\n",
-        serde_json::json!({ "hello": { "peer": peer.as_str() } })
-    );
+    let hello = format!("{}\n", hello(role));
     if writer.write_all(hello.as_bytes()).is_err() {
         return fail("remoteUnavailable", EXIT_APP_NOT_RUNNING);
     }
@@ -243,10 +257,19 @@ mod tests {
     }
 
     #[test]
-    fn only_peer_with_a_valid_id_is_accepted() {
+    fn only_peer_with_a_valid_id_or_pair_alone_is_accepted() {
         let id = "0123456789abcdef0123456789abcdef";
-        assert_eq!(parse_args(&args(&["--peer", id])).unwrap().as_str(), id);
+        assert_eq!(
+            parse_args(&args(&["--peer", id])).unwrap(),
+            Role::Peer(DeviceId::parse(id).unwrap())
+        );
+        assert_eq!(parse_args(&args(&["--pair"])).unwrap(), Role::Pair);
         for bad in [
+            args(&["--pair", id]),
+            args(&["--pair", "--peer", id]),
+            args(&["--peer", id, "--pair"]),
+            args(&["--pair", "--pair"]),
+            args(&["--Pair"]),
             args(&[]),
             args(&["--peer"]),
             args(&["--peer", "short"]),
@@ -260,27 +283,56 @@ mod tests {
     }
 
     #[test]
-    fn only_dispatch_is_served() {
-        assert_eq!(check_command(Some("dispatch")), Ok(()));
-        for other in [
-            None,
-            Some(""),
-            Some("pair"),
-            Some("shell"),
-            Some("dispatch "),
-            Some("dispatch; id"),
-            Some("Dispatch"),
-            Some("bash"),
-        ] {
-            assert_eq!(check_command(other), Err("commandNotAllowed"), "{other:?}");
+    fn a_peer_runs_only_dispatch_and_a_pairing_runs_only_pair() {
+        let peer = Role::Peer(DeviceId::parse("0123456789abcdef0123456789abcdef").unwrap());
+        assert_eq!(check_command(&peer, Some("dispatch")), Ok(()));
+        assert_eq!(check_command(&Role::Pair, Some("pair")), Ok(()));
+        // Each role refuses the other's word.
+        assert_eq!(check_command(&peer, Some("pair")), Err("commandNotAllowed"));
+        assert_eq!(
+            check_command(&Role::Pair, Some("dispatch")),
+            Err("commandNotAllowed")
+        );
+        for role in [&peer, &Role::Pair] {
+            for other in [
+                None,
+                Some(""),
+                Some("shell"),
+                Some("dispatch "),
+                Some("pair "),
+                Some("dispatch; id"),
+                Some("pair; id"),
+                Some("Dispatch"),
+                Some("Pair"),
+                Some("bash"),
+            ] {
+                assert_eq!(
+                    check_command(role, other),
+                    Err("commandNotAllowed"),
+                    "{role:?} {other:?}"
+                );
+            }
         }
+    }
+
+    #[test]
+    fn the_hello_names_the_peer_or_the_pairing() {
+        let id = "0123456789abcdef0123456789abcdef";
+        assert_eq!(
+            hello(&Role::Peer(DeviceId::parse(id).unwrap())).to_string(),
+            format!("{{\"hello\":{{\"peer\":\"{id}\"}}}}")
+        );
+        assert_eq!(
+            hello(&Role::Pair).to_string(),
+            "{\"hello\":{\"pair\":true}}"
+        );
     }
 
     #[test]
     fn without_the_app_the_helper_answers_app_not_running() {
         let dir = super::super::testing::scratch("helper-none");
         let sink = crate::remote::testing::Sink::default();
-        let peer = DeviceId::parse("0123456789abcdef0123456789abcdef").unwrap();
+        let peer = Role::Peer(DeviceId::parse("0123456789abcdef0123456789abcdef").unwrap());
         let code = session(
             &dir.join("remote/app.sock"),
             &peer,

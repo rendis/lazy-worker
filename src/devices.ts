@@ -494,10 +494,10 @@ export function mountDevices(host: Host) {
           if (off || noUser) renderGuide();
           else closeGuide(false);
         }
-        setText(pairingState, t(data.pairing === "open" ? "pairingOpen" : "pairingClosed"));
-        // Pairing and actions arrive in later steps, so the app shows them off until then.
+        setText(pairingState, t(data.pairing.open ? "pairingOpen" : "pairingClosed"));
+        // The pairing screen and actions arrive in later steps, so the app shows them off until then.
         const later = desktop.sampleDevices ? undefined : t("notAvailableYet");
-        pairing.disable(data.pairing === "open" ? t("pairingOpen") : later, t("openPairing"));
+        pairing.disable(data.pairing.open ? t("pairingOpen") : later, t("openPairing"));
         addAction.disable(later, t("addAction"));
         log.disable(undefined, t("showLog"));
         if (confirming && confirming !== "cut" && confirming !== "passwords" && !data.controllers.some(({ id }) => id === confirming)) confirming = undefined;
@@ -765,8 +765,8 @@ export function mountDevices(host: Host) {
     return {
       root,
       update(current: RemoteDevice): void {
-        sections.hidden = !current.online;
-        offline.hidden = current.online;
+        sections.hidden = current.online !== true;
+        offline.hidden = current.online === true;
         const known = current.tools.filter(tool => tools.some(({ id }) => id === tool.id));
         toolList.sync(known);
         setText(toolsSection.summary, fill(t("deviceToolsSummary"), {
@@ -813,9 +813,9 @@ export function mountDevices(host: Host) {
           return;
         }
         const device = current.data as RemoteDevice;
-        state.toggleAttribute("data-on", device.online);
-        setText(state, t(device.online ? "deviceOnline" : "deviceOffline"));
-        open.disable(device.online ? (desktop.sampleDevices ? undefined : t("notAvailableYet")) : t("deviceOfflineTip"), t("openInterface"));
+        state.toggleAttribute("data-on", device.online === true);
+        setText(state, t(device.online === true ? "deviceOnline" : "deviceOffline"));
+        open.disable(device.online === true ? (desktop.sampleDevices ? undefined : t("notAvailableYet")) : t("deviceOfflineTip"), t("openInterface"));
         (content as ReturnType<typeof remoteBody>).update(device);
       },
     };
@@ -855,7 +855,7 @@ export function mountDevices(host: Host) {
         thisDevice: {
           name: "", kind: "desktop",
           remoteAccess: { remoteLogin: "off", passwordLogin: "unknown", userAllowed: null, managedFile: false, macosMajor: null },
-          pairing: "closed", controllers: [],
+          pairing: { open: false, expires: null, attemptsLeft: 0 }, controllers: [],
           socket: { listening: true, error: null }, actions: [],
         },
         devices: [],

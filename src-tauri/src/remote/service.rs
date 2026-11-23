@@ -3,16 +3,23 @@
 
 use super::{
     authorized_keys::AuthorizedKeys,
-    identity::DeviceId,
+    controlled::Store,
+    destination::Destination,
+    identity::{self, DeviceId},
+    known_hosts,
     log::{Entry, Log},
-    peers::Peers,
+    pair_client,
+    pake::{Own, OwnDevice},
+    pairing::{Opened, Pairing},
+    peers::{clean_name, PeerPermissions, Peers},
     server::{Handler, Server},
-    Layout,
+    ssh, Layout,
 };
 use crate::{
-    devices::{Controller, Socket},
+    devices::{self, Controller, Remote, Socket},
     dispatch::{self, Origin, Request},
 };
+use serde::Serialize;
 use serde_json::Value;
 use std::{path::PathBuf, sync::Arc};
 use tauri::{AppHandle, Manager};
@@ -27,10 +34,39 @@ impl Handler for Dispatcher {
 }
 
 struct Running {
+    layout: Layout,
     peers: Arc<Peers>,
     log: Arc<Log>,
     keys: Result<AuthorizedKeys, &'static str>,
+    pairing: Arc<Pairing>,
+    own: OwnDevice,
+    /// The devices that this one controls. An error code when the file could not be opened.
+    controlled: Result<Store, &'static str>,
     server: Result<Server, &'static str>,
+}
+
+/// What forgetting a device leaves undone: our key stays in its `authorized_keys`, and only that
+/// device can remove it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Forgotten {
+    pub remove_on_device: bool,
+}
+
+/// The name of a device that the system does not name.
+const UNNAMED: &str = "Unnamed device";
+
+/// This device as a party of a pairing. It creates the identity when there is none.
+fn own_device(layout: &Layout) -> Result<Own, &'static str> {
+    let identity = identity::load_or_create(layout)?;
+    let device = devices::this_device();
+    let name = clean_name(&device.name);
+    Ok(Own {
+        id: identity.device_id,
+        name: if name.is_empty() { UNNAMED.to_owned() } else { name },
+        kind: device.kind,
+        public_key: identity.public_key,
+    })
 }
 
 /// Managed by the app. Holds an error code when the files could not be opened, so the Devices
@@ -64,11 +100,36 @@ impl Service {
                 let _ = keys.refresh_all(&peers.list(), &peers.networks());
             }
         }
-        let server = Server::start(layout.socket_file(), peers.clone(), log.clone(), handler);
+        // A pairing line that is still there belongs to a window that ended with the last run.
+        if let Ok(keys) = &keys {
+            let _ = keys.remove_pairing();
+        }
+        let own: OwnDevice = {
+            let layout = layout.clone();
+            Arc::new(move || own_device(&layout))
+        };
+        let pairing = Arc::new(Pairing::new(
+            peers.clone(),
+            log.clone(),
+            keys.clone(),
+            own.clone(),
+        ));
+        let controlled = Store::open(layout.devices_file());
+        let server = Server::start(
+            layout.socket_file(),
+            peers.clone(),
+            log.clone(),
+            pairing.clone(),
+            handler,
+        );
         Ok(Running {
+            layout: layout.clone(),
             peers,
             log,
             keys,
+            pairing,
+            own,
+            controlled,
             server,
         })
     }
@@ -146,8 +207,99 @@ impl Service {
         outcome
     }
 
+    pub fn pairing_state(&self) -> devices::Pairing {
+        self.running()
+            .map_or_else(|_| devices::Pairing::closed(), |running| running.pairing.state())
+    }
+
+    /// Opens a pairing window with the permissions that the user chose here. It reads the
+    /// system, so call it off the main thread.
+    pub fn open_pairing(
+        &self,
+        control: bool,
+        applications: bool,
+        actions: bool,
+    ) -> Result<Opened, &'static str> {
+        self.running()?.pairing.open(PeerPermissions {
+            control,
+            applications,
+            actions,
+            shell: false,
+        })
+    }
+
+    pub fn close_pairing(&self) -> Result<(), &'static str> {
+        self.running()?.pairing.close()
+    }
+
+    /// The devices that this one controls, with what is known of whether they answer.
+    pub fn remote_devices(&self) -> Vec<Remote> {
+        let Ok(Running {
+            controlled: Ok(store),
+            ..
+        }) = &self.0
+        else {
+            return Vec::new();
+        };
+        let list = store.list();
+        let online = store.online(&list);
+        list.iter()
+            .zip(online)
+            .map(|(device, online)| Remote::new(device, online))
+            .collect()
+    }
+
+    /// Pairs with the device at the address, with the code that it shows. It runs ssh and can
+    /// take a minute, so call it off the main thread.
+    pub fn pair_device(
+        &self,
+        user: &str,
+        host: &str,
+        port: Option<u16>,
+        code: &str,
+    ) -> Result<Remote, &'static str> {
+        let running = self.running()?;
+        let store = running.controlled.as_ref().map_err(|code| *code)?;
+        let destination = Destination::new(user, host, port)?;
+        let device = pair_client::pair(&running.layout, store, &running.own, &destination, code)?;
+        let _ = running.log.append(&Entry::new(
+            Some(&device.id),
+            Some(&device.name),
+            "pairDevice",
+            "ok",
+        ));
+        Ok(Remote::new(&device, None))
+    }
+
+    /// Removes a device from this one: the entry, the pinned host key, and the open connection.
+    /// Our key stays in the `authorized_keys` of that device, so the answer says that it must be
+    /// removed there too.
+    pub fn forget_device(&self, id: &str) -> Result<Forgotten, &'static str> {
+        let device_id = DeviceId::parse(id)?;
+        let running = self.running()?;
+        let store = running.controlled.as_ref().map_err(|code| *code)?;
+        let device = store.remove(id)?.ok_or("notPaired")?;
+        // The device is gone either way. A step that fails is reported after the others ran.
+        let unpinned = known_hosts::unpin(&running.layout, &device_id);
+        let stopped = device
+            .destination()
+            .and_then(|destination| ssh::stop_master(&running.layout, &destination, &device_id));
+        let outcome = unpinned.and(stopped);
+        let _ = running.log.append(&Entry::new(
+            Some(id),
+            Some(&device.name),
+            "forgetDevice",
+            outcome.err().unwrap_or("ok"),
+        ));
+        outcome.map(|()| Forgotten {
+            remove_on_device: true,
+        })
+    }
+
     pub fn cut_all(&self) -> Result<(), &'static str> {
         let running = self.running()?;
+        // Nobody can pair while access is being cut.
+        let _ = running.pairing.close();
         running.peers.clear()?;
         if let Ok(server) = &running.server {
             server.close_all();
@@ -172,11 +324,12 @@ impl Service {
 
     /// Ends the connections and removes the socket, when the app quits.
     pub fn stop(&self) {
-        if let Ok(Running {
-            server: Ok(server), ..
-        }) = &self.0
-        {
-            server.stop();
+        if let Ok(running) = &self.0 {
+            // The window and its line must not outlive the app.
+            let _ = running.pairing.close();
+            if let Ok(server) = &running.server {
+                server.stop();
+            }
         }
     }
 }

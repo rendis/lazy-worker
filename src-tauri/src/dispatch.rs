@@ -134,6 +134,10 @@ pub enum Request {
         actions: bool,
     },
     RemovePeer { id: String },
+    OpenPairing { control: bool, applications: bool, actions: bool },
+    ClosePairing,
+    PairDevice { user: String, host: String, port: Option<u16>, code: String },
+    ForgetDevice { id: String },
     CutAllAccess,
     AllowPasswordLogin,
     EnableRemoteAccess,
@@ -191,6 +195,10 @@ impl Request {
             | Self::GetRemoteLog
             | Self::SetPeerPermissions { .. }
             | Self::RemovePeer { .. }
+            | Self::OpenPairing { .. }
+            | Self::ClosePairing
+            | Self::PairDevice { .. }
+            | Self::ForgetDevice { .. }
             | Self::CutAllAccess
             | Self::AllowPasswordLogin
             | Self::EnableRemoteAccess
@@ -246,6 +254,10 @@ impl Request {
             | Self::RequestActivityAccessibility
             | Self::SetPeerPermissions { .. }
             | Self::RemovePeer { .. }
+            | Self::OpenPairing { .. }
+            | Self::ClosePairing
+            | Self::PairDevice { .. }
+            | Self::ForgetDevice { .. }
             | Self::CutAllAccess
             | Self::AllowPasswordLogin
             | Self::EnableRemoteAccess
@@ -361,19 +373,29 @@ async fn run(
         Request::GetProxyLog => json(locked("workerUnavailable")?.proxy.log()),
         Request::GetDevices => {
             #[cfg(unix)]
-            let (controllers, socket) = {
+            let stores = {
                 let service = app.state::<crate::remote::service::Service>();
-                (service.controllers(), service.socket())
+                devices::Stores {
+                    controllers: service.controllers(),
+                    socket: service.socket(),
+                    pairing: service.pairing_state(),
+                    devices: service.remote_devices(),
+                }
             };
             #[cfg(not(unix))]
-            let (controllers, socket) = (Vec::new(), devices::Socket::unavailable("unsupported"));
+            let stores = devices::Stores {
+                controllers: Vec::new(),
+                socket: devices::Socket::unavailable("unsupported"),
+                pairing: devices::Pairing::closed(),
+                devices: Vec::new(),
+            };
             json(
                 tauri::async_runtime::spawn_blocking(move || {
                     #[cfg(unix)]
                     let access = crate::remote::access::status();
                     #[cfg(not(unix))]
                     let access = devices::RemoteAccess::unavailable();
-                    devices::overview(controllers, socket, access)
+                    devices::overview(stores, access)
                 })
                 .await
                 .map_err(|_| "workerUnavailable")?,
@@ -435,6 +457,72 @@ async fn run(
             .await
             .map_err(|_| "workerUnavailable")?
             .map(|()| Value::Null);
+            #[cfg(not(unix))]
+            {
+                let _ = id;
+                Err("unsupported")
+            }
+        }
+        Request::OpenPairing { control, applications, actions } => {
+            #[cfg(unix)]
+            return json(
+                tauri::async_runtime::spawn_blocking({
+                    let app = app.clone();
+                    move || {
+                        app.state::<crate::remote::service::Service>()
+                            .open_pairing(control, applications, actions)
+                    }
+                })
+                .await
+                .map_err(|_| "workerUnavailable")??,
+            );
+            #[cfg(not(unix))]
+            {
+                let _ = (control, applications, actions);
+                Err("unsupported")
+            }
+        }
+        Request::ClosePairing => {
+            #[cfg(unix)]
+            return tauri::async_runtime::spawn_blocking({
+                let app = app.clone();
+                move || app.state::<crate::remote::service::Service>().close_pairing()
+            })
+            .await
+            .map_err(|_| "workerUnavailable")?
+            .map(|()| Value::Null);
+            #[cfg(not(unix))]
+            Err("unsupported")
+        }
+        Request::PairDevice { user, host, port, code } => {
+            #[cfg(unix)]
+            return json(
+                tauri::async_runtime::spawn_blocking({
+                    let app = app.clone();
+                    move || {
+                        app.state::<crate::remote::service::Service>()
+                            .pair_device(&user, &host, port, &code)
+                    }
+                })
+                .await
+                .map_err(|_| "workerUnavailable")??,
+            );
+            #[cfg(not(unix))]
+            {
+                let _ = (user, host, port, code);
+                Err("unsupported")
+            }
+        }
+        Request::ForgetDevice { id } => {
+            #[cfg(unix)]
+            return json(
+                tauri::async_runtime::spawn_blocking({
+                    let app = app.clone();
+                    move || app.state::<crate::remote::service::Service>().forget_device(&id)
+                })
+                .await
+                .map_err(|_| "workerUnavailable")??,
+            );
             #[cfg(not(unix))]
             {
                 let _ = id;
@@ -705,6 +793,11 @@ mod tests {
             json!({"command": "getRemoteLog"}),
             json!({"command": "setPeerPermissions", "args": {"id": id, "control": true, "applications": true, "actions": true}}),
             json!({"command": "removePeer", "args": {"id": id}}),
+            json!({"command": "openPairing", "args": {"control": true, "applications": true, "actions": true}}),
+            json!({"command": "closePairing"}),
+            json!({"command": "pairDevice", "args": {"user": "me", "host": "studio.local", "port": 22, "code": "123456"}}),
+            json!({"command": "pairDevice", "args": {"user": "me", "host": "studio.local", "code": "123456"}}),
+            json!({"command": "forgetDevice", "args": {"id": id}}),
             json!({"command": "cutAllAccess"}),
             json!({"command": "allowPasswordLogin"}),
             json!({"command": "enableRemoteAccess"}),
