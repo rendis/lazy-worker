@@ -1,0 +1,13 @@
+{
+  "request": "Character model sheet for the antagonist of a clay stop-motion series. Same character as the first reference: a corporate eyeball. Head is one big clay eyeball (cream sclera with thin red-orange vein squiggles, one large dark iris, two thick brown clay eyebrows), a white shirt collar and a burgundy clay tie. Give him a short tapered cream clay body like the first reference, with two small mitten hands in short white shirt sleeves and two short stubby legs with tiny dark brown shoes. Same handmade plasticine texture, warm studio light and scale as the hero in the second reference. Lay out six full-body poses of the SAME character in a 3 x 2 grid, each centred in its own equal cell with space around it, all facing the viewer at the same size and the same camera height: 1) watching: hands behind his back, iris looking sideways, one brow raised, suspicious. 2) checking: holds a small clay clipboard and ticks it with a pencil. 3) blocking: one palm raised flat toward the viewer in a stop gesture, brows angry and low. 4) fooled and happy: the eye closed in a happy curve with a wide smile, like the right face in the first reference, hands clasped. 5) outsmarted: iris looking up, brows high, small clay sweat drop, hands spread. 6) grumpy: arms crossed, brows angry, iris glaring sideways. Flat solid deep teal background (#164544), no floor, no props other than the clipboard and pencil, no text, no letters, no numbers.",
+  "edit": null,
+  "select": null,
+  "references": [
+    "/private/tmp/claude-501/-Users-rendis-Projects-Workshop-open-source-lazy-worker/cb0f2ab7-ce34-46ed-ba0a-9f85bdacb5e4/scratchpad/insp-ref.png",
+    "/private/tmp/claude-501/-Users-rendis-Projects-Workshop-open-source-lazy-worker/cb0f2ab7-ce34-46ed-ba0a-9f85bdacb5e4/scratchpad/miga-ref.png"
+  ],
+  "size": "1536x1024",
+  "model": "gpt-6.2-sol",
+  "effort": "medium",
+  "generated": "2026-11-23T12:53:59"
+}

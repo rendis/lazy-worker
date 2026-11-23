@@ -1,0 +1,204 @@
+<template>
+  <style>
+    #root { position:absolute; inset:0; overflow:hidden }
+    .set.two { background-image:url("assets/workshop-proxy.webp") }
+    .ai-cloud { position:absolute; left:610px; top:14px; width:700px; height:315px; background:url("assets/ai-cloud.webp") center/contain no-repeat }
+    .glow { position:absolute; width:240px; height:240px; margin:-120px 0 0 -120px; border-radius:50%; opacity:0;
+      background:radial-gradient(circle,#fff1b8 0,#ffd76a99 35%,transparent 70%) }
+    .screen { position:absolute; border-radius:22px; opacity:0 }
+    .screen svg { position:absolute; left:50%; top:50%; width:120px; height:120px; margin:-60px 0 0 -60px; fill:none; stroke:#fff6dc;
+      stroke-width:9; stroke-linecap:round; stroke-linejoin:round; filter:drop-shadow(1px 3px 2px #321f1980) }
+    .screen.left { left:252px; top:632px; width:262px; height:187px }
+    .screen.right { left:1356px; top:635px; width:267px; height:190px; background:#6fb548 }
+    .screen.denied { background:#b5432f }
+    .screen.through { background:#569b38 }
+    .boss-clip { position:absolute; left:0; top:0; width:900px; height:594px; overflow:hidden }
+    .boss { position:absolute; left:144px; top:108px; width:512px; height:512px }
+    .boss-flip { width:100%; height:100%; transform:scale(-.86,.86); transform-origin:50% 95% }
+    .boss .lids { display:none }
+    .cable { position:absolute; left:540px; top:721px; width:790px; height:76px; background:url("assets/cable.webp") center/100% 100% no-repeat;
+      clip-path:inset(0 50% 0 50%) }
+    .packet { position:absolute; left:0; top:0; width:130px; height:104px; background:center/contain no-repeat; opacity:0 }
+    .packet.spark { background-image:url("assets/packet-spark.webp") }
+    .packet.robot { background-image:url("assets/packet-robot.webp") }
+    .packet.brain { background-image:url("assets/packet-brain.webp") }
+    .ai-mark { position:absolute; left:252px; top:632px; width:262px; height:187px }
+    .ai-mark svg { position:absolute; left:81px; top:43px; width:100px; height:100px; fill:#f2bf3d; stroke:#fff1c9; stroke-width:1.2;
+      stroke-linejoin:round; filter:drop-shadow(1px 3px 2px #10182680) }
+    .reply { position:absolute; left:0; top:0; width:56px; height:56px; border-radius:50%; opacity:0;
+      background:radial-gradient(circle at 40% 35%,#fff7cf,#f2bf3d 55%,#c98a1b); box-shadow:0 0 22px 6px #ffd76a99 }
+    .burst { position:absolute; left:560px; top:350px; width:120px; height:120px; opacity:0; fill:none; stroke:#fff1c9; stroke-width:10;
+      stroke-linecap:round; filter:drop-shadow(1px 3px 2px #321f1980) }
+    .plug-puff { position:absolute }
+    .plug-puff i { opacity:0; position:absolute; width:30px; height:30px; border-radius:50%; background:#f3d9b4; box-shadow:inset -3px -4px 5px #b9805e80 }
+  </style>
+  <div id="root" data-composition-id="proxy" data-width="1920" data-height="1080">
+    <div class="workbench" id="proxy-stage" data-layout-allow-overflow data-layout-allow-overlap>
+      <div class="set two"></div>
+      <div class="glow" id="proxy-glow-spark" style="left:753px;top:106px"></div>
+      <div class="glow" id="proxy-glow-robot" style="left:963px;top:106px"></div>
+      <div class="glow" id="proxy-glow-brain" style="left:1175px;top:116px"></div>
+      <div class="ai-cloud" id="proxy-ai"></div>
+      <div class="ai-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M9.94 15.5a2 2 0 0 0-1.44-1.44l-6.13-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0l1.58 6.14a2 2 0 0 0 1.44 1.44l6.13 1.58a.5.5 0 0 1 0 .96l-6.13 1.58a2 2 0 0 0-1.44 1.44l-1.58 6.14a.5.5 0 0 1-.96 0z"/></svg>
+      </div>
+      <div class="screen left denied" id="proxy-denied">
+        <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M18 18l28 28M46 18L18 46"/></svg>
+      </div>
+      <div class="screen left through" id="proxy-through">
+        <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M15 33l11 11 23-26"/></svg>
+      </div>
+      <div class="screen right" id="proxy-relay"></div>
+      <div class="boss-clip">
+        <div class="boss" id="proxy-boss">
+          <div class="boss-flip">
+            <div class="pose" id="proxy-boss-pose">
+              <svg id="proxy-boss-sculpt" class="sculpt" width="512" height="512" viewBox="0 0 512 512" aria-hidden="true">
+                <image href="assets/inspector-poses.webp" width="1536" height="1024"/>
+              </svg>
+              <div class="lids" id="proxy-boss-lids"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <svg class="burst" id="proxy-burst" viewBox="0 0 120 120" aria-hidden="true"><path d="M20 30l18 14M60 12v22M100 30L82 44"/></svg>
+      <div class="cable" id="proxy-cable"></div>
+      <div class="plug-puff" id="proxy-puff-left" style="left:540px;top:745px"><i></i><i></i><i></i></div>
+      <div class="plug-puff" id="proxy-puff-right" style="left:1310px;top:745px"><i></i><i></i><i></i></div>
+      <div class="packet spark" id="proxy-try1"></div>
+      <div class="packet robot" id="proxy-try2"></div>
+      <div class="packet spark" id="proxy-sent-spark"></div>
+      <div class="packet robot" id="proxy-sent-robot"></div>
+      <div class="packet brain" id="proxy-sent-brain"></div>
+      <div class="reply" id="proxy-reply-spark"></div>
+      <div class="reply" id="proxy-reply-robot"></div>
+      <div class="reply" id="proxy-reply-brain"></div>
+      <div class="shadow miga-shadow" id="proxy-shadow" style="opacity:0"></div>
+      <div class="miga" id="proxy-puppet">
+        <div class="pose" id="proxy-pose">
+          <svg id="proxy-sculpt" class="sculpt" width="512" height="512" viewBox="0 0 512 512" aria-hidden="true">
+            <image href="assets/miga-poses.webp" width="1536" height="1024"/>
+            <image href="assets/miga-proxy.webp" x="1536" width="512" height="512"/>
+          </svg>
+          <div class="lids" id="proxy-lids"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const film = gsap.timeline({paused:true});
+    const {move, pose, swap, blink, wait, arrive, thumbsUp, dust} = makeClayPuppet(film, {
+      sculpt:"#proxy-sculpt", lids:"#proxy-lids", pose:"#proxy-pose", body:"#proxy-puppet", shadow:"#proxy-shadow"
+    });
+    // The Inspector uses the same sculpt swap with his own sheet.
+    const boss = makeClayPuppet(film, {
+      sculpt:"#proxy-boss-sculpt", lids:"#proxy-boss-lids", pose:"#proxy-boss-pose", body:"#proxy-boss", shadow:"#proxy-boss"
+    });
+    const WATCH = 0, CHECK = 1, BLOCK = 2, OUTSMARTED = 4, GRUMPY = 5;
+    const CARRY = 6, HIPS = 4;
+    const HOME = 848;
+    const miga = ["#proxy-puppet","#proxy-shadow"];
+
+    // Positions are the centre of a packet.
+    const leftScreen = {x:383, y:722}, palm = {x:548, y:432};
+    // Each AI service stands on the internet cloud. A packet carries the mark of the one it goes to.
+    const sites = {spark:{x:753, y:106}, robot:{x:963, y:106}, brain:{x:1175, y:116}};
+    const rightTop = {x:1490, y:600};
+    // The cable's centre line, from the left connector to the right one.
+    const cable = [[571,763],[627,764],[683,765],[739,758],[795,760],[850,770],[906,779],[963,779],
+      [1018,769],[1074,758],[1130,756],[1186,764],[1242,764],[1298,763]];
+
+    const at = (p, extra) => ({x:p.x, y:p.y, ...extra});
+    function along(target, points, start, duration, scale) {
+      const step = duration / (points.length - 1);
+      points.slice(1).forEach((p, i) => move(target, {x:points[i][0], y:points[i][1], scale},
+        {x:p[0], y:p[1], scale}, start + i * step, step, "none"));
+    }
+    // A packet leaves the screen, hits the Inspector's palm and drops onto the pile.
+    function attempt(id, start, rest, tilt) {
+      const hit = start + .55;
+      move(id, at(leftScreen, {opacity:1, scale:.2, rotation:0}), at(palm, {opacity:1, scale:1, rotation:-8}), start, .55, "power2.out");
+      move(id, {scaleX:1, scaleY:1}, {scaleX:.72, scaleY:1.14}, hit, .07, "power2.out");
+      move(id, {scaleX:.72, scaleY:1.14}, {scaleX:1, scaleY:1}, hit + .07, .14, "back.out(3)");
+      move(id, at(palm, {rotation:-8, scale:1}), at(rest, {rotation:tilt, scale:.75}), hit + .21, .44, "power2.in");
+      move(id, {scaleX:.75, scaleY:.75}, {scaleX:.86, scaleY:.6}, hit + .65, .07, "power2.out");
+      move(id, {scaleX:.86, scaleY:.6}, {scaleX:.75, scaleY:.75}, hit + .72, .22, "back.out(3)");
+      move("#proxy-burst", {opacity:1, scale:.5}, {opacity:1, scale:1}, hit, .16, "back.out(3)");
+      move("#proxy-burst", {opacity:1}, {opacity:0}, hit + .30, .16, "power1.in");
+      return hit;
+    }
+
+    const camera = "#proxy-stage";
+    const wide = {scale:1, x:0, y:0}, close = {scale:1.16, x:-24, y:-46};
+    gsap.set(camera, {transformOrigin:"0 0", ...wide});
+    gsap.set([".packet",".reply"], {xPercent:-50, yPercent:-50});
+    gsap.set("#proxy-boss", {y:470});
+    boss.pose(WATCH, 0);
+    wait(HOME);
+    pose(CARRY, 0);
+
+    // Without Proxy. This Mac's AI tool tries to reach its services and the Inspector stops every packet.
+    move(camera, wide, close, .30, 2.30, "power1.inOut");
+    move("#proxy-boss", {y:470}, {y:0}, .55, .36, "back.out(1.6)");
+    boss.swap(BLOCK, .86);
+    const first = attempt("#proxy-try1", .48, {x:648, y:925}, -14);
+    move("#proxy-denied", {opacity:0}, {opacity:.92}, first + .04, .12, "power1.out");
+    attempt("#proxy-try2", 1.78, {x:668, y:852}, 9);
+    // Satisfied, he ticks his clipboard.
+    boss.swap(CHECK, 2.85);
+    move("#proxy-boss-pose", {rotation:0}, {rotation:-4}, 3.05, .12, "power2.out");
+    move("#proxy-boss-pose", {rotation:-4}, {rotation:0}, 3.17, .30, "back.out(2.5)");
+
+    // With Proxy. Miga throws a network cable between the two Macs.
+    move(camera, close, wide, 3.30, .60, "power3.inOut");
+    arrive(3.50);
+    move("#proxy-pose", {rotation:0}, {rotation:-7}, 4.15, .26, "power2.out");
+    move("#proxy-pose", {rotation:-7}, {rotation:6}, 4.41, .14, "power3.in");
+    move(miga, {x:HOME}, {x:HOME + 22}, 4.41, .14, "power3.in");
+    const thrown = swap(HIPS, 4.45);
+    film.set(miga, {x:HOME}, thrown + .10);
+    film.set("#proxy-pose", {rotation:0}, thrown + .10);
+    const plugged = thrown + .30;
+    move("#proxy-cable", {clipPath:"inset(0% 50% 0% 50%)", scaleY:1.5}, {clipPath:"inset(0% 0% 0% 0%)", scaleY:1}, thrown, .30, "power2.out");
+    dust("#proxy-puff-left i", plugged);
+    dust("#proxy-puff-right i", plugged);
+
+    // Each packet runs through the cable, out of the other Mac and up to its AI service.
+    function deliver(name, start) {
+      const id = "#proxy-sent-" + name, site = sites[name], first = cable[0], last = cable[cable.length - 1];
+      move(id, at(leftScreen, {opacity:1, scale:.2}), {x:first[0], y:first[1], opacity:1, scale:.5}, start, .30, "power2.out");
+      along(id, cable, start + .30, .60, .5);
+      const out = start + .90;
+      move(id, {x:last[0], y:last[1], scale:.5}, at(rightTop, {scale:.6}), out, .16, "power2.out");
+      move(id, at(rightTop, {scale:.6}), at(site, {scale:.7}), out + .16, .48, "power2.inOut");
+      const arrived = out + .64;
+      move(id, {scale:.7, opacity:1}, {scale:0, opacity:0}, arrived, .12, "power2.in");
+      move("#proxy-glow-" + name, {opacity:0, scale:.6}, {opacity:1, scale:1}, arrived, .14, "power2.out");
+      move("#proxy-glow-" + name, {opacity:1}, {opacity:.35}, arrived + .30, .50, "power1.inOut");
+      return {out, arrived};
+    }
+    // The answer comes back the same way.
+    function answer(name, start) {
+      const id = "#proxy-reply-" + name, site = sites[name], first = cable[0], last = cable[cable.length - 1];
+      move(id, at(site, {opacity:1, scale:.4}), at(rightTop, {opacity:1, scale:1}), start, .30, "power2.inOut");
+      move(id, at(rightTop), {x:last[0], y:last[1]}, start + .30, .10, "power2.in");
+      along(id, [...cable].reverse(), start + .40, .36, 1);
+      move(id, {x:first[0], y:first[1], scale:1, opacity:1}, at(leftScreen, {scale:.3, opacity:0}), start + .76, .14, "power2.in");
+      return start + .90;
+    }
+
+    const sent = plugged + .25;
+    const names = ["spark", "robot", "brain"];
+    const trips = names.map((name, i) => deliver(name, sent + i * .18));
+    move("#proxy-relay", {opacity:0}, {opacity:.75}, trips[0].out, .10, "power1.out");
+    move("#proxy-relay", {opacity:.75}, {opacity:0}, trips[2].out + .20, .30, "power1.in");
+    boss.swap(OUTSMARTED, trips[0].out + .10);
+    const answered = Math.max(...names.map((name, i) => answer(name, trips[i].arrived + .12)));
+    move("#proxy-denied", {opacity:.92}, {opacity:0}, answered + .14, .30, "power1.inOut");
+    move("#proxy-through", {opacity:0, scale:.8}, {opacity:.94, scale:1}, answered + .10, .30, "back.out(3)");
+    boss.swap(GRUMPY, answered + .40);
+    thumbsUp(answered + .55);
+    blink(2, answered + 1.20);
+    window.__timelines.proxy = film;
+  </script>
+</template>

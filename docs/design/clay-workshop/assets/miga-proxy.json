@@ -1,0 +1,12 @@
+{
+  "request": "Same character, same size, same position in the frame, same feet position, same light and texture. Change only the pose: she now hugs a small coil of the golden-yellow clay network cable from the second image against her chest with both mitten hands, with one of its chunky rectangular cream network connectors showing at the top of the coil. Not an audio jack, not a power plug. Eyes looking ahead with a determined little smile. Keep the brass wind-up key on her back visible. Flat solid deep teal background (#164544), no text.",
+  "edit": "/private/tmp/claude-501/-Users-rendis-Projects-Workshop-open-source-lazy-worker/cb0f2ab7-ce34-46ed-ba0a-9f85bdacb5e4/scratchpad/miga-ref.png",
+  "select": null,
+  "references": [
+    "/private/tmp/claude-501/-Users-rendis-Projects-Workshop-open-source-lazy-worker/cb0f2ab7-ce34-46ed-ba0a-9f85bdacb5e4/scratchpad/px-cable.png"
+  ],
+  "size": null,
+  "model": "gpt-6.2-sol",
+  "effort": "medium",
+  "generated": "2026-11-23T13:05:01"
+}

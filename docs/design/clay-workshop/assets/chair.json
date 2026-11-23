@@ -1,0 +1,10 @@
+{
+  "request": "Make the background transparent: a clean cutout of the clay chair with real alpha. Change only the background; keep the chair's shape, colors and clay texture exactly as they are. No shadow, no halo.",
+  "edit": "assets/chair.webp",
+  "select": null,
+  "references": [],
+  "size": null,
+  "model": "gpt-6.2-sol",
+  "effort": "medium",
+  "generated": "2026-11-21T13:18:39"
+}

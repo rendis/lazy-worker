@@ -1,0 +1,126 @@
+<template>
+  <style>
+    #root { position:absolute; inset:0; overflow:hidden }
+    .set.blank { background-image:url("assets/workshop-blank.webp") }
+    .job { position:absolute; left:986px; top:218px; width:668px; height:416px; border-radius:36px; overflow:hidden }
+    .job svg { position:absolute; left:259px; top:62px; width:150px; height:150px; fill:none; stroke:#fff1c9; stroke-width:9;
+      stroke-linecap:round; stroke-linejoin:round; filter:drop-shadow(1px 4px 3px #1d2c3a80) }
+    .bar { position:absolute; left:104px; top:252px; width:460px; height:62px; border-radius:31px; overflow:hidden;
+      background:#f6e2ae; box-shadow:inset 3px 5px 8px #321f1966, 1px 4px 4px #1d2c3a66 }
+    .bar i { position:absolute; inset:7px; border-radius:24px; overflow:hidden }
+    .bar b { position:absolute; inset:0; border-radius:24px; background:#c9603f; transform-origin:0 50%;
+      box-shadow:inset 3px 4px 6px #ffffff40, inset -4px -5px 7px #321f1950 }
+    .done { position:absolute; left:266px; top:66px; width:136px; height:136px; border-radius:50%; opacity:0;
+      border:10px solid #f6e2ae; background:#569b38; box-shadow:inset 4px 5px 9px #ffffff2a,inset -6px -6px 8px #321f1959,1px 5px 5px #321f1980 }
+    .done svg { position:static; display:block; width:100%; height:100%; stroke-width:5; filter:none }
+    .eyelid { position:absolute; inset:0; background:#1b2a3d; box-shadow:0 6px 0 #0f1826 }
+    .eyelid svg { left:184px; top:150px; width:300px; height:120px; stroke:#9fb4c9; stroke-width:7; filter:none }
+    .flash { position:absolute; inset:0; background:#fff7dc; opacity:0 }
+    .snore { position:absolute; left:1672px; top:236px; width:70px; height:70px; fill:none; stroke:#fff1c9; stroke-width:13;
+      stroke-linecap:round; stroke-linejoin:round; opacity:0; filter:drop-shadow(1px 3px 2px #321f1980) }
+    .steam { position:absolute; left:1000px; top:640px }
+    .steam i { position:absolute; width:46px; height:46px; border-radius:50%; background:#fff4dc; opacity:0;
+      box-shadow:inset -3px -4px 5px #c9a58480 }
+  </style>
+  <div id="root" data-composition-id="caffeinate" data-width="1920" data-height="1080">
+    <div class="workbench" id="caffeinate-stage" data-layout-allow-overflow>
+      <div class="set blank"></div>
+      <div class="job">
+        <svg viewBox="0 0 64 64" aria-hidden="true" id="caffeinate-task"><path d="M32 10v30M19 28l13 13 13-13M12 52h40"/></svg>
+        <div class="done" id="caffeinate-done"><svg viewBox="0 0 64 64" aria-hidden="true"><path d="M17 33l10 10 21-24"/></svg></div>
+        <div class="bar"><i><b id="caffeinate-progress"></b></i></div>
+        <div class="eyelid" id="caffeinate-eyelid">
+          <svg viewBox="0 0 150 60" aria-hidden="true"><path d="M12 22q24 26 48 0M90 22q24 26 48 0"/></svg>
+        </div>
+        <div class="flash" id="caffeinate-flash"></div>
+      </div>
+      <svg class="snore" id="caffeinate-z1" viewBox="0 0 64 64" aria-hidden="true"><path d="M14 14h36L14 50h36"/></svg>
+      <svg class="snore" id="caffeinate-z2" viewBox="0 0 64 64" aria-hidden="true"><path d="M14 14h36L14 50h36"/></svg>
+      <svg class="snore" id="caffeinate-z3" viewBox="0 0 64 64" aria-hidden="true"><path d="M14 14h36L14 50h36"/></svg>
+      <div class="shadow chair-shadow"></div>
+      <div class="chair" id="caffeinate-chair"></div>
+      <div class="shadow miga-shadow" id="caffeinate-shadow" style="opacity:0"></div>
+      <div class="steam" id="caffeinate-steam"><i></i><i></i><i></i></div>
+      <div class="miga" id="caffeinate-puppet">
+        <div class="pose" id="caffeinate-pose">
+          <svg id="caffeinate-sculpt" class="sculpt" width="512" height="512" viewBox="0 0 512 512" aria-hidden="true">
+            <image href="assets/miga-poses.webp" width="1536" height="1024"/>
+            <image href="assets/miga-coffee.webp" x="1536" width="1024" height="512"/>
+          </svg>
+          <div class="lids" id="caffeinate-lids"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const film = gsap.timeline({paused:true});
+    const {move, pose, swap, blink, wait, arrive, emptyChair} = makeClayPuppet(film, {
+      sculpt:"#caffeinate-sculpt", lids:"#caffeinate-lids", pose:"#caffeinate-pose",
+      body:"#caffeinate-puppet", shadow:"#caffeinate-shadow"
+    });
+    // Her own sculpts for this episode: offering the espresso, then keeping it.
+    const OFFER = 6, CHEERS = 7;
+    const HOME = 545, STALLED = .42;
+    const miga = ["#caffeinate-puppet","#caffeinate-shadow"];
+    const lid = "#caffeinate-eyelid";
+
+    // The Mac nods off: the lid drops, catches itself, then drops further.
+    function droop(from, down, back, at) {
+      move(lid, {yPercent:from}, {yPercent:down}, at, .34, "power2.in");
+      move(lid, {yPercent:down}, {yPercent:back}, at + .40, .22, "power2.out");
+    }
+    function snore(z, at) {
+      move(z, {opacity:0, x:0, y:0, scale:.5}, {opacity:1, x:24, y:-22, scale:.8}, at, .35, "power1.out");
+      move(z, {opacity:1, x:24, y:-22, scale:.8}, {opacity:0, x:84, y:-78, scale:1.2}, at + .35, .65, "power1.in");
+    }
+
+    const camera = "#caffeinate-stage";
+    const wide = {scale:1.2, x:-384, y:-168};
+    const screen = {scale:1.75, x:-1400, y:-262};
+    gsap.set(camera, {transformOrigin:"0 0", ...wide});
+    gsap.set(lid, {yPercent:-104});
+    gsap.set("#caffeinate-progress", {scaleX:.04});
+    wait(HOME);
+
+    // Without Caffeinate. Nobody is at the desk and a long job is running.
+    emptyChair("#caffeinate-chair");
+    move(camera, wide, screen, .45, 1.45, "power2.inOut");
+    move("#caffeinate-progress", {scaleX:.04}, {scaleX:STALLED}, .20, 2.25, "none");
+    droop(-104, -62, -86, .75);
+    droop(-86, -34, -58, 1.45);
+    // The Mac falls asleep and the job stops where it was.
+    move(lid, {yPercent:-58}, {yPercent:0}, 2.10, .34, "bounce.out");
+    snore("#caffeinate-z1", 2.55);
+    snore("#caffeinate-z2", 2.90);
+    snore("#caffeinate-z3", 3.25);
+
+    // With Caffeinate. Miga arrives with an espresso and holds it up to the Mac.
+    move(camera, screen, wide, 3.30, .60, "power3.inOut");
+    pose(OFFER, 3.40);
+    arrive(3.55);
+    const offer = 4.25;
+    move("#caffeinate-pose", {rotation:0}, {rotation:-5}, offer, .22, "power2.out");
+    move("#caffeinate-pose", {rotation:-5}, {rotation:7}, offer + .22, .20, "power3.out");
+    move(miga, {x:HOME}, {x:HOME + 38}, offer + .22, .20, "power3.out");
+    move("#caffeinate-puppet", {y:0}, {y:-26}, offer + .22, .14, "power2.out");
+    move("#caffeinate-puppet", {y:-26}, {y:0}, offer + .36, .16, "power2.in");
+    const hit = offer + .30;
+    move("#caffeinate-steam i", {opacity:0, x:0, y:0, scale:.5},
+      {opacity:.9, x:i=>[26,58,84][i], y:i=>[-70,-112,-150][i], scale:1}, hit + .10, .40, "power1.out");
+    move("#caffeinate-steam i", {opacity:.9}, {opacity:0, y:i=>[-120,-170,-215][i], scale:1.5}, hit + .50, .40, "power1.in");
+    // The Mac snaps awake and the job runs to the end.
+    const awake = hit + .78;
+    move(lid, {yPercent:0}, {yPercent:-104}, awake, .16, "power3.in");
+    move("#caffeinate-flash", {opacity:.55}, {opacity:0}, awake + .10, .40, "power2.out");
+    move("#caffeinate-progress", {scaleX:STALLED}, {scaleX:1}, awake + .30, 1.05, "power1.inOut");
+    const finished = awake + 1.40;
+    film.set("#caffeinate-progress", {backgroundColor:"#6fb548"}, finished);
+    film.set("#caffeinate-task", {opacity:0}, finished);
+    move("#caffeinate-done", {opacity:1, scale:.5}, {opacity:1, scale:1}, finished, .42, "back.out(3)");
+    const settled = swap(CHEERS, finished + .25);
+    film.set(miga, {x:HOME}, settled);
+    film.set("#caffeinate-pose", {rotation:0}, settled);
+    blink(2, finished + 1.10);
+    window.__timelines.caffeinate = film;
+  </script>
+</template>

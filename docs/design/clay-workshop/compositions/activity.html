@@ -1,0 +1,124 @@
+<template>
+  <style>
+    #root { position:absolute; inset:0; overflow:hidden }
+  </style>
+  <div id="root" data-composition-id="activity" data-width="1920" data-height="1080">
+    <div class="workbench" id="activity-stage" data-layout-allow-overflow>
+      <div class="set"></div>
+      <div class="peek"><div class="inspector" id="activity-inspector"></div></div>
+      <svg class="alert" id="activity-alert" viewBox="0 0 120 90" aria-hidden="true">
+        <path d="M14 70 30 46M56 62V30M98 70 82 46"/>
+      </svg>
+      <svg class="idle-ring" id="activity-ring" viewBox="0 0 200 200" aria-hidden="true">
+        <circle class="track" cx="100" cy="100" r="78"/>
+        <circle class="left" id="activity-idle" cx="100" cy="100" r="78" transform="rotate(-90 100 100)"/>
+      </svg>
+      <div id="activity-presence" class="presence">
+        <svg viewBox="0 0 64 64" aria-hidden="true">
+          <path id="activity-check" d="M17 33l10 10 21-24"/>
+          <g id="activity-clock" opacity="0"><circle cx="32" cy="32" r="19"/><path d="M32 20v13l9 5"/></g>
+        </svg>
+      </div>
+      <div class="shadow chair-shadow"></div>
+      <div class="chair" id="activity-chair"></div>
+      <div class="shadow miga-shadow" id="activity-shadow" style="opacity:0"></div>
+      <div class="shadow prop-shadow" id="activity-prop-shadow"></div>
+      <div class="prop" id="activity-prop"></div>
+      <div class="puff" id="activity-puff"><i></i><i></i><i></i></div>
+      <div class="miga" id="activity-puppet">
+        <div class="pose" id="activity-pose">
+          <svg id="activity-sculpt" class="sculpt" width="512" height="512" viewBox="0 0 512 512" aria-hidden="true">
+            <image href="assets/miga-poses.webp" width="1536" height="1024"/>
+          </svg>
+          <div class="lids" id="activity-lids"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const film = gsap.timeline({paused:true});
+    const {move, blink, wait, arrive, shove, thumbsUp, emptyChair, dust} = makeClayPuppet(film, {
+      sculpt:"#activity-sculpt", lids:"#activity-lids", pose:"#activity-pose",
+      body:"#activity-puppet", shadow:"#activity-shadow"
+    });
+    const HOME = 545, RING = 490, GREEN = "#6fb548", AMBER = "#d8921a";
+    const arrow = ["#activity-prop","#activity-prop-shadow"];
+
+    function signal(away, at) {
+      film.set("#activity-presence",{backgroundColor:away?"#c48212":"#569b38"},at);
+      film.set("#activity-check",{opacity:away?0:1},at);
+      film.set("#activity-clock",{opacity:away?1:0},at);
+      move("#activity-presence",{scale:.72},{scale:1},at,.42,"back.out(3)");
+    }
+    // The ring is the chat's patience. It empties one tick at a time.
+    function drain(from, to, at, duration) {
+      const ticks = Math.round((from - to) * 8);
+      move("#activity-idle",{attr:{"stroke-dashoffset":RING*(1-from)}},{attr:{"stroke-dashoffset":RING*(1-to)}},at,duration,"steps("+ticks+")");
+      film.set("#activity-idle",{attr:{stroke:AMBER}},at + duration*(from-.375)/(from-to));
+    }
+    function refill(from, at) {
+      film.set("#activity-idle",{attr:{stroke:GREEN}},at);
+      move("#activity-idle",{attr:{"stroke-dashoffset":RING*(1-from)}},{attr:{"stroke-dashoffset":0}},at,.30,"power2.out");
+      move("#activity-ring",{scale:1.16},{scale:1},at,.40,"back.out(2.5)");
+    }
+    // The inspector stays behind the monitor until the status gives him a reason.
+    const hidden = {x:-215, rotation:-22}, peeking = {x:0, rotation:0};
+    function peek(at) {
+      move("#activity-inspector", hidden, peeking, at, .40, "back.out(1.7)");
+    }
+    // His face changes at the bottom of a squash, then he nods.
+    function cheer(at) {
+      const flip = at + .10, who = "#activity-inspector";
+      move(who, {scaleX:1, scaleY:1}, {scaleX:1.07, scaleY:.88}, at, .10, "power2.in");
+      film.set(who, {backgroundPosition:"-233px 0"}, flip);
+      move(who, {scaleX:1.07, scaleY:.88}, {scaleX:.96, scaleY:1.07}, flip, .09, "power2.out");
+      move(who, {scaleX:.96, scaleY:1.07}, {scaleX:1, scaleY:1}, flip + .09, .22, "back.out(2)");
+      move(who, {rotation:0}, {rotation:6}, flip + .40, .16, "power2.out");
+      move(who, {rotation:6}, {rotation:0}, flip + .56, .34, "back.out(2.5)");
+    }
+    function alarm(at) {
+      move("#activity-alert",{opacity:1,scale:.4},{opacity:1,scale:1},at,.22,"back.out(3)");
+      move("#activity-alert",{opacity:1},{opacity:0},at + .62,.20,"power1.in");
+    }
+    // The pointer moves a centimetre, then rocks back onto its heel.
+    function nudge(at) {
+      const {hit, letGo} = shove(HOME, at);
+      move(arrow,{x:0},{x:30},hit,.16,"power3.out");
+      move("#activity-prop",{rotation:0},{rotation:6},hit,.16,"power3.out");
+      dust("#activity-puff i", hit);
+      move(arrow,{x:30},{x:0},letGo + .04,.50,"back.out(2.2)");
+      move("#activity-prop",{rotation:6},{rotation:0},letGo + .04,.62,"elastic.out(1,.45)");
+      return hit;
+    }
+
+    const camera = "#activity-stage";
+    const wide = {scale:1.2, x:-384, y:-168};
+    const screen = {scale:2.05, x:-2016, y:-430};
+    // Opening states are set outside the timeline so frame 0 already shows them.
+    gsap.set(camera, {transformOrigin:"0 0", ...wide});
+    gsap.set("#activity-idle", {attr:{stroke:GREEN,"stroke-dashoffset":0}});
+    gsap.set("#activity-inspector", hidden);
+    wait(HOME);
+
+    // Without Activity. Whoever sat here has just left: the chair is still turning.
+    emptyChair("#activity-chair");
+    // Nobody touches the Mac, the ring runs out and the status goes amber.
+    move(camera, wide, screen, .45, 1.55, "power2.inOut");
+    drain(1, 0, .55, 1.60);
+    signal(true, 2.15);
+    peek(2.42);
+    alarm(2.74);
+
+    // With Activity. Miga arrives and gives the pointer a shove.
+    move(camera, screen, wide, 3.25, .60, "power3.inOut");
+    arrive(3.50);
+    const hit = nudge(4.15);
+    refill(0, hit + .10);
+    signal(false, hit + .10);
+    // The inspector sees the green status and is happy with it.
+    cheer(hit + .45);
+    thumbsUp(hit + .95);
+    blink(2, hit + 1.75);
+    window.__timelines.activity = film;
+  </script>
+</template>

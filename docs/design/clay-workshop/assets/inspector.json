@@ -1,0 +1,10 @@
+{
+  "request": "A cutout sprite for an animation. Keep only the round eyeball character: his eyeball head with the dark pupil, the two brown brows, the red veins, the shirt collar, the dark red tie and his torso. Remove his hand completely. Remove the monitor, the wall and the lamp. Transparent background with real alpha and clean edges, no halo, no shadow. Keep the character at the same size, position and angle, with the same clay texture and lighting. Where the monitor edge covered him on the left, complete the round head and the shoulder naturally.",
+  "edit": "/private/tmp/claude-501/-Users-rendis--claude-spares-spare-6zWiUq/cb0f2ab7-ce34-46ed-ba0a-9f85bdacb5e4/scratchpad/bg-crop.png",
+  "select": null,
+  "references": [],
+  "size": null,
+  "model": "gpt-6.2-sol",
+  "effort": "medium",
+  "generated": "2026-11-21T13:51:44"
+}

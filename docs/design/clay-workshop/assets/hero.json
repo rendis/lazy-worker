@@ -1,0 +1,13 @@
+{
+  "request": "Wide hero banner for the top of a software README. Handmade clay / plasticine stop-motion look, same materials, lighting and palette as the reference workbench (deep teal wall, terracotta clay tabletop, warm lamp light, soft shadows). The character from the first reference (Miga: tapered terracotta clay body, low cap ridge, cream eyes with dark brows, mitten hands, brass two-loop wind-up key on her back) stands proud in the centre of the tabletop, full body visible, hands on hips, smiling at the viewer. Around her on the table, a small collection of chunky clay props, each clearly separate: a cream clay mouse-pointer arrow, a small espresso cup with a curl of clay steam, an open brass padlock lying on its side, and an open clay toolbox. No monitor, no chair. Generous empty teal wall on the left and right thirds. Very wide panoramic framing, camera at table height. No text, no letters, no numbers, no logos, no UI.",
+  "edit": null,
+  "select": null,
+  "references": [
+    "/private/tmp/claude-501/-Users-rendis--claude-spares-spare-6zWiUq/cb0f2ab7-ce34-46ed-ba0a-9f85bdacb5e4/scratchpad/thumb-cell.png",
+    "/private/tmp/claude-501/-Users-rendis--claude-spares-spare-6zWiUq/cb0f2ab7-ce34-46ed-ba0a-9f85bdacb5e4/scratchpad/ws-ref.png"
+  ],
+  "size": "1920x720",
+  "model": "gpt-6.2-sol",
+  "effort": "medium",
+  "generated": "2026-11-21T22:57:35"
+}

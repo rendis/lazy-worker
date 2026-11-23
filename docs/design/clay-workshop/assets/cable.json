@@ -1,0 +1,12 @@
+{
+  "request": "One prop for a clay stop-motion film, same plasticine texture and warm light as the reference: a long thick soft clay NETWORK cable (like an ethernet cable), warm golden-yellow clay, smooth, lying flat in one gentle wave from the far left edge to the far right edge of the frame. Each end has a chunky rectangular cream clay network connector with a small latch tab on top and a short strain-relief boot, the left connector pointing left and the right connector pointing right. No metal prongs, no round jack, not a power plug, not an audio plug. Seen from the front at table height. Even thickness about one tenth of the image height. Flat solid deep teal background (#164544), no shadow, no text.",
+  "edit": null,
+  "select": null,
+  "references": [
+    "/private/tmp/claude-501/-Users-rendis-Projects-Workshop-open-source-lazy-worker/cb0f2ab7-ce34-46ed-ba0a-9f85bdacb5e4/scratchpad/proxy-style.png"
+  ],
+  "size": "1536x512",
+  "model": "gpt-6.2-sol",
+  "effort": "medium",
+  "generated": "2026-11-23T13:04:00"
+}
