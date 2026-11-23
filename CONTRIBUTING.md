@@ -42,6 +42,23 @@ A new tool touches the same places every time. Use this list, and see [AGENTS.md
 6. **Document it.** Add a section to the [user guide](docs/user-guide.md). Copy the tool block in the [README](README.md), switch the clip to the other side, and link it to the new section.
 7. **Record what you learned.** Add one line to [AGENTS.md](AGENTS.md) for each new project rule.
 
+### Where a tool is registered
+
+Step 1 touches these places. The TypeScript and Rust compilers report most of the ones you miss, because each tool is a key in a typed record or an arm in a `match`.
+
+| File | What to add |
+| --- | --- |
+| `src/modules.ts` | The tool's ID in `ToolId` and its entry in `tools`: title, description, icon, and help. Add `section` when it sits under a broader sidebar entry, and `row` when its Tools row belongs to a group. |
+| `index.html` | A `data-module-view="<id>"` block that holds a `.module-body`. The shared header mounts before that body. |
+| `src/desktop.ts` | The tool in `defaults.quickStart`, in `previewStatuses`, and in the list `startPreviewTools` walks. Give each new native call a browser-preview result. |
+| `src/main.ts` | The tool in the initial `statuses`, in `startFailures`, and in `unsupportedTools`. Import each new icon and add it to `renderIcons`. |
+| `src-tauri/src/<tool>.rs` | The tool itself: its settings, its status, and its worker behind a platform adapter. |
+| `src-tauri/src/main.rs` | The tool in `ToolId`, `Statuses`, and `Tools`, in `set_active` and `start_selected`, in the one-second clock, and in the stop on exit. Register each new command in `generate_handler!`. |
+| `src-tauri/src/preferences.rs` | The tool's flag in `QuickStart`, and its settings in `Preferences` when it has any. |
+| `src-tauri/src/tray.rs` | The tool's state, its start and stop labels in both languages, its menu item, and its action. |
+
+Run `npm run dev` to work on the panel in a browser with simulated sessions, and `npm run tauri -- dev` for the native app.
+
 ## Guidelines
 
 - Write code, comments, and documentation in English. Keep every interface string in English and Spanish.
