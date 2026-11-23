@@ -325,6 +325,10 @@ export const desktop = {
   async requestActivityAccessibility(): Promise<void> {
     if (native) return invoke("request_activity_accessibility");
   },
+  /** True on the first launch of a new installation. A preview shows the setup with `?onboarding`. */
+  async getFirstRun(): Promise<boolean> {
+    return !native && new URLSearchParams(location.search).has("onboarding");
+  },
   async getUpdateStatus(): Promise<UpdateStatus> {
     return macApp ? invoke("get_update_status") : previewUpdate;
   },

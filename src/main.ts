@@ -13,6 +13,7 @@ import {
 import { messages, type Language, type Message } from "./messages";
 import { mountTools, tools, updateQuickStartMode, updateToolStatus, type ToolId } from "./modules";
 import { mountOperationProgress } from "./operation-progress";
+import { mountOnboarding } from "./onboarding";
 import { mountProxy } from "./proxy";
 import { formatSession, SESSION_WIDTH } from "./time";
 import { mountUpdateNotice } from "./update-notice";
@@ -193,6 +194,7 @@ function setNoticeOpen(region: HTMLElement, open: boolean): void {
   setAttribute(region, "aria-hidden", String(!open));
 }
 
+const onboarding = mountOnboarding({ translate });
 const updates = mountUpdateNotice({
   translate,
   setNoticeOpen,
@@ -512,6 +514,7 @@ function renderPreferences(previous?: Preferences): void {
     setAttribute(activityPower, "aria-label", translate("activitySession"));
     progress.renderLabel();
     updates.render();
+    onboarding.render();
     renderStatus();
   } else {
     renderControls();
@@ -1018,6 +1021,7 @@ async function initialize(): Promise<void> {
     feedback.tools = "saveFailed";
   }
   renderPreferences();
+  if (await desktop.getFirstRun()) onboarding.open();
   void updates.start();
   await refreshStatus();
   refreshPermissions();

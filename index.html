@@ -451,6 +451,61 @@
           </div>
         </div>
       </main>
+      <section class="onboarding" id="onboarding" hidden>
+        <div class="onboarding-card">
+          <img class="onboarding-mark" src="/src/assets/logo.png" width="46" height="46" alt="" draggable="false" />
+          <div class="onboarding-steps">
+            <div class="onboarding-step" data-step="welcome">
+              <h1 tabindex="-1" data-text="onboardingWelcome">Welcome to Lazy Worker</h1>
+              <p class="onboarding-lead" data-text="onboardingWelcomeLead">A toolbox for your Mac menu bar. Set it up in a minute.</p>
+              <div class="setting-row">
+                <i data-lucide="globe"></i><span class="setting-label" id="onboarding-language" data-text="language">Language</span>
+                <div class="segments" role="group" aria-labelledby="onboarding-language">
+                  <button type="button" data-language="en" lang="en" aria-pressed="false">English</button>
+                  <button type="button" data-language="system" data-text="system" aria-pressed="true">System</button>
+                  <button type="button" data-language="es" lang="es" aria-pressed="false">Español</button>
+                  <span class="segment-indicator" aria-hidden="true"></span>
+                </div>
+              </div>
+              <div class="setting-row">
+                <i data-lucide="contrast"></i><span class="setting-label" id="onboarding-appearance" data-text="appearance">Appearance</span>
+                <div class="segments" role="group" aria-labelledby="onboarding-appearance">
+                  <button type="button" data-theme-choice="light" aria-pressed="false"><i data-lucide="sun"></i><span data-text="light">Light</span></button>
+                  <button type="button" data-theme-choice="system" aria-pressed="true"><i data-lucide="monitor"></i><span data-text="system">System</span></button>
+                  <button type="button" data-theme-choice="dark" aria-pressed="false"><i data-lucide="moon"></i><span data-text="dark">Dark</span></button>
+                  <span class="segment-indicator" aria-hidden="true"></span>
+                </div>
+              </div>
+            </div>
+            <div class="onboarding-step" data-step="startup" hidden>
+              <h1 tabindex="-1" data-text="onboardingStartup">Ready when you are</h1>
+              <p class="onboarding-lead" data-text="onboardingStartupLead">Lazy Worker stays in the menu bar. Choose what happens when your Mac starts.</p>
+              <label class="setting-row">
+                <i data-lucide="laptop"></i>
+                <span class="onboarding-option">
+                  <span class="setting-label" data-text="loginLaunch">Open Lazy Worker at login</span>
+                  <span class="setting-note" data-text="loginLaunchDescription">Opens the app when you sign in to your Mac.</span>
+                </span>
+                <span class="switch"><input type="checkbox" role="switch" data-mirror="login-launch" data-mirror-when="leave" /><span aria-hidden="true"></span></span>
+              </label>
+              <label class="setting-row">
+                <i data-lucide="zap"></i>
+                <span class="onboarding-option">
+                  <span class="setting-label" data-text="startToolsOnLaunch">Run Quick start when the app opens</span>
+                  <span class="setting-note" data-text="startToolsOnLaunchDescription">Starts the tools marked for Quick start with their saved settings.</span>
+                </span>
+                <span class="switch"><input type="checkbox" role="switch" data-mirror="start-tools-on-launch" /><span aria-hidden="true"></span></span>
+              </label>
+            </div>
+          </div>
+          <footer class="onboarding-footer">
+            <div class="onboarding-progress" id="onboarding-progress" role="img"></div>
+            <button class="text-link" id="onboarding-skip" type="button" data-text="onboardingSkip">Skip setup</button>
+            <button class="onboarding-button" id="onboarding-back" type="button" data-text="back">Back</button>
+            <button class="onboarding-button primary" id="onboarding-next" type="button"><span>Continue</span><i data-lucide="arrow-right" aria-hidden="true"></i></button>
+          </footer>
+        </div>
+      </section>
       <div class="log-overlay" id="proxy-log-window" inert>
         <section class="log-window" role="dialog" aria-labelledby="proxy-log-title">
           <header>
