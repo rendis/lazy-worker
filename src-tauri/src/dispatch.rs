@@ -15,7 +15,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{AppHandle, Manager, State, WebviewWindow};
+use tauri::{AppHandle, Manager, WebviewWindow};
 
 /// What a request needs from its origin.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -30,7 +30,7 @@ pub enum Access {
 
 /// What a remote device may do. All off by default.
 #[derive(Clone, Copy, Debug, Default)]
-#[cfg_attr(not(test), allow(dead_code))] // Only tests build a remote origin until remote windows exist.
+#[cfg_attr(not(unix), allow(dead_code))]
 pub struct Permissions {
     pub control: bool,
     pub actions: bool,
@@ -38,7 +38,7 @@ pub struct Permissions {
 
 /// Where a request comes from.
 #[derive(Clone, Copy, Debug)]
-#[cfg_attr(not(test), allow(dead_code))] // Only tests build a remote origin until remote windows exist.
+#[cfg_attr(not(unix), allow(dead_code))] // Only the socket server builds a remote origin.
 pub enum Origin {
     Local,
     Remote(Permissions),
@@ -102,6 +102,7 @@ pub enum Request {
     GetProxyPeers,
     GetProxyLog,
     GetDevices,
+    GetRemoteLog,
     DetectProxyApps,
     ListCaffeinateProcesses,
     CheckForUpdate,
@@ -126,6 +127,14 @@ pub enum Request {
     SaveProxyApps { apps: Vec<ProxyApp> },
     SaveProxyAllowed { allowed: Vec<String> },
     RequestActivityAccessibility,
+    SetPeerPermissions {
+        id: String,
+        control: bool,
+        applications: bool,
+        actions: bool,
+    },
+    RemovePeer { id: String },
+    CutAllAccess,
 }
 
 impl Request {
@@ -176,6 +185,10 @@ impl Request {
                 }
             }
             Self::GetDevices
+            | Self::GetRemoteLog
+            | Self::SetPeerPermissions { .. }
+            | Self::RemovePeer { .. }
+            | Self::CutAllAccess
             | Self::SaveProxyApps { .. }
             | Self::SaveProxyAllowed { .. }
             | Self::RequestActivityAccessibility => Access::LocalOnly,
@@ -183,20 +196,87 @@ impl Request {
     }
 }
 
+impl Request {
+    /// True for a request that only reads state. A remote read that works is not logged.
+    /// There is no default arm: a new request must say whether it reads.
+    pub fn is_read(&self) -> bool {
+        match self {
+            Self::GetPreferences
+            | Self::GetFirstRun
+            | Self::GetSystemLanguage
+            | Self::GetStatuses
+            | Self::GetLidStatus
+            | Self::GetLoginLaunch
+            | Self::GetUpdateStatus
+            | Self::GetActivityAccessibility
+            | Self::GetProxyNetwork
+            | Self::GetProxyPeers
+            | Self::GetProxyLog
+            | Self::GetDevices
+            | Self::GetRemoteLog
+            | Self::DetectProxyApps
+            | Self::ListCaffeinateProcesses => true,
+            Self::CheckForUpdate
+            | Self::RestartToUpdate
+            | Self::SetLanguage { .. }
+            | Self::SetTheme { .. }
+            | Self::SetDuration { .. }
+            | Self::SetSchedule { .. }
+            | Self::SetQuickStart { .. }
+            | Self::SetStartToolsOnLaunch { .. }
+            | Self::SetHideWhileSharing { .. }
+            | Self::SetSeenVersion { .. }
+            | Self::SaveCaffeinateSettings { .. }
+            | Self::SetProxyRole { .. }
+            | Self::SetProxyPort { .. }
+            | Self::SetProxyServer { .. }
+            | Self::SetToolActive { .. }
+            | Self::SetLoginLaunch { .. }
+            | Self::SetLidMode { .. }
+            | Self::CheckProxyServer { .. }
+            | Self::LaunchProxyApp { .. }
+            | Self::SaveProxyApps { .. }
+            | Self::SaveProxyAllowed { .. }
+            | Self::RequestActivityAccessibility
+            | Self::SetPeerPermissions { .. }
+            | Self::RemovePeer { .. }
+            | Self::CutAllAccess => false,
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn dispatch(
     window: WebviewWindow,
-    controller: State<'_, Controller>,
     request: Request,
 ) -> Result<Value, &'static str> {
     let origin = Origin::of_window(window.label())?;
+    handle(window.app_handle(), origin, request).await
+}
+
+/// Checks that the origin may send the request.
+pub fn authorize(
+    origin: Origin,
+    request: &Request,
+    preferences: &Preferences,
+) -> Result<(), &'static str> {
+    origin.permits(request.access(preferences))
+}
+
+/// Runs one request for an origin. The webview and every remote device share this path.
+pub async fn handle(
+    app: &AppHandle,
+    origin: Origin,
+    request: Request,
+) -> Result<Value, &'static str> {
+    let controller = app.state::<Controller>();
     let preferences = controller
         .lock()
         .map_err(|_| "workerUnavailable")?
         .activity
         .preferences();
-    origin.permits(request.access(&preferences))?;
-    run(request, origin, window.app_handle(), &controller).await
+    authorize(origin, &request, &preferences)?;
+    run(request, origin, app, &controller).await
 }
 
 fn json<T: Serialize>(value: T) -> Result<Value, &'static str> {
@@ -270,11 +350,65 @@ async fn run(
         ),
         Request::GetProxyPeers => json(locked("workerUnavailable")?.proxy.peers()),
         Request::GetProxyLog => json(locked("workerUnavailable")?.proxy.log()),
-        Request::GetDevices => json(
-            tauri::async_runtime::spawn_blocking(devices::overview)
-                .await
-                .map_err(|_| "workerUnavailable")?,
-        ),
+        Request::GetDevices => {
+            #[cfg(unix)]
+            let (controllers, socket) = {
+                let service = app.state::<crate::remote::service::Service>();
+                (service.controllers(), service.socket())
+            };
+            #[cfg(not(unix))]
+            let (controllers, socket) = (Vec::new(), devices::Socket::unavailable("unsupported"));
+            json(
+                tauri::async_runtime::spawn_blocking(move || devices::overview(controllers, socket))
+                    .await
+                    .map_err(|_| "workerUnavailable")?,
+            )
+        }
+        Request::GetRemoteLog => {
+            #[cfg(unix)]
+            return json(app.state::<crate::remote::service::Service>().log()?);
+            #[cfg(not(unix))]
+            Err("unsupported")
+        }
+        Request::SetPeerPermissions { id, control, applications, actions } => {
+            #[cfg(unix)]
+            return app
+                .state::<crate::remote::service::Service>()
+                .set_permissions(&id, control, applications, actions)
+                .map(|()| Value::Null);
+            #[cfg(not(unix))]
+            {
+                let _ = (id, control, applications, actions);
+                Err("unsupported")
+            }
+        }
+        Request::RemovePeer { id } => {
+            #[cfg(unix)]
+            return tauri::async_runtime::spawn_blocking({
+                let app = app.clone();
+                move || app.state::<crate::remote::service::Service>().remove_peer(&id)
+            })
+            .await
+            .map_err(|_| "workerUnavailable")?
+            .map(|()| Value::Null);
+            #[cfg(not(unix))]
+            {
+                let _ = id;
+                Err("unsupported")
+            }
+        }
+        Request::CutAllAccess => {
+            #[cfg(unix)]
+            return tauri::async_runtime::spawn_blocking({
+                let app = app.clone();
+                move || app.state::<crate::remote::service::Service>().cut_all()
+            })
+            .await
+            .map_err(|_| "workerUnavailable")?
+            .map(|()| Value::Null);
+            #[cfg(not(unix))]
+            Err("unsupported")
+        }
         Request::DetectProxyApps => json(
             tauri::async_runtime::spawn_blocking(proxy::detect)
                 .await
@@ -516,6 +650,25 @@ mod tests {
         assert_eq!(allowed(CONTROL, &devices, &preferences), Err("localOnly"));
         assert_eq!(allowed(ACTIONS, &devices, &preferences), Err("localOnly"));
         assert_eq!(allowed(Origin::Local, &devices, &preferences), Ok(()));
+    }
+
+    #[test]
+    fn every_device_management_request_is_local_only() {
+        let preferences = Preferences::default();
+        let id = "0123456789abcdef0123456789abcdef";
+        for value in [
+            json!({"command": "getDevices"}),
+            json!({"command": "getRemoteLog"}),
+            json!({"command": "setPeerPermissions", "args": {"id": id, "control": true, "applications": true, "actions": true}}),
+            json!({"command": "removePeer", "args": {"id": id}}),
+            json!({"command": "cutAllAccess"}),
+        ] {
+            let parsed = request(value);
+            for origin in [NONE, CONTROL, ACTIONS, Origin::Remote(Permissions { control: true, actions: true })] {
+                assert_eq!(allowed(origin, &parsed, &preferences), Err("localOnly"));
+            }
+            assert_eq!(allowed(Origin::Local, &parsed, &preferences), Ok(()));
+        }
     }
 
     #[test]

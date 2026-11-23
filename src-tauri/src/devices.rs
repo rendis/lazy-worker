@@ -1,8 +1,8 @@
 //! What this device shows in the Devices view: its name and its kind.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Kind {
     Laptop,
@@ -29,7 +29,68 @@ pub enum Pairing {
     Closed,
 }
 
-/// The list the Devices view draws. Controllers, actions, and other devices come in later steps.
+/// A device that may control this one, as the Devices view shows it.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Controller {
+    pub id: String,
+    pub name: String,
+    pub kind: Kind,
+    /// Unix seconds, or nothing before its first request.
+    pub last_access: Option<u64>,
+    /// True while it has an open connection.
+    pub connected: bool,
+    pub permissions: ControllerPermissions,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ControllerPermissions {
+    pub control: bool,
+    pub applications: bool,
+    pub actions: bool,
+    pub shell: bool,
+}
+
+#[cfg(unix)]
+impl Controller {
+    pub fn new(peer: &crate::remote::peers::Peer, connected: bool) -> Self {
+        Self {
+            id: peer.id.clone(),
+            name: peer.name.clone(),
+            kind: peer.kind,
+            last_access: peer.last_access,
+            connected,
+            permissions: ControllerPermissions {
+                control: peer.permissions.control,
+                applications: peer.permissions.applications,
+                actions: peer.permissions.actions,
+                shell: peer.permissions.shell,
+            },
+        }
+    }
+}
+
+/// Whether the app socket that other devices reach is listening, and why not when it is not.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Socket {
+    pub listening: bool,
+    pub error: Option<String>,
+}
+
+impl Socket {
+    #[cfg(unix)]
+    pub fn listening() -> Self {
+        Self { listening: true, error: None }
+    }
+
+    pub fn unavailable(error: &str) -> Self {
+        Self { listening: false, error: Some(error.to_owned()) }
+    }
+}
+
+/// The list the Devices view draws. Actions and other devices come in later steps.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Overview {
@@ -44,7 +105,8 @@ pub struct ThisDevice {
     pub device: Device,
     pub remote_access: RemoteAccess,
     pub pairing: Pairing,
-    pub controllers: Vec<()>,
+    pub controllers: Vec<Controller>,
+    pub socket: Socket,
     pub actions: Vec<()>,
 }
 
@@ -68,13 +130,14 @@ mod platform {
 }
 
 /// Reads the system, so call it off the main thread.
-pub fn overview() -> Overview {
+pub fn overview(controllers: Vec<Controller>, socket: Socket) -> Overview {
     Overview {
         this_device: ThisDevice {
             device: platform::this_device(),
             remote_access: RemoteAccess::Unknown,
             pairing: Pairing::Closed,
-            controllers: Vec::new(),
+            controllers,
+            socket,
             actions: Vec::new(),
         },
         devices: Vec::new(),
@@ -138,6 +201,7 @@ mod tests {
                 remote_access: RemoteAccess::Unknown,
                 pairing: Pairing::Closed,
                 controllers: Vec::new(),
+                socket: Socket::unavailable("x"),
                 actions: Vec::new(),
             },
             devices: Vec::new(),
@@ -148,5 +212,7 @@ mod tests {
         assert_eq!(value["thisDevice"]["remoteAccess"], "unknown");
         assert_eq!(value["thisDevice"]["pairing"], "closed");
         assert_eq!(value["devices"], serde_json::json!([]));
+        assert_eq!(value["thisDevice"]["socket"]["listening"], false);
+        assert_eq!(value["thisDevice"]["socket"]["error"], "x");
     }
 }

@@ -84,7 +84,18 @@ export type Controller = {
   name: string;
   kind: DeviceKind;
   lastAccess: number | null;
+  /** True while the device has an open connection. */
+  connected: boolean;
   permissions: Record<ControllerPermission, boolean>;
+};
+/** One request or event in the log of remote access. `request` is a command name, never its arguments. */
+export type RemoteLogEntry = {
+  time: number;
+  peer: string | null;
+  name: string | null;
+  request: string;
+  /** `ok` or an error code. */
+  outcome: string;
 };
 /** `weekday` counts from 0 on Sunday. `time` is a time of day as `HH:MM`. */
 export type ActionSchedule =
@@ -122,6 +133,8 @@ export type DevicesOverview = {
     remoteAccess: "unknown" | "off" | "on";
     pairing: "closed" | "open";
     controllers: Controller[];
+    /** Whether this device can receive requests, and an error code when it cannot. */
+    socket: { listening: boolean; error: string | null };
     actions: SavedAction[];
   };
   devices: RemoteDevice[];
@@ -296,6 +309,50 @@ function updatePreviewCaffeinateSession(settings: CaffeinateSettings): void {
   });
 }
 
+/** The controllers and the log of a preview. A change lasts until the page reloads. */
+let previewControllers: Controller[] | undefined;
+let previewLog: RemoteLogEntry[] | undefined;
+
+function sampleControllers(now: number): Controller[] {
+  return [
+    {
+      id: "studio", name: "iMac del estudio", kind: "desktop", lastAccess: now - 5 * 60, connected: true,
+      permissions: { control: true, applications: true, actions: true, shell: false },
+    },
+    {
+      id: "office", name: "MacBook Air de la oficina", kind: "laptop", lastAccess: now - 26 * 3600, connected: false,
+      permissions: { control: true, applications: false, actions: false, shell: false },
+    },
+    {
+      id: "new", name: "Mac mini", kind: "desktop", lastAccess: null, connected: false,
+      permissions: { control: false, applications: false, actions: false, shell: false },
+    },
+  ];
+}
+
+function previewEntries(now: number): RemoteLogEntry[] {
+  const studio = { peer: "studio", name: "iMac del estudio" };
+  const office = { peer: "office", name: "MacBook Air de la oficina" };
+  return [
+    { time: now - 20, ...studio, request: "getStatuses", outcome: "ok" },
+    { time: now - 95, ...studio, request: "setToolActive", outcome: "ok" },
+    { time: now - 240, ...office, request: "getDevices", outcome: "localOnly" },
+    { time: now - 3 * 3600, ...office, request: "launchProxyApp", outcome: "notPermitted" },
+    { time: now - 26 * 3600, ...office, request: "getPreferences", outcome: "ok" },
+    { time: now - 2 * 86400, ...studio, request: "getStatuses", outcome: "ok" },
+  ];
+}
+
+function previewControllerList(): Controller[] {
+  previewControllers ??= sampleControllers(Math.floor(Date.now() / 1000));
+  return previewControllers;
+}
+
+function previewLogList(): RemoteLogEntry[] {
+  previewLog ??= previewEntries(Math.floor(Date.now() / 1000));
+  return previewLog;
+}
+
 /** The sample list a preview shows, so the whole Devices view can be checked. Times follow the clock. */
 function previewDevices(): DevicesOverview {
   const now = Math.floor(Date.now() / 1000);
@@ -314,10 +371,10 @@ function previewDevices(): DevicesOverview {
   return {
     thisDevice: {
       name: "MacBook Pro", kind: "laptop", remoteAccess: "on", pairing: "closed",
-      controllers: [{
-        id: "studio", name: "iMac del estudio", kind: "desktop", lastAccess: now - 5 * 60,
-        permissions: { control: true, applications: true, actions: true, shell: false },
-      }],
+      controllers: previewControllerList().map(controller => ({
+        ...controller, permissions: { ...controller.permissions },
+      })),
+      socket: { listening: true, error: null },
       actions: [
         {
           id: "xcode", name: "Clear the Xcode cache", schedule: { every: "weekly", weekday: 1, time: "09:00" },
@@ -493,6 +550,34 @@ export const desktop = {
   },
   async getDevices(): Promise<DevicesOverview> {
     return native ? call("getDevices") : previewDevices();
+  },
+  async setPeerPermissions(
+    id: string, permissions: Pick<Controller["permissions"], "control" | "applications" | "actions">,
+  ): Promise<void> {
+    if (native) return call("setPeerPermissions", { id, ...permissions });
+    const controller = previewControllerList().find(item => item.id === id);
+    if (!controller) throw "notPaired";
+    controller.permissions = { ...controller.permissions, ...permissions };
+  },
+  async removePeer(id: string): Promise<void> {
+    if (native) return call("removePeer", { id });
+    const controller = previewControllerList().find(item => item.id === id);
+    if (!controller) throw "notPaired";
+    previewControllers = previewControllerList().filter(item => item.id !== id);
+    previewLogList().unshift({
+      time: Math.floor(Date.now() / 1000), peer: id, name: controller.name, request: "removePeer", outcome: "ok",
+    });
+  },
+  async cutAllAccess(): Promise<void> {
+    if (native) return call("cutAllAccess");
+    previewControllers = [];
+    previewLogList().unshift({
+      time: Math.floor(Date.now() / 1000), peer: null, name: null, request: "cutAll", outcome: "ok",
+    });
+  },
+  /** The entries of the log, newest first. */
+  async getRemoteLog(): Promise<RemoteLogEntry[]> {
+    return native ? call("getRemoteLog") : previewLogList().map(entry => ({ ...entry }));
   },
   async detectProxyApps(): Promise<ProxyInstalls> {
     return native ? call("detectProxyApps") : { claudeCode: true, claudeApp: true, codexCode: false, codexApp: true };

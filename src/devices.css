@@ -97,6 +97,10 @@
 
 .permission-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .permission-chip {
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -107,6 +111,12 @@
   font-size: 13px;
   font-weight: 640;
 }
+.permission-chip:disabled { opacity: .55; cursor: default; }
+.permission-chip:hover:enabled:not([data-on]) { border-color: var(--secondary); color: var(--text); }
+.permission-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.device-confirm { display: flex; align-items: center; gap: 6px; margin-inline-start: auto; }
+.device-confirm .setting-note { margin-inline-end: 6px; color: var(--pending-color); white-space: nowrap; }
+.device-cut-confirm .setting-label { color: var(--pending-color); }
 .permission-chip[data-on] { border-color: transparent; background: var(--choice); color: var(--choice-ink); }
 .permission-chip .lucide { width: 14px; height: 14px; }
 
@@ -149,3 +159,6 @@
 .device-cut .setting-label { font-size: 14.5px; }
 .device-cut:disabled { opacity: .45; }
 .collapse[data-settle]:not([data-settled]) > * { overflow: hidden; }
+
+/* The log of remote access names a device in the second column, so it needs more room than a proxy address. */
+#device-log-list .proxy-log-entry { grid-template-columns: 8em 13em minmax(0, 1fr) auto; }

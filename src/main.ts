@@ -298,7 +298,15 @@ const proxy = mountProxy({
   refreshIcons: renderIcons,
 });
 
-const devices = mountDevices({ translate, language: preferredLanguage, refreshIcons: renderIcons });
+const devices = mountDevices({
+  translate,
+  language: preferredLanguage,
+  refreshIcons: renderIcons,
+  fail(error) {
+    feedback.devices = errorMessage(error, "remoteChangeFailed");
+    renderFeedback();
+  },
+});
 
 function renderFeedback(): void {
   const unsupported = accessibility === "unsupported";
@@ -1116,6 +1124,7 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-view]")
       void updateLoginLaunch();
     }
     if (button.dataset.view === "devices") void devices.refresh();
+    else devices.reset();
   });
 }
 async function refreshSystemLanguage(): Promise<void> {

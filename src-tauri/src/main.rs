@@ -155,6 +155,11 @@ fn remember_running(app: &tauri::AppHandle) {
 }
 
 fn main() {
+    // Started by sshd as `remote --peer <id>`: relay lines and exit, before any window code.
+    #[cfg(unix)]
+    if let Some(code) = remote::helper::run_if_requested() {
+        std::process::exit(code);
+    }
     let builder = tauri::Builder::default();
     #[cfg(target_os = "macos")]
     let builder = builder
@@ -192,6 +197,8 @@ fn main() {
             let controller = Arc::new(Mutex::new(tools));
             let clock = Arc::downgrade(&controller);
             app.manage(controller);
+            #[cfg(unix)]
+            app.manage(remote::service::Service::start(app.handle(), &directory));
             #[cfg(target_os = "macos")]
             let tray_app = {
                 panel::install(app)?;
@@ -236,6 +243,10 @@ fn main() {
         RunEvent::Exit => {
             #[cfg(target_os = "macos")]
             presentation::stop(app);
+            #[cfg(unix)]
+            if let Some(service) = app.try_state::<remote::service::Service>() {
+                service.stop();
+            }
             let controller = app.state::<Controller>();
             if let Ok(mut tools) = controller.lock() {
                 tools.set_active(ToolId::Activity, false);

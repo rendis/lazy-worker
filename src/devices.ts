@@ -1,12 +1,12 @@
 import "./devices.css";
 import {
   desktop, type ActionSchedule, type Controller, type ControllerPermission, type DeviceKind, type DevicesOverview,
-  type RemoteApp, type RemoteDevice, type RemoteTool, type SavedAction,
+  type RemoteApp, type RemoteDevice, type RemoteLogEntry, type RemoteTool, type SavedAction,
 } from "./desktop";
-import type { Language, Message } from "./messages";
+import { messages, type Language, type Message } from "./messages";
 import { tools } from "./modules";
 import { h, icon, type Child } from "./proxy";
-import { age, formatClock, type AgeUnit } from "./time";
+import { age, formatClock, formatMoment, type AgeUnit } from "./time";
 
 // Every name and text below comes from data that other devices will send, so it is only ever set as text.
 const openKey = "lazy-worker-devices-open";
@@ -22,6 +22,12 @@ const permissions: { id: ControllerPermission; icon: string; label: Message }[] 
   { id: "actions", icon: "play", label: "permActions" },
   { id: "shell", icon: "terminal", label: "permShell" },
 ];
+/** The request names and outcomes that the log shows in words. Any other one shows as it is. */
+const logEvents: Record<string, Message> = { removePeer: "remoteLogEventRemovePeer", cutAll: "remoteLogEventCutAll" };
+const logOutcomes: Record<string, Message> = {
+  ok: "remoteOutcomeOk", notPermitted: "remoteOutcomeNotPermitted", localOnly: "remoteOutcomeLocalOnly",
+  notPaired: "remoteOutcomeNotPaired", badRequest: "remoteOutcomeBadRequest",
+};
 const kindIcons: Record<DeviceKind, string> = { laptop: "laptop", desktop: "monitor" };
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
@@ -29,6 +35,8 @@ type Host = {
   translate(key: Message): string;
   language(): Language;
   refreshIcons(): void;
+  /** Shows the notice of a failed change. `error` is the code that the app sent, when it sent one. */
+  fail(error: unknown): void;
 };
 type Row<T> = { root: HTMLElement; update(item: T): void };
 type Item = { id: string; self: boolean; name: string; kind: DeviceKind; data: DevicesOverview["thisDevice"] | RemoteDevice };
@@ -63,8 +71,17 @@ export function mountDevices(host: Host) {
   const addButton = document.getElementById("add-device") as HTMLButtonElement;
   const addTip = addButton.parentElement!;
 
+  const logWindow = document.getElementById("device-log-window")!;
+  const logList = document.getElementById("device-log-list")!;
+  const logCount = document.getElementById("device-log-count")!;
+  const logClose = document.getElementById("device-log-close") as HTMLButtonElement;
+
   let overview: DevicesOverview | undefined;
   let requested = 0;
+  /** What waits for a second click: a device id, or `cut` for all access. Only one thing waits at a time. */
+  let confirming: string | undefined;
+  let logEntries: RemoteLogEntry[] = [];
+  let logTrigger: HTMLElement | undefined;
   let opened = readOpen();
   let built = false;
   let sequence = 0;
@@ -122,6 +139,9 @@ export function mountDevices(host: Host) {
     const root = h("div", { class: "collapse", inert: true }, h("div", {}, paragraph));
     return {
       root,
+      set(value: string): void {
+        setText(paragraph, value);
+      },
       show(open: boolean): void {
         root.toggleAttribute("data-open", open);
         root.toggleAttribute("inert", !open);
@@ -268,29 +288,87 @@ export function mountDevices(host: Host) {
 
   const actionSignature = (action: SavedAction): string => JSON.stringify([host.language(), action.name]);
 
+  /** Saves the three permissions that can change here. The shell is turned on at the device itself. */
+  async function setPermission(controller: Controller, id: ControllerPermission, on: boolean): Promise<void> {
+    const next = { ...controller.permissions, [id]: on };
+    try {
+      await desktop.setPeerPermissions(controller.id, {
+        control: next.control, applications: next.applications, actions: next.actions,
+      });
+    } catch (error) {
+      host.fail(error);
+    }
+    await refresh();
+  }
+
+  async function removeController(controller: Controller): Promise<void> {
+    confirming = undefined;
+    try {
+      await desktop.removePeer(controller.id);
+    } catch (error) {
+      host.fail(error);
+    }
+    await refresh();
+  }
+
+  function confirmButtons(yesLabel: string, yes: () => void, no: () => void) {
+    const accept = iconButton(yesLabel, "check", "danger");
+    const cancel = iconButton(t("cancel"), "x");
+    accept.button.addEventListener("click", yes);
+    cancel.button.addEventListener("click", no);
+    return { accept, cancel };
+  }
+
   function controllerRow(controller: Controller): Row<Controller> {
+    let current = controller;
     const detail = h("span", { class: "setting-note" });
     const chips = permissions.map(permission => {
-      const state = h("span", { class: "visually-hidden" });
-      const chip = h("span", { class: "permission-chip" },
-        icon(permission.icon), h("span", { "aria-hidden": "true" }, t(permission.label)), state);
-      return { permission, chip, state };
+      const locked = permission.id === "shell";
+      const chip = h("button", {
+        type: "button", class: "permission-chip", "aria-pressed": "false", disabled: locked,
+        "aria-label": locked ? `${t(permission.label)}. ${t("permShellLocked")}` : t(permission.label),
+      }, icon(permission.icon), h("span", {}, t(permission.label)));
+      if (!locked) {
+        chip.addEventListener("click", () => {
+          void setPermission(current, permission.id, chip.getAttribute("aria-pressed") !== "true");
+        });
+      }
+      // The wrapper holds the tip, so the disabled shell chip can still say why it is off.
+      const root = locked ? h("span", { class: "tip", "data-tip": t("permShellLocked") }, chip) : chip;
+      return { permission, chip, root };
     });
+    const chipBox = h("div", { class: "permission-chips" }, ...chips.map(({ root }) => root));
     const remove = iconButton(fill(t("removeController"), { device: controller.name }), "user-minus");
+    const { accept, cancel } = confirmButtons(t("removeAccess"), () => { void removeController(current); }, () => {
+      confirming = undefined;
+      render();
+      remove.button.focus();
+    });
+    const confirm = h("div", { class: "device-confirm", hidden: true },
+      h("span", { class: "setting-note" }, t("removeConfirm")), accept.root, cancel.root);
+    remove.button.addEventListener("click", () => {
+      confirming = current.id;
+      render();
+      cancel.button.focus();
+    });
     const root = h("div", { class: "device-row" },
       kindIcon(controller.kind),
       h("div", { class: "device-row-text" }, h("strong", {}, controller.name), detail),
-      h("div", { class: "permission-chips" }, ...chips.map(({ chip }) => chip)),
-      remove.root);
+      chipBox, remove.root, confirm);
     return {
       root,
-      update(current) {
-        setText(detail, current.lastAccess === null ? t("noAccessYet") : fill(t("lastAccess"), { age: elapsed(current.lastAccess) }));
-        for (const { permission, chip, state } of chips) {
-          const on = current.permissions[permission.id] === true;
-          chip.toggleAttribute("data-on", on);
-          setText(state, fill(t(on ? "permissionOn" : "permissionOff"), { permission: t(permission.label) }));
+      update(next) {
+        current = next;
+        setText(detail, next.connected ? t("connectedNow")
+          : next.lastAccess === null ? t("noAccessYet") : fill(t("lastAccess"), { age: elapsed(next.lastAccess) }));
+        for (const { permission, chip } of chips) {
+          setAttribute(chip, "aria-pressed", String(next.permissions[permission.id] === true));
+          chip.toggleAttribute("data-on", next.permissions[permission.id] === true);
         }
+        const asking = confirming === next.id;
+        chipBox.hidden = asking;
+        remove.root.hidden = asking;
+        confirm.hidden = !asking;
       },
     };
   }
@@ -307,6 +385,7 @@ export function mountDevices(host: Host) {
     const pairing = iconButton(t("openPairing"), "lock-keyhole-open", "outlined");
     const pairingRow = settingRow("lock-keyhole", "pairing", pairingState, pairing.root);
 
+    const socketNote = note("");
     const controllersEmpty = note(t("noControllers"));
     const controllerRows = h("div", { class: "device-rows" });
     const controllerList = list<Controller>(
@@ -322,12 +401,29 @@ export function mountDevices(host: Host) {
 
     const cutLabel = h("span", { class: "setting-label" }, t("cutAll"));
     const cutButton = h("button", { type: "button", class: "setting-row device-cut" }, icon("hand"), cutLabel);
-    const cut = h("span", { class: "tip device-cut-tip" }, cutButton);
+    const cutTip = h("span", { class: "tip device-cut-tip" }, cutButton);
+    const cutCancelAction = () => {
+      confirming = undefined;
+      render();
+      cutButton.focus();
+    };
+    const cutButtons = confirmButtons(t("cutAll"), () => { void cutAll(); }, cutCancelAction);
+    const cutAsk = settingRow("hand", "cutConfirm", cutButtons.accept.root, cutButtons.cancel.root);
+    cutAsk.root.classList.add("device-cut-confirm");
+    cutAsk.root.hidden = true;
+    const cut = h("div", { class: "device-cut-box" }, cutTip, cutAsk.root);
+    cutButton.addEventListener("click", () => {
+      confirming = "cut";
+      render();
+      cutButtons.cancel.button.focus();
+    });
+    log.button.setAttribute("aria-haspopup", "dialog");
+    log.button.addEventListener("click", () => { void openLog(log.button); });
 
     const root = h("div", { class: "device-body" },
       access.root, pairingRow.root,
       h("div", { class: "device-subhead" }, h("h3", {}, t("whoCanControl"))),
-      controllerRows, controllersEmpty.root,
+      controllerRows, controllersEmpty.root, socketNote.root,
       h("div", { class: "device-subhead" }, h("h3", {}, t("deviceActions")), addAction.root),
       actionRows, actionsEmpty.root,
       logRow.root, cut);
@@ -341,21 +437,108 @@ export function mountDevices(host: Host) {
         setText(remoteState, t(accessKey[data.remoteAccess] ?? "remoteAccessUnknown"));
         remoteState.toggleAttribute("data-on", data.remoteAccess === "on");
         setText(pairingState, t(data.pairing === "open" ? "pairingOpen" : "pairingClosed"));
-        // Pairing, actions, and the log arrive in later steps, so the app shows them off until then.
+        // Pairing and actions arrive in later steps, so the app shows them off until then.
         const later = desktop.sampleDevices ? undefined : t("notAvailableYet");
         pairing.disable(data.pairing === "open" ? t("pairingOpen") : later, t("openPairing"));
         addAction.disable(later, t("addAction"));
-        log.disable(later, t("showLog"));
+        log.disable(undefined, t("showLog"));
+        if (confirming && confirming !== "cut" && !data.controllers.some(({ id }) => id === confirming)) confirming = undefined;
+        if (data.controllers.length === 0 && confirming === "cut") confirming = undefined;
         controllerList.sync(data.controllers);
         controllersEmpty.show(data.controllers.length === 0);
+        const reason = data.socket.error;
+        socketNote.set(fill(t("socketUnavailable"), {
+          reason: reason && Object.prototype.hasOwnProperty.call(messages.en, reason) ? t(reason as Message) : reason ?? "",
+        }));
+        socketNote.show(!data.socket.listening);
         actionList.sync(data.actions);
         actionsEmpty.show(data.actions.length === 0);
         const nobody = data.controllers.length === 0;
+        const asking = confirming === "cut";
         if (cutButton.disabled !== nobody) cutButton.disabled = nobody;
-        if (nobody) setTip(cut, t("noControllers"));
-        else cut.removeAttribute("data-tip");
+        if (nobody) setTip(cutTip, t("noControllers"));
+        else cutTip.removeAttribute("data-tip");
+        cutTip.hidden = asking;
+        cutAsk.root.hidden = !asking;
       },
     };
+  }
+
+  async function cutAll(): Promise<void> {
+    confirming = undefined;
+    try {
+      await desktop.cutAllAccess();
+    } catch (error) {
+      host.fail(error);
+    }
+    await refresh();
+  }
+
+  function outcomeText(outcome: string): string {
+    const known = logOutcomes[outcome];
+    if (known) return t(known);
+    return Object.prototype.hasOwnProperty.call(messages.en, outcome) ? t(outcome as Message) : outcome;
+  }
+
+  /** Names and request names come from other devices, so they are only ever set as text. */
+  function logItem(entry: RemoteLogEntry): HTMLElement {
+    const event = logEvents[entry.request];
+    return h("li", { class: "proxy-log-entry", "data-outcome": entry.outcome === "ok" ? "ok" : "refused" },
+      h("time", {}, formatMoment(entry.time, host.language())),
+      h("span", { class: "proxy-log-target" }, entry.name ?? "—"),
+      h("span", { class: "proxy-log-target" }, event ? t(event) : entry.request),
+      h("span", { class: "proxy-log-outcome" }, outcomeText(entry.outcome)));
+  }
+
+  function renderLog(): void {
+    setText(logCount, fill(t("remoteLogEntries"), { count: logEntries.length }));
+    logList.replaceChildren(...(logEntries.length
+      ? logEntries.map(logItem) : [h("li", { class: "setting-note" }, t("remoteLogEmpty"))]));
+  }
+
+  async function openLog(trigger: HTMLElement): Promise<void> {
+    logTrigger = trigger;
+    try {
+      logEntries = await desktop.getRemoteLog();
+    } catch (error) {
+      host.fail(error);
+      return;
+    }
+    renderLog();
+    logWindow.setAttribute("data-open", "");
+    logWindow.inert = false;
+    trigger.setAttribute("aria-expanded", "true");
+    logClose.focus();
+  }
+
+  function closeLog(restoreFocus = true): void {
+    if (!logWindow.hasAttribute("data-open")) return;
+    logWindow.removeAttribute("data-open");
+    logWindow.inert = true;
+    logTrigger?.setAttribute("aria-expanded", "false");
+    if (restoreFocus && logTrigger?.isConnected) logTrigger.focus();
+  }
+
+  logClose.addEventListener("click", () => closeLog());
+  logWindow.addEventListener("pointerdown", event => {
+    if (event.target === logWindow) closeLog();
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key !== "Escape") return;
+    if (logWindow.hasAttribute("data-open")) closeLog();
+    else if (confirming) {
+      confirming = undefined;
+      render();
+    }
+  });
+
+  /** Leaving the view drops what waits for a second click and closes the log. */
+  function reset(): void {
+    closeLog(false);
+    if (confirming) {
+      confirming = undefined;
+      render();
+    }
   }
 
   function section(key: string, title: Message, fallback = false) {
@@ -520,6 +703,7 @@ export function mountDevices(host: Host) {
         id: `r:${device.id}`, self: false, name: device.name, kind: device.kind, data: device,
       })),
     ]);
+    if (logWindow.hasAttribute("data-open")) renderLog();
     if (built) {
       built = false;
       host.refreshIcons();
@@ -535,12 +719,15 @@ export function mountDevices(host: Host) {
     } catch {
       // Keep the last list. A first failure still shows this device, without its details.
       overview ??= {
-        thisDevice: { name: "", kind: "desktop", remoteAccess: "unknown", pairing: "closed", controllers: [], actions: [] },
+        thisDevice: {
+          name: "", kind: "desktop", remoteAccess: "unknown", pairing: "closed", controllers: [],
+          socket: { listening: true, error: null }, actions: [],
+        },
         devices: [],
       };
     }
     render();
   }
 
-  return { refresh, render };
+  return { refresh, render, reset };
 }

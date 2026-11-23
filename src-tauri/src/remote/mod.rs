@@ -4,10 +4,17 @@
 //! the keys we pinned. Text from outside never becomes an SSH option or a remote command.
 #![cfg_attr(not(test), allow(dead_code))] // The callers arrive with pairing.
 
+pub mod authorized_keys;
 pub mod destination;
+pub mod helper;
 pub mod identity;
 pub mod known_hosts;
+pub mod log;
+pub mod peers;
+pub mod server;
+pub mod service;
 pub mod ssh;
+pub mod wire;
 
 use std::{
     fs::{self, DirBuilder, OpenOptions},
@@ -65,6 +72,18 @@ impl Layout {
         self.remote.join("known_hosts")
     }
 
+    pub fn peers_file(&self) -> PathBuf {
+        self.remote.join("peers.json")
+    }
+
+    pub fn socket_file(&self) -> PathBuf {
+        self.remote.join("app.sock")
+    }
+
+    pub fn log_file(&self) -> PathBuf {
+        self.remote.join("log.jsonl")
+    }
+
     pub fn control_dir(&self) -> Option<&Path> {
         self.control.as_deref()
     }
@@ -87,6 +106,34 @@ fn socket_fits(directory: &Path) -> bool {
 
 extern "C" {
     fn geteuid() -> u32;
+}
+
+#[cfg(target_os = "macos")]
+extern "C" {
+    fn getpeereid(fd: i32, uid: *mut u32, gid: *mut u32) -> i32;
+}
+
+/// The user id of the process at the other end of a Unix socket. Nothing where the system gives
+/// none, and the caller then refuses the connection.
+#[cfg(target_os = "macos")]
+pub(crate) fn peer_uid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
+    use std::os::fd::AsRawFd;
+    let (mut uid, mut gid) = (0u32, 0u32);
+    // SAFETY: the descriptor is open for the whole call, and both pointers are valid for writes.
+    let result = unsafe { getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) };
+    (result == 0).then_some(uid)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn peer_uid(_stream: &std::os::unix::net::UnixStream) -> Option<u32> {
+    None
+}
+
+/// Unix seconds now.
+pub(crate) fn now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
 }
 
 /// The user id of this process.
@@ -193,6 +240,27 @@ pub(crate) mod testing {
     };
 
     static COUNTER: AtomicU32 = AtomicU32::new(0);
+
+    /// A writer whose bytes the test reads back.
+    #[derive(Clone, Default)]
+    pub struct Sink(pub std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl Sink {
+        pub fn text(&self) -> String {
+            String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+        }
+    }
+
+    impl std::io::Write for Sink {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
 
     /// A fresh directory under the system temp directory. The caller removes it.
     pub fn scratch(label: &str) -> PathBuf {
