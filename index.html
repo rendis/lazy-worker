@@ -126,18 +126,18 @@
               <div class="setting-row">
                 <i data-lucide="clock"></i>
                 <span class="setting-label" id="caffeinate-mode-label" data-text="caffeinateMode">Run for</span>
-                <div class="segments caffeinate-modes" role="radiogroup" aria-labelledby="caffeinate-mode-label" data-selection="untilStopped">
+                <div class="segments caffeinate-modes segment-icons" role="radiogroup" aria-labelledby="caffeinate-mode-label" data-selection="untilStopped">
                   <label>
                     <input type="radio" name="caffeinate-mode" value="untilStopped" checked />
-                    <span data-text="untilStopped">Until stopped</span>
+                    <span><i data-lucide="infinity"></i><span data-text="untilStopped">Until stopped</span></span>
                   </label>
                   <label>
                     <input type="radio" name="caffeinate-mode" value="timer" />
-                    <span data-text="caffeinateTimer">Timer</span>
+                    <span><i data-lucide="timer"></i><span data-text="caffeinateTimer">Timer</span></span>
                   </label>
                   <label>
                     <input type="radio" name="caffeinate-mode" value="process" />
-                    <span data-text="caffeinateProcess">Process</span>
+                    <span><i data-lucide="cpu"></i><span data-text="caffeinateProcess">Process</span></span>
                   </label>
                   <span class="segment-indicator" aria-hidden="true"></span>
                 </div>

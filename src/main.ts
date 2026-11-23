@@ -1,7 +1,7 @@
 import "./style.css";
 import {
   Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
-  Cpu, createIcons, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Info, Laptop, LayoutGrid, Link, LockKeyhole,
+  Cpu, createIcons, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Infinity as InfinityIcon, Info, Laptop, LayoutGrid, Link, LockKeyhole,
   Maximize2, MessageSquare, Monitor, Moon, Pencil, Play, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
   Shield, Sparkles, Square, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserRound, X, Zap,
 } from "lucide";
@@ -28,7 +28,7 @@ function renderIcons(): void {
   createIcons({
     icons: {
       Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
-      Cpu, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Info, Laptop, LayoutGrid, Link, LockKeyhole,
+      Cpu, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Infinity: InfinityIcon, Info, Laptop, LayoutGrid, Link, LockKeyhole,
       Maximize2, MessageSquare, Monitor, Moon, Pencil, Play, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server,
       Settings, Shield, Sparkles, Square, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserRound, X, Zap,
     },
