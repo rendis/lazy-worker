@@ -150,7 +150,16 @@ impl Service {
             | Ok(Running {
                 server: Err(error), ..
             }) => Socket::unavailable(error),
-            Ok(_) => Socket::listening(),
+            // Without a safe helper no line can be written, so no device can reach the socket.
+            Ok(running) => match running
+                .keys
+                .as_ref()
+                .map_err(|code| *code)
+                .and_then(|keys| keys.trusted_helper())
+            {
+                Ok(_) => Socket::listening(),
+                Err(code) => Socket::unavailable(code),
+            },
         }
     }
 

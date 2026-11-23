@@ -1885,6 +1885,7 @@ version = "0.6.7"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "curve25519-dalek",
  "hkdf",
  "hmac",
  "objc2",

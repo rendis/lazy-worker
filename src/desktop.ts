@@ -24,6 +24,8 @@ export type ProxyApp = {
   icon: string;
   /** `null` keeps the built-in command. `{server}` stands for the server address. */
   command: string | null;
+  /** True when the app has its own command. A remote device gets `command: null` and only this flag. */
+  custom?: boolean;
   quickStart: boolean;
   /** The desktop app or the command-line program of a built-in tool. */
   variant: "app" | "code";
@@ -426,7 +428,7 @@ function previewDevices(): DevicesOverview {
   return {
     thisDevice: {
       name: "MacBook Pro", kind: "laptop", remoteAccess: { ...previewAccess }, pairing: { ...previewPairing },
-      account: "reynaldo",
+      account: "alex",
       controllers: previewControllerList().map(controller => ({
         ...controller, permissions: { ...controller.permissions },
       })),
@@ -633,7 +635,7 @@ export const desktop = {
     const expires = Math.floor(Date.now() / 1000) + 600;
     previewPairingOpened = Math.floor(Date.now() / 1000);
     Object.assign(previewPairing, { open: true, expires, attemptsLeft: 3 });
-    return { code: "482913", account: "reynaldo", expires };
+    return { code: "482913", account: "alex", expires };
   },
   async closePairing(): Promise<void> {
     if (native) return call("closePairing");

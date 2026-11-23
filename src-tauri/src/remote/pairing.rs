@@ -394,9 +394,10 @@ impl Pairing {
             self.changed.notify_all();
             let _ = self.remove_line();
         }
+        // The name is only a claim until the code is proved, so the log keeps the id alone.
         let _ = self.log.append(&Entry::new(
             Some(&controller.id),
-            Some(&controller.name),
+            None,
             "pair",
             "wrongCode",
         ));

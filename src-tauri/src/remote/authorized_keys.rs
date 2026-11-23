@@ -45,6 +45,55 @@ static FILE_LOCK: Mutex<()> = Mutex::new(());
 pub struct AuthorizedKeys {
     home: PathBuf,
     helper: PathBuf,
+    trust: Trust,
+}
+
+/// Checks the helper path and gives the path that a line names.
+type Trust = fn(&Path) -> Result<PathBuf, &'static str>;
+
+/// The group of the administrators on macOS. They can become root, so a directory of root that
+/// they can write is as safe as one that root alone can write.
+const ADMIN_GID: u32 = 80;
+
+/// True when an owner and a mode let nobody but root, us, and for root's directories the
+/// administrators, change the entry.
+fn entry_safe(uid: u32, gid: u32, mode: u32, ours: u32) -> bool {
+    let owner = uid == 0 || uid == ours;
+    let group_only_admin = uid == 0 && gid == ADMIN_GID;
+    let others = mode & 0o002 == 0;
+    let group = mode & 0o020 == 0 || group_only_admin;
+    owner && others && group
+}
+
+/// Checks the file and each directory from it up to `floor`, and the path for a translocation.
+/// Nothing above `floor` is looked at.
+fn trusted_from(path: &Path, floor: &Path) -> Result<PathBuf, &'static str> {
+    let real = fs::canonicalize(path).map_err(|_| "helperPathUnsafe")?;
+    if real.to_string_lossy().contains("/AppTranslocation/") {
+        return Err("helperPathUnsafe");
+    }
+    let ours = our_uid();
+    let mut entry: Option<&Path> = Some(real.as_path());
+    while let Some(current) = entry {
+        let meta = fs::symlink_metadata(current).map_err(|_| "helperPathUnsafe")?;
+        if !entry_safe(meta.uid(), meta.gid(), meta.mode(), ours) {
+            return Err("helperPathUnsafe");
+        }
+        if current == floor {
+            break;
+        }
+        entry = current.parent();
+    }
+    Ok(real)
+}
+
+/// The check that runs before a line is written: no translocated copy, and the program and every
+/// directory above it owned by root or us and closed to group and others.
+fn trusted_helper(path: &Path) -> Result<PathBuf, &'static str> {
+    #[cfg(test)]
+    return Ok(path.to_path_buf());
+    #[cfg(not(test))]
+    trusted_from(path, Path::new("/"))
 }
 
 /// The program path goes inside double quotes that sshd hands to the login shell. A character
@@ -135,8 +184,17 @@ enum Others {
 impl AuthorizedKeys {
     /// `home` is the home directory of the user. `helper` is the app executable.
     pub fn new(home: PathBuf, helper: PathBuf) -> Result<Self, &'static str> {
+        Self::with_trust(home, helper, trusted_helper)
+    }
+
+    fn with_trust(home: PathBuf, helper: PathBuf, trust: Trust) -> Result<Self, &'static str> {
         check_helper(&helper)?;
-        Ok(Self { home, helper })
+        Ok(Self { home, helper, trust })
+    }
+
+    /// The program path for a line, or `helperPathUnsafe`. Run before any line is written.
+    pub fn trusted_helper(&self) -> Result<PathBuf, &'static str> {
+        (self.trust)(&self.helper)
     }
 
     fn ssh_dir(&self) -> PathBuf {
@@ -148,7 +206,7 @@ impl AuthorizedKeys {
     }
 
     pub fn install(&self, peer: &Peer, networks: &[String]) -> Result<(), &'static str> {
-        let line = render(&peer.id, &peer.public_key, networks, &self.helper)?;
+        let line = render(&peer.id, &peer.public_key, networks, &self.trusted_helper()?)?;
         self.rewrite(
             BTreeMap::from([(peer.id.clone(), Some(line))]),
             Others::Keep,
@@ -162,7 +220,7 @@ impl AuthorizedKeys {
 
     /// Adds the pairing line, or replaces the one that is there.
     pub fn install_pairing(&self, networks: &[String], expiry: &str) -> Result<(), &'static str> {
-        let line = render_pairing(networks, &self.helper, expiry)?;
+        let line = render_pairing(networks, &self.trusted_helper()?, expiry)?;
         self.rewrite(
             BTreeMap::from([(PAIRING.to_owned(), Some(line))]),
             Others::Keep,
@@ -183,7 +241,7 @@ impl AuthorizedKeys {
     pub fn refresh_all(&self, peers: &[Peer], networks: &[String]) -> Result<(), &'static str> {
         let mut wanted = BTreeMap::new();
         for peer in peers {
-            let line = render(&peer.id, &peer.public_key, networks, &self.helper)?;
+            let line = render(&peer.id, &peer.public_key, networks, &self.trusted_helper()?)?;
             wanted.insert(peer.id.clone(), Some(line));
         }
         self.rewrite(wanted, Others::Drop)
@@ -503,6 +561,61 @@ expiry-time=\"202611231215\",command=\"\\\"{HELPER}\\\" remote --pair\" {} lazy-
             b"ssh-ed25519 AAAA lazy-worker:not-an-id\nother key\n"
         );
         fs::remove_dir_all(home).unwrap();
+    }
+
+    /// A program in a directory of `mode`, under a scratch root. Returns the root and the program.
+    fn program_in(label: &str, mode: u32) -> (PathBuf, PathBuf) {
+        let root = crate::remote::testing::scratch(label);
+        let dir = root.join("App.app");
+        fs::create_dir(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(mode)).unwrap();
+        let program = dir.join("lw");
+        fs::write(&program, "x").unwrap();
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+        (fs::canonicalize(root).unwrap(), fs::canonicalize(program).unwrap())
+    }
+
+    #[test]
+    fn an_entry_is_safe_only_when_root_or_we_own_it_and_group_and_others_cannot_write() {
+        assert!(entry_safe(0, 0, 0o755, 501));
+        assert!(entry_safe(501, 20, 0o755, 501));
+        assert!(entry_safe(0, ADMIN_GID, 0o775, 501), "/Applications");
+        assert!(!entry_safe(501, 20, 0o775, 501), "group write on ours");
+        assert!(!entry_safe(0, 0, 0o775, 501), "group write on root, not admin");
+        assert!(!entry_safe(501, 20, 0o757, 501), "others write");
+        assert!(!entry_safe(0, 0, 0o777, 501));
+        assert!(!entry_safe(502, 20, 0o755, 501), "someone else owns it");
+    }
+
+    #[test]
+    fn a_helper_in_a_group_writable_directory_is_refused_and_no_line_is_written() {
+        let (root, program) = program_in("ak-unsafe", 0o775);
+        assert_eq!(trusted_from(&program, &root), Err("helperPathUnsafe"));
+        let home = crate::remote::testing::scratch("ak-unsafe-home");
+        let keys =
+            AuthorizedKeys::with_trust(home.clone(), program.clone(), |path| {
+                trusted_from(path, path.parent().and_then(Path::parent).unwrap())
+            })
+            .unwrap();
+        assert_eq!(keys.install(&peer(ID_A, "A"), &[]), Err("helperPathUnsafe"));
+        assert_eq!(keys.install_pairing(&[], "202611231215"), Err("helperPathUnsafe"));
+        assert_eq!(keys.refresh_all(&[peer(ID_A, "A")], &[]), Err("helperPathUnsafe"));
+        assert!(!home.join(".ssh/authorized_keys").exists());
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn a_helper_in_a_closed_directory_passes_and_a_translocated_one_does_not() {
+        let (root, program) = program_in("ak-safe", 0o755);
+        assert_eq!(trusted_from(&program, &root), Ok(program.clone()));
+        let moved = root.join("AppTranslocation").join("x");
+        fs::create_dir_all(&moved).unwrap();
+        let copy = moved.join("lw");
+        fs::write(&copy, "x").unwrap();
+        assert_eq!(trusted_from(&copy, &root), Err("helperPathUnsafe"));
+        assert_eq!(trusted_from(&root.join("missing"), &root), Err("helperPathUnsafe"));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

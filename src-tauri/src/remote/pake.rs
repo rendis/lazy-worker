@@ -15,6 +15,7 @@ use super::{
 };
 use crate::devices::Kind;
 use base64::{engine::general_purpose::STANDARD, Engine};
+use curve25519_dalek::edwards::CompressedEdwardsY;
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -189,8 +190,16 @@ fn decode(text: &str, length: usize) -> Result<Vec<u8>, &'static str> {
     }
 }
 
+/// A SPAKE2 message of the other side: one byte for the side, then a point. A point of small
+/// order, or one that is not on the curve, would let an attacker fix the shared key, so it is refused.
 pub fn decode_pake(text: &str) -> Result<Vec<u8>, &'static str> {
-    decode(text, PAKE_LENGTH)
+    let bytes = decode(text, PAKE_LENGTH)?;
+    let mut point = [0u8; 32];
+    point.copy_from_slice(&bytes[1..]);
+    match CompressedEdwardsY(point).decompress() {
+        Some(point) if !point.is_small_order() => Ok(bytes),
+        _ => Err("pairingFailed"),
+    }
 }
 
 pub fn decode_mac(text: &str) -> Result<Vec<u8>, &'static str> {
@@ -385,6 +394,27 @@ mod tests {
     }
 
     #[test]
+    fn a_pake_message_with_a_small_order_point_is_refused() {
+        let (_, good) = start_controller("123456");
+        assert_eq!(decode_pake(&encode(&good)).unwrap(), good);
+        // The identity point (0, 1), and the point of order two (0, -1), with the side byte.
+        let mut identity = vec![0x42u8, 1];
+        identity.extend([0u8; 31]);
+        let mut order_two = vec![0x42u8];
+        order_two.extend([0xec]);
+        order_two.extend([0xff; 30]);
+        order_two.push(0x7f);
+        assert_eq!(decode_pake(&encode(&identity)), Err("pairingFailed"));
+        assert_eq!(decode_pake(&encode(&order_two)), Err("pairingFailed"));
+        // Bytes that are not a point on the curve.
+        let mut off_curve = vec![0x42u8, 2];
+        off_curve.extend([0u8; 31]);
+        assert_eq!(decode_pake(&encode(&off_curve)), Err("pairingFailed"));
+        // The length is still checked first.
+        assert_eq!(decode_pake(&encode(&identity[..32])), Err("badMessage"));
+    }
+
+    #[test]
     fn the_confirmations_are_bound_to_their_side_and_to_the_transcript() {
         let keys = derive(b"shared key");
         let hash = transcript(&[1; 33], &[2; 33], &controller(), &target(), HOST_KEY, "me");
@@ -466,8 +496,8 @@ mod tests {
 
     #[test]
     fn binary_fields_must_be_exact_base64() {
-        let good = encode(&[7; 33]);
-        assert_eq!(decode_pake(&good).unwrap(), vec![7; 33]);
+        let (_, message) = start_controller("123456");
+        assert_eq!(decode_pake(&encode(&message)).unwrap(), message);
         assert!(decode_pake(&encode(&[7; 32])).is_err());
         assert!(decode_pake(&encode(&[7; 34])).is_err());
         assert!(decode_pake("***").is_err());

@@ -283,10 +283,10 @@ mod tests {
     #[test]
     fn reads_the_methods_a_server_offers() {
         // OpenSSH 8.6 on macOS 12 with its defaults.
-        let open = "rendis@127.0.0.1: Permission denied (publickey,password,keyboard-interactive).\n";
+        let open = "alex@127.0.0.1: Permission denied (publickey,password,keyboard-interactive).\n";
         assert_eq!(parse_methods(open), PasswordLogin::Allowed);
         // OpenSSH 10 with the drop-in.
-        assert_eq!(parse_methods("rendis@127.0.0.1: Permission denied (publickey).\n"), PasswordLogin::Blocked);
+        assert_eq!(parse_methods("alex@127.0.0.1: Permission denied (publickey).\n"), PasswordLogin::Blocked);
         assert_eq!(parse_methods("Permission denied (publickey,password).\n"), PasswordLogin::Allowed);
         assert_eq!(parse_methods("Permission denied (keyboard-interactive).\n"), PasswordLogin::Allowed);
         assert_eq!(parse_methods("Permission denied (gssapi-with-mic).\n"), PasswordLogin::Unknown);
@@ -298,8 +298,8 @@ mod tests {
 
     #[test]
     fn reads_the_group_answer() {
-        assert_eq!(parse_membership("yes rendis is a member of com.apple.access_ssh\n", ""), Some(true));
-        assert_eq!(parse_membership("no rendis is NOT a member of com.apple.access_ssh\n", ""), Some(false));
+        assert_eq!(parse_membership("yes alex is a member of com.apple.access_ssh\n", ""), Some(true));
+        assert_eq!(parse_membership("no alex is NOT a member of com.apple.access_ssh\n", ""), Some(false));
         assert_eq!(parse_membership("Group not found.\n", ""), Some(true));
         assert_eq!(parse_membership("", "Group not found.\n"), Some(true));
         assert_eq!(parse_membership("Unable to find the user record\n", ""), None);

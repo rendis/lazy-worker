@@ -27,6 +27,7 @@
 - Keep proxy logic in `src/proxy.ts` and reach the system only through `desktop`. Give each `desktop` proxy call a browser-preview result.
 - Store a proxy command as a template where `{server}` stands for the server address. Store `null` for an unchanged built-in command. Save a command of the user's own exactly as written, and ask for the server address only when the command names it.
 - Ask before an action that cannot be undone, in the place where the user started it.
+- A remote origin never starts the proxy server or changes where it listens or what it reaches, and its reads hide stored commands. Check the helper path before any managed `authorized_keys` line, and clean every name from the network through `clean_name`.
 - Treat proxy clients as apps to open, with no running state. Start selected opens the marked ones. Stop selected leaves them open.
 - Reach other devices only through `remote::ssh` with our own `-F` config, a validated `Destination`, and `--` before the host. Never pass user text as ssh options or as the remote command.
 - On the target side, run every remote request through the same dispatcher as the webview, with an `Origin::Remote` built from the peers store on each request. The helper only relays bounded lines. Managed `authorized_keys` lines carry `restrict` and no `pty` unless a shell grant is active.

@@ -35,8 +35,36 @@ use std::{
 };
 
 pub const MAX_CONNECTIONS: usize = 16;
-const IDLE: Duration = Duration::from_secs(10 * 60);
-const HELLO_WAIT: Duration = Duration::from_secs(10);
+/// Open connections that one paired device may have.
+const MAX_PER_PEER: usize = 4;
+/// Pairing connections at once. The pairing session takes one slot too.
+const MAX_PAIRING: usize = 1;
+
+/// The times that bound a connection. A test may use shorter ones.
+#[derive(Clone, Copy)]
+struct Limits {
+    /// From connect to the end of the hello line.
+    hello: Duration,
+    /// From the hello to the start message of a pairing.
+    start: Duration,
+    /// A whole pairing session, from the hello.
+    session: Duration,
+    /// Between request lines.
+    idle: Duration,
+    /// From the first byte of a request line to its end.
+    line: Duration,
+    /// For every write to the peer.
+    write: Duration,
+}
+
+const LIMITS: Limits = Limits {
+    hello: Duration::from_secs(10),
+    start: Duration::from_secs(10),
+    session: SESSION_TIMEOUT,
+    idle: Duration::from_secs(10 * 60),
+    line: Duration::from_secs(30),
+    write: Duration::from_secs(10),
+};
 const MAX_RESPONSE: usize = 1024 * 1024;
 /// `sun_path` holds 104 bytes with its end mark on macOS.
 const SOCKET_PATH_MAX: usize = 103;
@@ -63,20 +91,63 @@ struct HelloBody {
 /// The registered name of a pairing connection. It is not a device id, so it never matches a peer.
 const PAIRING_CONNECTION: &str = "pairing";
 
-/// A stream that ends its reads at a fixed time, whatever the other side does.
+/// A stream that ends its reads at a fixed time, whatever the other side does. Until the first
+/// line is complete it also ends them at `first_line`.
 struct Deadlined {
     stream: UnixStream,
     deadline: Instant,
+    first_line: Option<Instant>,
 }
 
 impl Read for Deadlined {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-        let left = self.deadline.saturating_duration_since(Instant::now());
+        let limit = self.first_line.map_or(self.deadline, |at| at.min(self.deadline));
+        let left = limit.saturating_duration_since(Instant::now());
         if left.is_zero() {
             return Err(std::io::ErrorKind::TimedOut.into());
         }
         self.stream.set_read_timeout(Some(left))?;
-        self.stream.read(buffer)
+        let count = self.stream.read(buffer)?;
+        if buffer[..count].contains(&b'\n') {
+            self.first_line = None;
+        }
+        Ok(count)
+    }
+}
+
+/// A stream with two read limits: `idle` while no line has begun, and `line` from the first
+/// byte of a line to its end, so a slow drip is cut.
+struct Dripped {
+    stream: UnixStream,
+    idle: Duration,
+    line: Duration,
+    /// When the line that is now partly read began.
+    began: Option<Instant>,
+}
+
+/// Where the line stands after `chunk`: when the line now partly read began, if there is one.
+fn line_began(began: Option<Instant>, chunk: &[u8], now: Instant) -> Option<Instant> {
+    match chunk.iter().rposition(|&byte| byte == b'\n') {
+        // The chunk ends a line. What follows the last end mark begins the next one.
+        Some(last) => (last + 1 < chunk.len()).then_some(now),
+        None if chunk.is_empty() => began,
+        None => began.or(Some(now)),
+    }
+}
+
+impl Read for Dripped {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let wait = match self.began {
+            Some(began) => self.line.saturating_sub(began.elapsed()),
+            None => self.idle,
+        };
+        if wait.is_zero() {
+            return Err(std::io::ErrorKind::TimedOut.into());
+        }
+        self.stream.set_read_timeout(Some(wait))?;
+        let count = self.stream.read(buffer)?;
+        self.began = line_began(self.began, &buffer[..count], Instant::now());
+        Ok(count)
     }
 }
 
@@ -97,6 +168,7 @@ struct Shared {
     log: Arc<Log>,
     pairing: Arc<Pairing>,
     handler: Box<dyn Handler>,
+    limits: Limits,
     connections: Mutex<Connections>,
     live: AtomicUsize,
     stopped: AtomicBool,
@@ -150,6 +222,17 @@ impl Server {
         pairing: Arc<Pairing>,
         handler: impl Handler,
     ) -> Result<Self, &'static str> {
+        Self::start_with(path, peers, log, pairing, handler, LIMITS)
+    }
+
+    fn start_with(
+        path: PathBuf,
+        peers: Arc<Peers>,
+        log: Arc<Log>,
+        pairing: Arc<Pairing>,
+        handler: impl Handler,
+        limits: Limits,
+    ) -> Result<Self, &'static str> {
         if path.as_os_str().len() > SOCKET_PATH_MAX {
             return Err("socketPathTooLong");
         }
@@ -173,6 +256,7 @@ impl Server {
             log,
             pairing,
             handler: Box::new(handler),
+            limits,
             connections: Mutex::new(Connections::default()),
             live: AtomicUsize::new(0),
             stopped: AtomicBool::new(false),
@@ -229,6 +313,7 @@ fn accept(listener: UnixListener, shared: Arc<Shared>) {
         if shared.live.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
             shared.live.fetch_sub(1, Ordering::SeqCst);
             let mut stream = stream;
+            let _ = stream.set_write_timeout(Some(shared.limits.write));
             let _ = stream.write_all(error_line("busy").as_bytes());
             continue;
         }
@@ -245,23 +330,41 @@ fn accept(listener: UnixListener, shared: Arc<Shared>) {
     }
 }
 
-/// Lists the connection, so that cutting a device or stopping the server ends it.
-fn register(shared: &Shared, slot: &mut Slot, name: &str, stream: UnixStream) {
+/// Lists the connection, so that cutting a device or stopping the server ends it. A name that
+/// has `max` connections already is refused, and the check and the listing are one step.
+fn register(
+    shared: &Shared,
+    slot: &mut Slot,
+    name: &str,
+    max: usize,
+    stream: UnixStream,
+) -> Result<(), ()> {
     let mut open = shared.lock();
+    if open.open.values().filter(|(peer, _)| peer == name).count() >= max {
+        return Err(());
+    }
     open.next += 1;
     let key = open.next;
     open.open.insert(key, (name.to_owned(), stream));
     slot.id = Some(key);
+    Ok(())
 }
 
-/// Runs one pairing session. It has `SESSION_TIMEOUT` in all, from the first line on.
-fn serve_pairing(reader: BufReader<UnixStream>, mut writer: UnixStream, shared: &Shared) {
+/// Runs one pairing session. It has `limits.session` in all, from the hello, and its start
+/// message must come within `limits.start`.
+fn serve_pairing(reader: BufReader<Dripped>, mut writer: UnixStream, shared: &Shared) {
     // The start message may have come in the same read as the hello, so keep what is buffered.
     let buffered = reader.buffer().to_vec();
-    let stream = reader.into_inner();
-    let deadline = Instant::now() + SESSION_TIMEOUT;
-    let _ = writer.set_write_timeout(Some(SESSION_TIMEOUT));
-    let mut input = BufReader::new(Cursor::new(buffered).chain(Deadlined { stream, deadline }));
+    let stream = reader.into_inner().stream;
+    let now = Instant::now();
+    let limits = shared.limits;
+    let first_line = (!buffered.contains(&b'\n')).then(|| now + limits.start);
+    let _ = writer.set_write_timeout(Some(limits.write));
+    let mut input = BufReader::new(Cursor::new(buffered).chain(Deadlined {
+        stream,
+        deadline: now + limits.session,
+        first_line,
+    }));
     shared.pairing.serve(&mut input, &mut writer);
 }
 
@@ -277,8 +380,14 @@ fn connection(stream: UnixStream, mut slot: Slot) {
     let Ok(registered) = stream.try_clone() else {
         return;
     };
-    let mut reader = BufReader::new(stream);
-    let _ = reader.get_ref().set_read_timeout(Some(HELLO_WAIT));
+    let limits = shared.limits;
+    let _ = writer.set_write_timeout(Some(limits.write));
+    let mut reader = BufReader::new(Dripped {
+        stream,
+        idle: limits.hello,
+        line: limits.hello,
+        began: None,
+    });
     let reply = |writer: &mut UnixStream, code: &str| {
         let _ = writer.write_all(error_line(code).as_bytes());
     };
@@ -300,13 +409,21 @@ fn connection(stream: UnixStream, mut slot: Slot) {
             _ => return reply(&mut writer, "notPaired"),
         },
         (None, Some(true)) => {
-            register(&shared, &mut slot, PAIRING_CONNECTION, registered);
+            if register(&shared, &mut slot, PAIRING_CONNECTION, MAX_PAIRING, registered).is_err() {
+                return reply(&mut writer, "pairingBusy");
+            }
             return serve_pairing(reader, writer, &shared);
         }
         _ => return reply(&mut writer, "badHello"),
     };
-    register(&shared, &mut slot, &id, registered);
-    let _ = reader.get_ref().set_read_timeout(Some(IDLE));
+    if register(&shared, &mut slot, &id, MAX_PER_PEER, registered).is_err() {
+        return reply(&mut writer, "busy");
+    }
+    {
+        let timed = reader.get_mut();
+        timed.idle = limits.idle;
+        timed.line = limits.line;
+    }
 
     loop {
         let line = match read_line(&mut reader, MAX_REQUEST_LINE) {
@@ -412,6 +529,10 @@ mod tests {
 
     /// The directory is short and in `/tmp`, because a socket path has a hard limit.
     fn setup(_label: &str) -> Setup {
+        setup_with(LIMITS)
+    }
+
+    fn setup_with(limits: Limits) -> Setup {
         static COUNTER: AtomicU32 = AtomicU32::new(0);
         let dir = PathBuf::from(format!(
             "/tmp/lw-t-{}-{}",
@@ -441,12 +562,13 @@ mod tests {
             host_key_file,
             Duration::from_secs(600),
         ));
-        let server = Server::start(
+        let server = Server::start_with(
             socket.clone(),
             peers.clone(),
             log.clone(),
             pairing.clone(),
             Fake,
+            limits,
         )
         .unwrap();
         Setup {
@@ -751,11 +873,11 @@ mod tests {
     #[test]
     fn connections_past_the_cap_are_turned_away() {
         let setup = setup("cap");
-        setup.pair(ID_A, true, false);
-        let mut held = Vec::new();
-        for _ in 0..MAX_CONNECTIONS {
-            held.push(setup.connect(ID_A));
-        }
+        // Connections that have not said hello yet count too.
+        let held: Vec<_> = (0..MAX_CONNECTIONS)
+            .map(|_| UnixStream::connect(&setup.socket).unwrap())
+            .collect();
+        thread::sleep(Duration::from_millis(200));
         let mut over = UnixStream::connect(&setup.socket).unwrap();
         over.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
         let mut reader = BufReader::new(over.try_clone().unwrap());
@@ -763,6 +885,91 @@ mod tests {
         let mut line = String::new();
         reader.read_line(&mut line).unwrap();
         assert_eq!(line.trim(), r#"{"error":"busy"}"#);
+        drop(held);
+    }
+
+    #[test]
+    fn one_peer_may_hold_only_a_few_connections_and_others_are_not_affected() {
+        let setup = setup("per-peer");
+        setup.pair(ID_A, true, false);
+        setup.pair(ID_B, true, false);
+        let mut held = Vec::new();
+        for _ in 0..MAX_PER_PEER {
+            let (mut stream, mut reader) = setup.connect(ID_A);
+            assert_eq!(
+                ask(&mut stream, &mut reader, status()),
+                serde_json::json!({"ok": "done"})
+            );
+            held.push((stream, reader));
+        }
+        let (_stream, mut reader) = setup.connect(ID_A);
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        assert_eq!(line.trim(), r#"{"error":"busy"}"#);
+        let (mut other, mut other_reader) = setup.connect(ID_B);
+        assert_eq!(
+            ask(&mut other, &mut other_reader, status()),
+            serde_json::json!({"ok": "done"})
+        );
+        // A closed connection frees its place.
+        let (first, first_reader) = held.remove(0);
+        drop((first, first_reader));
+        for _ in 0..50 {
+            if setup.server.shared.lock().open.values().filter(|(p, _)| p == ID_A).count()
+                < MAX_PER_PEER
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        let (mut again, mut again_reader) = setup.connect(ID_A);
+        assert_eq!(
+            ask(&mut again, &mut again_reader, status()),
+            serde_json::json!({"ok": "done"})
+        );
+    }
+
+    #[test]
+    fn a_slow_drip_of_one_request_line_is_cut_but_an_idle_connection_is_not() {
+        let setup = setup_with(Limits {
+            line: Duration::from_millis(400),
+            idle: Duration::from_secs(5),
+            ..LIMITS
+        });
+        setup.pair(ID_A, true, false);
+        let (mut stream, mut reader) = setup.connect(ID_A);
+        assert_eq!(
+            ask(&mut stream, &mut reader, status()),
+            serde_json::json!({"ok": "done"})
+        );
+        // Quiet between lines is fine.
+        thread::sleep(Duration::from_millis(700));
+        assert_eq!(
+            ask(&mut stream, &mut reader, status()),
+            serde_json::json!({"ok": "done"})
+        );
+        // One byte at a time, never finishing the line.
+        let started = Instant::now();
+        for byte in b"{\"request\":{\"command\":\"getStatuses\"" {
+            if stream.write_all(&[*byte]).is_err() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(60));
+        }
+        assert!(at_end(&mut reader));
+        assert!(started.elapsed() < Duration::from_secs(4));
+    }
+
+    #[test]
+    fn the_line_clock_starts_at_the_first_byte_and_stops_at_the_end_mark() {
+        let at = Instant::now();
+        let later = at + Duration::from_secs(1);
+        assert_eq!(line_began(None, b"", at), None);
+        assert_eq!(line_began(None, b"abc", at), Some(at));
+        assert_eq!(line_began(Some(at), b"def", later), Some(at));
+        assert_eq!(line_began(Some(at), b"end\n", later), None);
+        assert_eq!(line_began(Some(at), b"end\nnext", later), Some(later));
+        assert_eq!(line_began(None, b"one\ntwo\n", later), None);
     }
 
     /// The helper and the server together, with a byte stream in place of sshd.
@@ -861,6 +1068,39 @@ mod tests {
         assert_eq!(
             pairing_talk(&setup, &[]),
             [r#"{"error":"pairingClosed"}"#]
+        );
+    }
+
+    #[test]
+    fn a_silent_pairing_client_is_cut_and_frees_the_slot() {
+        let setup = setup_with(Limits {
+            start: Duration::from_millis(300),
+            ..LIMITS
+        });
+        setup
+            .pairing
+            .open(PeerPermissions::default())
+            .unwrap();
+        let stream = UnixStream::connect(&setup.socket).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut writer = stream.try_clone().unwrap();
+        writeln!(writer, "{{\"hello\":{{\"pair\":true}}}}").unwrap();
+        // A second pairing connection is turned away while the first one holds the slot.
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(pairing_talk(&setup, &[]), [r#"{"error":"pairingBusy"}"#]);
+        let started = Instant::now();
+        let mut reader = BufReader::new(stream);
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        assert_eq!(line.trim(), r#"{"error":"pairingFailed"}"#);
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(at_end(&mut reader));
+        // The slot is free at once: the next client is served, and a bad line ends it.
+        assert_eq!(
+            pairing_talk(&setup, &["{\"request\":{}}"]),
+            [r#"{"error":"badMessage"}"#]
         );
     }
 

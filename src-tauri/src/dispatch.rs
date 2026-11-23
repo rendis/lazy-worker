@@ -158,8 +158,6 @@ impl Request {
             | Self::GetUpdateStatus
             | Self::GetActivityAccessibility
             | Self::GetProxyNetwork
-            | Self::GetProxyPeers
-            | Self::GetProxyLog
             | Self::DetectProxyApps
             | Self::ListCaffeinateProcesses
             | Self::CheckForUpdate
@@ -173,13 +171,17 @@ impl Request {
             | Self::SetHideWhileSharing { .. }
             | Self::SetSeenVersion { .. }
             | Self::SaveCaffeinateSettings { .. }
-            | Self::SetProxyRole { .. }
-            | Self::SetProxyPort { .. }
-            | Self::SetProxyServer { .. }
-            | Self::SetToolActive { .. }
             | Self::SetLoginLaunch { .. }
             | Self::SetLidMode { .. }
             | Self::CheckProxyServer { .. } => Access::Control,
+            // Starting the proxy server opens a port on this Mac, so only the person here may do it.
+            // Stopping it, and every other tool, stays remote control.
+            Self::SetToolActive { tool, active } => match (tool, active) {
+                (ToolId::Proxy, true) => Access::LocalOnly,
+                (ToolId::Proxy, false) | (ToolId::Activity | ToolId::Caffeinate, _) => {
+                    Access::Control
+                }
+            },
             Self::LaunchProxyApp { id } => {
                 let own_command = preferences
                     .proxy
@@ -207,6 +209,11 @@ impl Request {
             | Self::OpenSharingSettings
             | Self::SaveProxyApps { .. }
             | Self::SaveProxyAllowed { .. }
+            | Self::SetProxyRole { .. }
+            | Self::SetProxyPort { .. }
+            | Self::SetProxyServer { .. }
+            | Self::GetProxyPeers
+            | Self::GetProxyLog
             | Self::RequestActivityAccessibility => Access::LocalOnly,
         }
     }
@@ -303,6 +310,27 @@ pub async fn handle(
     run(request, origin, app, &controller).await
 }
 
+/// The preferences as one origin may read them. Every proxy app says whether it has its own command
+/// (`custom`). A remote origin never gets the command text, because it can hold a secret.
+fn preferences_view(preferences: &Preferences, origin: Origin) -> Result<Value, &'static str> {
+    let mut value = json(preferences)?;
+    let apps = value
+        .pointer_mut("/proxy/apps")
+        .and_then(Value::as_array_mut)
+        .ok_or("workerUnavailable")?;
+    for app in apps {
+        let Some(app) = app.as_object_mut() else {
+            continue;
+        };
+        let custom = app.get("command").is_some_and(|command| !command.is_null());
+        app.insert("custom".into(), Value::Bool(custom));
+        if matches!(origin, Origin::Remote(_)) {
+            app.insert("command".into(), Value::Null);
+        }
+    }
+    Ok(value)
+}
+
 fn json<T: Serialize>(value: T) -> Result<Value, &'static str> {
     serde_json::to_value(value).map_err(|_| "workerUnavailable")
 }
@@ -340,7 +368,10 @@ async fn run(
 ) -> Result<Value, &'static str> {
     let locked = |code: &'static str| controller.lock().map_err(move |_| code);
     match request {
-        Request::GetPreferences => json(locked("workerUnavailable")?.activity.preferences()),
+        Request::GetPreferences => {
+            let preferences = locked("workerUnavailable")?.activity.preferences();
+            preferences_view(&preferences, origin)
+        }
         Request::GetFirstRun => json(app.state::<FirstRun>().0),
         Request::GetSystemLanguage => {
             #[cfg(target_os = "macos")]
@@ -822,6 +853,56 @@ mod tests {
             }
             assert_eq!(allowed(Origin::Local, &parsed, &preferences), Ok(()));
         }
+    }
+
+    #[test]
+    fn a_remote_origin_cannot_start_the_proxy_or_change_where_it_listens() {
+        let preferences = Preferences::default();
+        for value in [
+            json!({"command": "setToolActive", "args": {"tool": "proxy", "active": true}}),
+            json!({"command": "setProxyRole", "args": {"role": "server"}}),
+            json!({"command": "setProxyPort", "args": {"port": 9000}}),
+            json!({"command": "setProxyServer", "args": {"server": "10.0.0.2:8899"}}),
+            json!({"command": "getProxyPeers"}),
+            json!({"command": "getProxyLog"}),
+        ] {
+            let parsed = request(value);
+            let both = Origin::Remote(Permissions { control: true, actions: true });
+            assert_eq!(allowed(CONTROL, &parsed, &preferences), Err("localOnly"));
+            assert_eq!(allowed(both, &parsed, &preferences), Err("localOnly"));
+            assert_eq!(allowed(Origin::Local, &parsed, &preferences), Ok(()));
+        }
+    }
+
+    #[test]
+    fn a_remote_origin_can_stop_the_proxy_and_control_other_tools() {
+        let preferences = Preferences::default();
+        for value in [
+            json!({"command": "setToolActive", "args": {"tool": "proxy", "active": false}}),
+            json!({"command": "setToolActive", "args": {"tool": "activity", "active": true}}),
+            json!({"command": "setToolActive", "args": {"tool": "caffeinate", "active": true}}),
+        ] {
+            let parsed = request(value);
+            assert_eq!(allowed(CONTROL, &parsed, &preferences), Ok(()));
+            assert_eq!(allowed(NONE, &parsed, &preferences), Err("notPermitted"));
+        }
+    }
+
+    #[test]
+    fn a_remote_read_hides_stored_commands_and_says_which_apps_have_one() {
+        let secret = "curl -H 'Authorization: sk-secret-123' {server}";
+        let mut preferences = Preferences::default();
+        preferences.proxy.apps[0].command = Some(secret.into());
+        let remote = preferences_view(&preferences, CONTROL).unwrap();
+        assert!(!remote.to_string().contains("sk-secret-123"));
+        let apps = remote["proxy"]["apps"].as_array().unwrap();
+        assert_eq!(apps[0]["command"], Value::Null);
+        assert_eq!(apps[0]["custom"], json!(true));
+        assert_eq!(apps[1]["custom"], json!(false));
+        let local = preferences_view(&preferences, Origin::Local).unwrap();
+        assert_eq!(local["proxy"]["apps"][0]["command"], json!(secret));
+        assert_eq!(local["proxy"]["apps"][0]["custom"], json!(true));
+        assert_eq!(local["proxy"]["apps"][1]["custom"], json!(false));
     }
 
     #[test]

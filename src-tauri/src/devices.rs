@@ -302,8 +302,8 @@ mod tests {
     #[test]
     fn a_name_is_the_first_line_without_its_edges() {
         assert_eq!(
-            name_from_output("  Reynaldo’s MacBook Pro \n"),
-            Some("Reynaldo’s MacBook Pro".into())
+            name_from_output("  Alex’s MacBook Pro \n"),
+            Some("Alex’s MacBook Pro".into())
         );
         assert_eq!(name_from_output("\n"), None);
         assert_eq!(name_from_output(""), None);

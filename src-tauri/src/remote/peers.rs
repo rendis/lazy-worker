@@ -52,9 +52,27 @@ pub struct Peer {
     pub last_access: Option<u64>,
 }
 
-/// A name for people: trimmed, with no control characters, and at most `MAX_NAME` characters.
+/// True for an invisible format character (Unicode Cf) that can reorder or hide text:
+/// soft hyphen, zero-width and bidi marks, bidi embeds, isolates, and the word joiner range.
+fn is_format(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{FEFF}'
+    )
+}
+
+/// A name for people: trimmed, with no control or invisible format characters, and at most
+/// `MAX_NAME` characters.
 pub fn clean_name(text: &str) -> String {
-    let kept: String = text.chars().filter(|c| !c.is_control()).collect();
+    let kept: String = text
+        .chars()
+        .filter(|c| !c.is_control() && !is_format(*c))
+        .collect();
     kept.trim()
         .chars()
         .take(MAX_NAME)
@@ -368,6 +386,9 @@ mod tests {
         assert_eq!(clean_name("  a\nb\t "), "ab");
         assert_eq!(clean_name(&"é".repeat(80)).chars().count(), MAX_NAME);
         assert_eq!(clean_name("\u{0}\u{1}"), "");
+        // Bidi controls, zero-width characters, and the byte order mark are removed.
+        assert_eq!(clean_name("a\u{202E}b\u{2066}c\u{2069}d\u{200B}e\u{FEFF}f\u{2060}g\u{00AD}h"), "abcdefgh");
+        assert_eq!(clean_name("\u{202E}\u{200F}"), "");
         let id = DeviceId::parse(ID_A).unwrap();
         assert_eq!(
             Peer::new(&id, "\n ", Kind::Desktop, KEY, 0).unwrap_err(),
