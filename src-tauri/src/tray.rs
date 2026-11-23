@@ -26,6 +26,7 @@ const OPEN: &str = "tray-open";
 const START_SELECTED: &str = "tray-start-selected";
 const ACTIVITY: &str = "tray-activity";
 const CAFFEINATE: &str = "tray-caffeinate";
+const PROXY: &str = "tray-proxy";
 const QUIT: &str = "tray-quit";
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -42,6 +43,7 @@ struct MenuState {
     update_available: bool,
     activity: ToolState,
     caffeinate: ToolState,
+    proxy: ToolState,
 }
 
 impl MenuState {
@@ -60,6 +62,11 @@ impl MenuState {
             active: statuses.caffeinate.mode != "off",
             failed: statuses.caffeinate.error.is_some(),
         };
+        let proxy = ToolState {
+            supported: statuses.proxy.supported,
+            active: statuses.proxy.mode != "off",
+            failed: statuses.proxy.error.is_some(),
+        };
         Some(Self {
             spanish: match preferences.language {
                 Language::System => matches!(system_language(), Language::Es),
@@ -71,15 +78,17 @@ impl MenuState {
                 && !activity.active)
                 || (preferences.quick_start.caffeinate
                     && caffeinate.supported
-                    && !caffeinate.active),
+                    && !caffeinate.active)
+                || (preferences.quick_start.proxy && proxy.supported && !proxy.active),
             update_available: crate::updates::has_update(app),
             activity,
             caffeinate,
+            proxy,
         })
     }
 
     fn has_active_tool(self) -> bool {
-        self.activity.active || self.caffeinate.active
+        self.activity.active || self.caffeinate.active || self.proxy.active
     }
 
     fn labels(self) -> Labels {
@@ -91,6 +100,8 @@ impl MenuState {
             stop_activity,
             start_caffeinate,
             stop_caffeinate,
+            start_proxy,
+            stop_proxy,
         ) = if self.spanish {
             (
                 "Abrir panel",
@@ -100,6 +111,8 @@ impl MenuState {
                 "Detener Actividad",
                 "Iniciar Caffeinate",
                 "Detener Caffeinate",
+                "Iniciar servidor proxy",
+                "Detener servidor proxy",
             )
         } else {
             (
@@ -110,6 +123,8 @@ impl MenuState {
                 "Stop Activity",
                 "Start Caffeinate",
                 "Stop Caffeinate",
+                "Start Proxy Server",
+                "Stop Proxy Server",
             )
         };
         let tool_label = |tool: ToolState, start: &str, stop: &str| {
@@ -127,6 +142,7 @@ impl MenuState {
             quit,
             activity: tool_label(self.activity, start_activity, stop_activity),
             caffeinate: tool_label(self.caffeinate, start_caffeinate, stop_caffeinate),
+            proxy: tool_label(self.proxy, start_proxy, stop_proxy),
         }
     }
 }
@@ -137,6 +153,7 @@ struct Labels {
     quit: &'static str,
     activity: String,
     caffeinate: String,
+    proxy: String,
 }
 
 struct Controls {
@@ -144,6 +161,7 @@ struct Controls {
     start_selected: MenuItem<tauri::Wry>,
     activity: MenuItem<tauri::Wry>,
     caffeinate: MenuItem<tauri::Wry>,
+    proxy: MenuItem<tauri::Wry>,
     quit: MenuItem<tauri::Wry>,
     rendered: Mutex<MenuState>,
 }
@@ -167,6 +185,8 @@ impl Controls {
         self.activity.set_enabled(state.activity.supported)?;
         self.caffeinate.set_text(labels.caffeinate)?;
         self.caffeinate.set_enabled(state.caffeinate.supported)?;
+        self.proxy.set_text(labels.proxy)?;
+        self.proxy.set_enabled(state.proxy.supported)?;
         if rendered.has_active_tool() != state.has_active_tool() {
             let tray = app
                 .tray_by_id(TRAY_ID)
@@ -192,6 +212,7 @@ pub fn install(app: &App) -> tauri::Result<()> {
         )?,
         activity: item(ACTIVITY, &labels.activity, state.activity.supported)?,
         caffeinate: item(CAFFEINATE, &labels.caffeinate, state.caffeinate.supported)?,
+        proxy: item(PROXY, &labels.proxy, state.proxy.supported)?,
         quit: item(QUIT, labels.quit, true)?,
         rendered: Mutex::new(state),
     };
@@ -203,6 +224,7 @@ pub fn install(app: &App) -> tauri::Result<()> {
             &controls.start_selected,
             &controls.activity,
             &controls.caffeinate,
+            &controls.proxy,
             &PredefinedMenuItem::separator(app)?,
             &controls.quit,
         ],
@@ -251,13 +273,13 @@ fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
             return;
         }
         START_SELECTED => Action::StartSelected,
-        ACTIVITY | CAFFEINATE => {
+        ACTIVITY | CAFFEINATE | PROXY => {
             let controls = app.state::<Controls>();
             let rendered = *controls.rendered.lock().unwrap();
-            if event.id.as_ref() == ACTIVITY {
-                Action::SetActive(ToolId::Activity, !rendered.activity.active)
-            } else {
-                Action::SetActive(ToolId::Caffeinate, !rendered.caffeinate.active)
+            match event.id.as_ref() {
+                ACTIVITY => Action::SetActive(ToolId::Activity, !rendered.activity.active),
+                CAFFEINATE => Action::SetActive(ToolId::Caffeinate, !rendered.caffeinate.active),
+                _ => Action::SetActive(ToolId::Proxy, !rendered.proxy.active),
             }
         }
         _ => return,
@@ -280,6 +302,7 @@ fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
                             current.caffeinate.supported,
                             current.caffeinate.mode != "off",
                         ),
+                        ToolId::Proxy => (current.proxy.supported, current.proxy.mode != "off"),
                     };
                     // The tool can finish while AppKit is tracking the menu selection.
                     if supported && is_active != active {

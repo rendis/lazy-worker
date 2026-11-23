@@ -1,20 +1,41 @@
 import "./tool-motion.css";
+import activityClip from "./assets/clips/activity-loop.mp4";
+import activityPoster from "./assets/clips/activity-poster.jpg";
+import caffeinateClip from "./assets/clips/caffeinate-loop.mp4";
+import caffeinatePoster from "./assets/clips/caffeinate-poster.jpg";
 import type { Preferences, Status } from "./desktop";
 import { messages, type Message } from "./messages";
 
+export type ToolId = "activity" | "caffeinate" | "proxy";
+
 type Tool = {
-  id: string;
+  id: ToolId;
   title: Message;
   description: Message;
   icon: string;
+  help: { text: Message; clip?: { video: string; poster: string; label: Message } };
+  /** Sidebar entry, when the module sits under a broader section. */
+  section?: { title: Message; icon: string };
+  /** Tools row, when the module belongs to a group there. */
+  row?: { title: Message; group: string };
 };
 
-export const tools = [
-  { id: "activity", title: "activity", description: "activityDescription", icon: "activity" },
-  { id: "caffeinate", title: "caffeinate", description: "caffeinateDescription", icon: "coffee" },
-] as const satisfies readonly Tool[];
-
-export type ToolId = (typeof tools)[number]["id"];
+export const tools: readonly Tool[] = [
+  {
+    id: "activity", title: "activity", description: "activityDescription", icon: "activity",
+    help: { text: "activityExplanation", clip: { video: activityClip, poster: activityPoster, label: "activityClip" } },
+  },
+  {
+    id: "caffeinate", title: "caffeinate", description: "caffeinateDescription", icon: "coffee",
+    help: { text: "caffeinateExplanation", clip: { video: caffeinateClip, poster: caffeinatePoster, label: "caffeinateClip" } },
+  },
+  {
+    id: "proxy", title: "proxy", description: "proxyDescription", icon: "server",
+    help: { text: "proxyExplanation" },
+    section: { title: "ai", icon: "sparkles" },
+    row: { title: "proxyServer", group: "ai-group-rows" },
+  },
+];
 
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const statusModes = ["off", "manual", "scheduled"] as const satisfies readonly Status["mode"][];
@@ -88,11 +109,11 @@ export function updateToolStatus(status: HTMLElement, mode: Status["mode"], text
   };
 }
 
-function mountTool(tool: (typeof tools)[number], navigation: HTMLElement, catalog: HTMLElement): HTMLElement {
+function mountTool(tool: Tool, navigation: HTMLElement, catalog: HTMLElement): HTMLElement {
   const link = instantiate("tool-nav-template");
   link.dataset.view = tool.id;
-  link.querySelector("i")!.dataset.lucide = tool.icon;
-  label(link.querySelector("span")!, tool.title);
+  link.querySelector("i")!.dataset.lucide = tool.section?.icon ?? tool.icon;
+  label(link.querySelector("span")!, tool.section?.title ?? tool.title);
   navigation.append(link);
 
   const row = instantiate("tool-card-template");
@@ -111,8 +132,8 @@ function mountTool(tool: (typeof tools)[number], navigation: HTMLElement, catalo
   rowPower.setAttribute("aria-labelledby", rowTitle.id);
   row.querySelector<HTMLElement>(".tool-icon")!.dataset.lucide = tool.icon;
   mountStatus(row.querySelector<HTMLElement>("[data-tool-status]")!, tool.id);
-  label(rowTitle, tool.title);
-  catalog.append(row);
+  label(rowTitle, tool.row?.title ?? tool.title);
+  (tool.row ? document.getElementById(tool.row.group)! : catalog).append(row);
 
   const header = instantiate("tool-header-template");
   const heading = header.querySelector("h1")!;
@@ -129,16 +150,29 @@ function mountTool(tool: (typeof tools)[number], navigation: HTMLElement, catalo
   power.setAttribute("aria-labelledby", heading.id);
   mountStatus(status, tool.id);
   timer.dataset.toolTimer = tool.id;
+  const helpButton = header.querySelector<HTMLButtonElement>("[data-help-button]")!;
+  const helpPanel = header.querySelector<HTMLElement>(".help-panel")!;
+  const clip = helpPanel.querySelector("video")!;
+  helpPanel.id = `${tool.id}-help`;
+  helpButton.setAttribute("aria-controls", helpPanel.id);
+  label(helpPanel.querySelector("p")!, tool.help.text);
+  if (tool.help.clip) {
+    clip.src = tool.help.clip.video;
+    clip.poster = tool.help.clip.poster;
+    clip.dataset.label = tool.help.clip.label;
+  } else {
+    clip.parentElement!.remove();
+    helpPanel.toggleAttribute("data-text-only", true);
+  }
   if (tool.id === "activity") {
     power.id = "power";
     status.id = "status";
   } else {
     header.querySelector("[data-permission-warning]")?.remove();
   }
-  header.querySelector<HTMLElement>(".tool-icon")!.dataset.lucide = tool.icon;
   label(heading, tool.title);
-  label(header.querySelector("p")!, tool.description);
-  document.querySelector(`[data-module-view="${tool.id}"]`)!.prepend(header);
+  label(header.querySelector<HTMLElement>(".module-description")!, tool.description);
+  document.querySelector(`[data-module-view="${tool.id}"] .module-body`)!.before(header);
   return row;
 }
 
@@ -170,7 +204,8 @@ export function updateQuickStartMode(mode: "start" | "stop" | "mixed"): void {
 export function mountTools(): (quickStart: Preferences["quickStart"]) => void {
   const navigation = document.getElementById("tool-navigation")!;
   const catalog = document.getElementById("tool-catalog")!;
-  const rows = tools.map(tool => ({ id: tool.id, row: mountTool(tool, navigation, catalog) }));
+  const rows = tools.map(tool => ({ tool, id: tool.id, row: mountTool(tool, navigation, catalog) }))
+    .filter(({ tool }) => !tool.row);
   let currentOrder = rows;
 
   function updateToolOrder(quickStart: Preferences["quickStart"]): void {
@@ -216,6 +251,28 @@ export function mountTools(): (quickStart: Preferences["quickStart"]) => void {
     panel.setAttribute("aria-hidden", String(!visible));
     button.setAttribute("aria-expanded", String(visible));
     openHelp = visible ? button : undefined;
+    const clip = panel.querySelector("video");
+    if (!clip) return;
+    if (visible && !reducedMotion.matches) void clip.play().catch(() => {});
+    else clip.pause();
+    if (!visible) enlargeClip(panel, false);
+  }
+
+  function enlargeClip(panel: HTMLElement, enlarged: boolean): void {
+    panel.toggleAttribute("data-enlarged", enlarged);
+    panel.querySelector(".help-clip")?.setAttribute("aria-pressed", String(enlarged));
+  }
+
+  for (const clip of document.querySelectorAll<HTMLButtonElement>(".help-clip")) {
+    clip.addEventListener("click", () => {
+      const panel = clip.closest<HTMLElement>(".help-panel")!;
+      enlargeClip(panel, !panel.hasAttribute("data-enlarged"));
+      if (reducedMotion.matches) {
+        const video = clip.querySelector("video")!;
+        if (video.paused) void video.play().catch(() => {});
+        else video.pause();
+      }
+    });
   }
 
   for (const button of helpButtons) {

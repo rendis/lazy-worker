@@ -15,6 +15,34 @@ export type CaffeinateSettings = {
   seconds: number;
   pid: number | null;
 };
+export type ProxyApp = {
+  id: string;
+  name: string;
+  icon: string;
+  /** `null` keeps the built-in command. `{server}` stands for the server address. */
+  command: string | null;
+  quickStart: boolean;
+  /** The desktop app or the command-line program of a built-in tool. */
+  variant: "app" | "code";
+};
+export type ProxySettings = {
+  role: "server" | "client";
+  port: number;
+  allowed: string[];
+  server: string;
+  apps: ProxyApp[];
+};
+export type ProxyNetwork = { hostname: string | null; addresses: string[] };
+export type ProxyPeer = { address: string; name: string | null; connections: number; idleSeconds: number };
+export type ProxyLogEntry = {
+  id: number;
+  /** Seconds since the Unix epoch. */
+  time: number;
+  peer: string;
+  target: string;
+  outcome: "ok" | "denied" | "blocked" | "unreachable" | "invalid";
+};
+export type ProxyInstalls = { claudeCode: boolean; claudeApp: boolean; codexCode: boolean; codexApp: boolean };
 export type Preferences = {
   language: Language | "system";
   theme: Theme;
@@ -24,6 +52,7 @@ export type Preferences = {
   startToolsOnLaunch: boolean;
   caffeinate: CaffeinateSettings;
   hideWhileSharing: boolean;
+  proxy: ProxySettings;
 };
 export type Status = {
   mode: "off" | "manual" | "scheduled";
@@ -40,7 +69,7 @@ export const defaults: Preferences = {
   theme: "system",
   duration: "minutes15",
   schedule: { enabled: false, start: "09:00", end: "17:00" },
-  quickStart: { activity: false, caffeinate: false },
+  quickStart: { activity: false, caffeinate: false, proxy: false },
   startToolsOnLaunch: false,
   hideWhileSharing: true,
   caffeinate: {
@@ -48,6 +77,16 @@ export const defaults: Preferences = {
     flags: { i: true, d: false, m: false, s: false, u: false },
     seconds: 1800,
     pid: null,
+  },
+  proxy: {
+    role: "server",
+    port: 8899,
+    allowed: [],
+    server: "",
+    apps: [
+      { id: "claude", name: "Claude", icon: "sparkles", command: null, quickStart: false, variant: "app" },
+      { id: "codex", name: "Codex", icon: "terminal", command: null, quickStart: false, variant: "app" },
+    ],
   },
 };
 
@@ -88,6 +127,12 @@ function loadPreviewPreferences(): Preferences {
   return {
     ...defaults,
     ...saved,
+    quickStart: { ...defaults.quickStart, ...saved.quickStart },
+    proxy: {
+      ...defaults.proxy,
+      ...saved.proxy,
+      apps: (saved.proxy?.apps ?? defaults.proxy.apps).map(app => ({ ...app, variant: app.variant ?? "app" })),
+    },
     caffeinate: {
       mode: !mode || mode === "command" ? defaults.caffeinate.mode : mode,
       flags: { ...defaults.caffeinate.flags, ...flags },
@@ -121,7 +166,7 @@ function previewStatus(id: ToolId): Status {
 }
 
 function previewStatuses(): Statuses {
-  return { activity: previewStatus("activity"), caffeinate: previewStatus("caffeinate") };
+  return { activity: previewStatus("activity"), caffeinate: previewStatus("caffeinate"), proxy: previewStatus("proxy") };
 }
 
 function previewCaffeinateError(settings: CaffeinateSettings): string | null {
@@ -206,7 +251,7 @@ export const desktop = {
   },
   startPreviewTools(preferences: Preferences): void {
     if (native || !preferences.startToolsOnLaunch) return;
-    for (const id of ["activity", "caffeinate"] as const) {
+    for (const id of ["activity", "caffeinate", "proxy"] as const) {
       if (preferences.quickStart[id]) setPreviewActive(id, true, preferences);
     }
   },
@@ -227,6 +272,48 @@ export const desktop = {
   },
   async getStatuses(): Promise<Statuses> {
     return native ? invoke("get_statuses") : previewStatuses();
+  },
+  async getProxyNetwork(): Promise<ProxyNetwork> {
+    if (native) return invoke("get_proxy_network");
+    return { hostname: "studio.local", addresses: ["192.168.1.20"] };
+  },
+  async getProxyPeers(): Promise<ProxyPeer[]> {
+    if (native) return invoke("get_proxy_peers");
+    const session = previewSessions.get("proxy");
+    if (!session) return [];
+    const seconds = Math.floor((performance.now() - session.started) / 1000);
+    return [
+      { address: "192.168.1.33", name: "MacBook-work", connections: 2 + seconds % 3, idleSeconds: seconds % 4 },
+      { address: "192.168.1.50", name: null, connections: 0, idleSeconds: 720 + seconds },
+    ];
+  },
+  async getProxyLog(): Promise<ProxyLogEntry[]> {
+    if (native) return invoke("get_proxy_log");
+    const session = previewSessions.get("proxy");
+    if (!session) return [];
+    const targets = ["api.anthropic.com:443", "statsig.anthropic.com:443", "api.openai.com:443", "localhost:8080"];
+    const count = Math.min(200, Math.floor((performance.now() - session.started) / 2500) + 1);
+    const now = Math.floor(Date.now() / 1000);
+    return Array.from({ length: count }, (_, index): ProxyLogEntry => {
+      const id = count - 1 - index;
+      const target = targets[id % targets.length];
+      return {
+        id,
+        time: now - index * 3,
+        peer: id % 7 === 6 ? "192.168.1.77" : "192.168.1.33",
+        target: id % 7 === 6 ? "" : target,
+        outcome: id % 7 === 6 ? "denied" : target.startsWith("localhost") ? "blocked" : "ok",
+      };
+    });
+  },
+  async detectProxyApps(): Promise<ProxyInstalls> {
+    return native ? invoke("detect_proxy_apps") : { claudeCode: true, claudeApp: true, codexCode: false, codexApp: true };
+  },
+  async checkProxyServer(address: string): Promise<boolean> {
+    return native ? invoke("check_proxy_server", { address }) : !address.startsWith("offline");
+  },
+  async launchProxyApp(id: string): Promise<void> {
+    if (native) return invoke("launch_proxy_app", { id });
   },
   async getActivityAccessibility(): Promise<ActivityAccessibility> {
     return native ? invoke("get_activity_accessibility") : "unsupported";

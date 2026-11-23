@@ -1,4 +1,4 @@
-use crate::caffeinate::CaffeinateSettings;
+use crate::{caffeinate::CaffeinateSettings, proxy::ProxySettings};
 use chrono::NaiveTime;
 use serde::{Deserialize, Serialize};
 use std::{fs, io, path::Path};
@@ -111,6 +111,7 @@ impl Schedule {
 pub struct QuickStart {
     pub activity: bool,
     pub caffeinate: bool,
+    pub proxy: bool,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -124,6 +125,7 @@ pub struct Preferences {
     pub start_tools_on_launch: bool,
     pub caffeinate: CaffeinateSettings,
     pub hide_while_sharing: bool,
+    pub proxy: ProxySettings,
 }
 
 impl Default for Preferences {
@@ -137,6 +139,7 @@ impl Default for Preferences {
             start_tools_on_launch: false,
             caffeinate: CaffeinateSettings::default(),
             hide_while_sharing: true,
+            proxy: ProxySettings::default(),
         }
     }
 }
@@ -216,6 +219,7 @@ mod tests {
         assert!(matches!(preferences.duration, ManualDuration::Minutes30));
         assert!(!preferences.quick_start.activity);
         assert!(!preferences.quick_start.caffeinate);
+        assert!(!preferences.quick_start.proxy);
         assert!(!preferences.start_tools_on_launch);
         assert_eq!(preferences.caffeinate.seconds, 1800);
     }

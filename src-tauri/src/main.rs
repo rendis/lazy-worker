@@ -3,6 +3,7 @@
 mod activity;
 mod caffeinate;
 mod preferences;
+mod proxy;
 
 #[cfg(target_os = "macos")]
 mod login_launch;
@@ -20,6 +21,7 @@ mod updates;
 use activity::Activity;
 use caffeinate::{Caffeinate, CaffeinateSettings, RunningProcess};
 use preferences::Preferences;
+use proxy::Proxy;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -34,17 +36,20 @@ use tauri::{Manager, RunEvent, State};
 enum ToolId {
     Activity,
     Caffeinate,
+    Proxy,
 }
 
 #[derive(Serialize)]
 struct Statuses {
     activity: activity::Status,
     caffeinate: caffeinate::Status,
+    proxy: proxy::Status,
 }
 
 struct Tools {
     activity: Activity,
     caffeinate: Caffeinate,
+    proxy: Proxy,
 }
 
 impl Tools {
@@ -52,6 +57,7 @@ impl Tools {
         Statuses {
             activity: self.activity.status(),
             caffeinate: self.caffeinate.status(),
+            proxy: self.proxy.status(),
         }
     }
 
@@ -63,6 +69,10 @@ impl Tools {
             ToolId::Caffeinate => {
                 self.caffeinate
                     .set_active(active, &self.activity.preferences().caffeinate);
+            }
+            ToolId::Proxy => {
+                self.proxy
+                    .set_active(active, &self.activity.preferences().proxy);
             }
         }
     }
@@ -93,6 +103,9 @@ impl Tools {
             && current.caffeinate.mode == "off"
         {
             self.caffeinate.set_active(true, &preferences.caffeinate);
+        }
+        if preferences.quick_start.proxy && current.proxy.mode == "off" {
+            self.proxy.set_active(true, &preferences.proxy);
         }
         self.statuses()
     }
@@ -126,10 +139,13 @@ fn save_preferences(
 ) -> Result<(), &'static str> {
     let mut tools = controller.lock().map_err(|_| "saveFailed")?;
     preferences.caffeinate = tools.activity.preferences().caffeinate;
+    preferences.proxy.sanitize();
+    let proxy = preferences.proxy.clone();
     #[cfg(target_os = "macos")]
     let presentation_changed =
         preferences.hide_while_sharing != tools.activity.preferences().hide_while_sharing;
     tools.activity.save_preferences(preferences)?;
+    tools.proxy.apply_settings(&proxy);
     drop(tools);
     #[cfg(target_os = "macos")]
     if presentation_changed {
@@ -181,6 +197,61 @@ async fn request_activity_accessibility() -> Result<(), &'static str> {
 }
 
 #[tauri::command]
+async fn get_proxy_network() -> Result<proxy::Network, &'static str> {
+    tauri::async_runtime::spawn_blocking(proxy::network)
+        .await
+        .map_err(|_| "workerUnavailable")
+}
+
+#[tauri::command]
+fn get_proxy_peers(controller: State<'_, Controller>) -> Result<Vec<proxy::Peer>, &'static str> {
+    Ok(controller
+        .lock()
+        .map_err(|_| "workerUnavailable")?
+        .proxy
+        .peers())
+}
+
+#[tauri::command]
+fn get_proxy_log(controller: State<'_, Controller>) -> Result<Vec<proxy::LogEntry>, &'static str> {
+    Ok(controller
+        .lock()
+        .map_err(|_| "workerUnavailable")?
+        .proxy
+        .log())
+}
+
+#[tauri::command]
+async fn detect_proxy_apps() -> Result<proxy::Installs, &'static str> {
+    tauri::async_runtime::spawn_blocking(proxy::detect)
+        .await
+        .map_err(|_| "workerUnavailable")
+}
+
+#[tauri::command]
+async fn check_proxy_server(address: String) -> bool {
+    tauri::async_runtime::spawn_blocking(move || proxy::check_server(&address))
+        .await
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+async fn launch_proxy_app(
+    controller: State<'_, Controller>,
+    id: String,
+) -> Result<(), &'static str> {
+    let settings = controller
+        .lock()
+        .map_err(|_| "proxyLaunchFailed")?
+        .activity
+        .preferences()
+        .proxy;
+    tauri::async_runtime::spawn_blocking(move || proxy::launch(&settings, &id))
+        .await
+        .map_err(|_| "proxyLaunchFailed")?
+}
+
+#[tauri::command]
 fn set_tool_active(
     controller: State<'_, Controller>,
     tool: ToolId,
@@ -207,9 +278,17 @@ fn main() {
             let mut tools = Tools {
                 activity: Activity::new(preferences, path),
                 caffeinate: Caffeinate::new(),
+                proxy: Proxy::new(),
             };
             if start_tools_on_launch {
                 tools.start_selected();
+                // Opening an app can wait for a shell, so it stays off the startup path.
+                let settings = tools.activity.preferences().proxy;
+                thread::spawn(move || {
+                    for app in settings.apps.iter().filter(|app| app.quick_start) {
+                        let _ = proxy::launch(&settings, &app.id);
+                    }
+                });
             }
             let controller = Arc::new(Mutex::new(tools));
             let clock = Arc::downgrade(&controller);
@@ -233,6 +312,7 @@ fn main() {
                 };
                 tools.activity.tick();
                 tools.caffeinate.status();
+                tools.proxy.status();
                 drop(tools);
                 #[cfg(target_os = "macos")]
                 {
@@ -253,6 +333,12 @@ fn main() {
             get_activity_accessibility,
             request_activity_accessibility,
             set_tool_active,
+            get_proxy_network,
+            get_proxy_peers,
+            get_proxy_log,
+            detect_proxy_apps,
+            check_proxy_server,
+            launch_proxy_app,
             #[cfg(target_os = "macos")]
             login_launch::get_login_launch,
             #[cfg(target_os = "macos")]
@@ -278,6 +364,7 @@ fn main() {
             if let Ok(mut tools) = controller.lock() {
                 tools.set_active(ToolId::Activity, false);
                 tools.set_active(ToolId::Caffeinate, false);
+                tools.set_active(ToolId::Proxy, false);
             };
         }
         #[cfg(target_os = "macos")]

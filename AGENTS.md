@@ -1,6 +1,8 @@
 # Lazy Worker working notes
 
 - Write code, comments, and documentation in English. Keep English and Spanish webview strings together in `src/messages.ts`. Localize the native menu in `src-tauri/src/tray.rs`.
+- Introduce the toolbox independently of its current tools in the README. Give each tool the same block under Tools: its clip, its name, one line, and a link to its user guide section. Alternate the clip between left and right. Keep usage details in the user guide.
+- Use the [clay workshop](docs/design/clay-workshop/README.md) as the starting point for feature clips. Produce every clip file with its `npm run export -- <tool>` command.
 - Hide the macOS panel on close and keep workers running until explicitly stopped or the app quits.
 - Acquire the macOS instance lock before app setup. Route repeat launches through the shared panel show path.
 - Register launch at login through a per-user LaunchAgent that opens the installed app bundle. Run startup Quick start once after acquiring the instance lock.
@@ -10,7 +12,27 @@
 - Crossfade the theme canvas layers and keep the Settings card geometry stable when its status text is translated.
 - Read the full macOS preferred-language list in native code because WebKit may expose only its first entry.
 - Read the running version through Tauri's app API. Use the configured bundle version in browser previews.
-- Register each module in `src/modules.ts` and mount its shared header so its icon, status, timer, and quick-start switch stay consistent with Tools. Keep the timer slot reserved when idle so it can fade without moving the layout.
+- Register each module in `src/modules.ts` and mount its shared header so its help, status, timer, and quick-start switch stay consistent with Tools. Keep the timer slot reserved when idle so it can fade without moving the layout.
+- Give each module a help popover with one plain paragraph and its `-loop.mp4` clip and poster from `src/assets/clips`. The clay workshop export writes them there, because its renders folder stays out of git.
+- Lay out module settings as `.setting-row` lines with an icon, a label, and the control at the end. Use `.segments` for exclusive choices and `.switch` for on/off options.
+- Mark Quick start with the bolt switch only. Its hint states when the tool starts, based on the startup setting.
+- Give a module that sits under a broader sidebar section a `section` in `src/modules.ts`, and a `row` when its Tools row belongs to a group.
+- Keep proxy logic in `src/proxy.ts` and reach the system only through `desktop`. Give each `desktop` proxy call a browser-preview result.
+- Store a proxy command as a template where `{server}` stands for the server address. Store `null` for an unchanged built-in command.
+- Treat proxy clients as apps to open, with no running state. Start selected opens the marked ones. Stop selected leaves them open.
+- Run the proxy server on standard threads in `src-tauri/src/proxy/server.rs`. Admit only the local network when the allow list is empty. Refuse targets on the server's own machine.
+- Keep the built-in client commands equal in `src/proxy.ts` and `src-tauri/src/proxy/apps.rs`. Launch a client from its saved id, and check the server address before it enters a command.
+- Keep the element of a rendered list row and update it in place, so its switch, selector, and disclosure can animate. Rebuild a row only when its name, icon, or language changes.
+- Open and close content through `.collapse` with `data-open` and `inert`. Keep `hidden` for content that swaps with other content.
+- Keep every image a file under `src/assets`. The content policy allows no `data:` images, so Vite must not inline assets.
+- Show the brand mark of a built-in proxy tool from `src/assets/brands`. The marks come from Simple Icons. To offer a new brand in the icon picker, add its file there and its name to `brandNames` in `src/proxy.ts`.
+- Discard unsaved input in a module view when the user leaves that view.
+- Put `data-tip` on a wrapper when a disabled button must say why it is off. Use an icon button with a tip for a secondary row action.
+- Give each built-in proxy tool an `app` and a `code` command. List App first and use it as the default. Find a desktop app by its bundle identifier.
+- Keep the proxy request log in memory with a fixed size. Drop the oldest entry first and clear the log when the server stops.
+- Show a live list, such as the proxy requests, in a `.log-overlay` window over the view, so the layout under it does not move.
+- Center the macOS window buttons in the 42 px title bar through `trafficLightPosition`. Its `y` plus the 16 px button height gives the height of the band that centers them.
+- Find command-line clients through the login shell `PATH`. Open a command-line client through a `.command` script in Terminal, and run an `open` command directly.
 - Derive Tools bulk actions from the runtime state of modules included in Quick start. Keep the action layout stable until a bulk operation finishes. Share one surface across single actions so only their icon and label crossfade. Keep row power available independently of the selection.
 - Keep active power buttons visibly recessed in terracotta until their module stops.
 - Derive each sidebar running dot from its module's runtime status, independent of the current page.
@@ -22,7 +44,7 @@
 - Dismiss permission notices on outside clicks and keep general results in the shared bottom-right notification stack.
 - Gate pointer movement on the system idle counter and skip it while any standard mouse button is held.
 - Keep both the Tauri bundle and Swift helper deployment targets at macOS 12.0. Keep the frontend build target compatible with Monterey's WebKit.
-- Use `npm run build` and `cargo test --manifest-path src-tauri/Cargo.toml` for changes to the shared app. Use the Intel bundle command in the README for changes to macOS integration.
+- Use `npm run build` and `cargo test --manifest-path src-tauri/Cargo.toml` for changes to the shared app. Use the Intel bundle command in the [development guide](docs/development.md#build-for-macos) for changes to macOS integration.
 - Verify the packaged helper and Accessibility permission on Monterey before reporting hardware compatibility. Verify presence in the target app separately from process status.
 
 ## macOS releases

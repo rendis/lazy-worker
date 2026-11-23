@@ -1,8 +1,9 @@
 import "./style.css";
 import {
-  Activity, ArrowRight, Check, ChevronRight, Coffee, Contrast, createIcons,
-  Database, ExternalLink, EyeOff, Globe, Info, Laptop, LayoutGrid, LockKeyhole, Monitor, Moon, Power,
-  Settings, Square, Sun, TriangleAlert, UserRound, X, Zap,
+  Activity, ArrowRight, Bot, Box, Brain, Check, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
+  Cpu, createIcons, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Info, Laptop, LayoutGrid, Link, LockKeyhole,
+  Maximize2, MessageSquare, Monitor, Moon, Pencil, Play, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
+  Shield, Sparkles, Square, Sun, Sunrise, Sunset, Terminal, Trash2, TriangleAlert, UserRound, X, Zap,
 } from "lucide";
 import { mountCaffeinateForm } from "./caffeinate-form";
 import {
@@ -12,6 +13,7 @@ import {
 import { messages, type Language, type Message } from "./messages";
 import { mountTools, tools, updateQuickStartMode, updateToolStatus, type ToolId } from "./modules";
 import { mountOperationProgress } from "./operation-progress";
+import { mountProxy } from "./proxy";
 import { mountUpdateNotice } from "./update-notice";
 
 function element<T extends HTMLElement = HTMLElement>(id: string): T {
@@ -20,14 +22,18 @@ function element<T extends HTMLElement = HTMLElement>(id: string): T {
 
 element("window-titlebar").hidden = !desktop.showWindowTitlebar;
 const updateToolOrder = mountTools();
-createIcons({
-  icons: {
-    Activity, ArrowRight, Check, ChevronRight, Coffee, Contrast, Database,
-    ExternalLink, EyeOff, Globe, Info, Laptop, LayoutGrid, LockKeyhole, Monitor, Moon, Power, Settings,
-    Square, Sun, TriangleAlert, UserRound, X, Zap,
-  },
-  attrs: { "aria-hidden": "true", "stroke-width": 1.75 },
-});
+function renderIcons(): void {
+  createIcons({
+    icons: {
+      Activity, ArrowRight, Bot, Box, Brain, Check, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
+      Cpu, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Info, Laptop, LayoutGrid, Link, LockKeyhole,
+      Maximize2, MessageSquare, Monitor, Moon, Pencil, Play, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server,
+      Settings, Shield, Sparkles, Square, Sun, Sunrise, Sunset, Terminal, Trash2, TriangleAlert, UserRound, X, Zap,
+    },
+    attrs: { "aria-hidden": "true", "stroke-width": 1.75 },
+  });
+}
+renderIcons();
 
 const caffeinate = mountCaffeinateForm();
 const progress = mountOperationProgress(element("operation-progress"));
@@ -49,6 +55,7 @@ const statusLabels = document.querySelectorAll<HTMLElement>("[data-tool-status]"
 const toolNavButtons = document.querySelectorAll<HTMLButtonElement>(".tool-nav-button");
 const powerButtons = document.querySelectorAll<HTMLButtonElement>("[data-tool-power]");
 const includeSwitches = document.querySelectorAll<HTMLInputElement>("[data-tool-include]");
+const quickStartHints = document.querySelectorAll<HTMLElement>("[data-quick-start-hint]");
 const durationButtons = document.querySelectorAll<HTMLButtonElement>("[data-duration]");
 const languageButtons = document.querySelectorAll<HTMLButtonElement>("[data-language]");
 const themeButtons = document.querySelectorAll<HTMLButtonElement>("[data-theme-choice]");
@@ -85,7 +92,10 @@ type ActivityMode = "duration" | "schedule";
 type FeedbackTarget = ToolId | "tools" | "settings";
 type FeedbackLine = { message: Message; tool?: ToolId };
 type PreferenceChoice = "duration" | "language" | "theme" | "hideWhileSharing" | "startToolsOnLaunch";
-type PreferenceChange = { key: PreferenceChoice | ToolId; apply: (current: Preferences) => Preferences };
+type PreferenceChange = {
+  key: PreferenceChoice | ToolId | "proxySettings";
+  apply: (current: Preferences) => Preferences;
+};
 const accessibilityLabels: Record<ActivityAccessibility, Message> = {
   granted: "accessibilityGranted",
   required: "accessibilityRequired",
@@ -101,7 +111,13 @@ let systemLanguage: Language = "en";
 let renderedLanguage: Language | undefined;
 const pendingPreferences: PreferenceChange[] = [];
 let queue = Promise.resolve();
-let statuses: Statuses = { activity: offStatus, caffeinate: offStatus };
+let statuses: Statuses = { activity: offStatus, caffeinate: offStatus, proxy: offStatus };
+const startFailures: Record<ToolId, Message> = {
+  activity: "workerUnavailable", caffeinate: "caffeinateStartFailed", proxy: "proxyStartFailed",
+};
+const unsupportedTools: Record<ToolId, Message> = {
+  activity: "unsupported", caffeinate: "caffeinateUnsupported", proxy: "proxyUnsupported",
+};
 let workerAction: { target: FeedbackTarget; running: boolean; keepQuickStartLayout: boolean } | undefined;
 let ready = false;
 let loaded = false;
@@ -162,9 +178,9 @@ function activeView(): HTMLElement {
 function toolError(tool: ToolId): Message | undefined {
   const { error, supported } = statuses[tool];
   if (error && !(tool === "activity" && error === "permissionRequired" && activityPermissionErrorRetired)) {
-    return errorMessage(error, tool === "activity" ? "workerUnavailable" : "caffeinateStartFailed");
+    return errorMessage(error, startFailures[tool]);
   }
-  if (ready && !supported) return tool === "activity" ? "unsupported" : "caffeinateUnsupported";
+  if (ready && !supported) return unsupportedTools[tool];
 }
 
 function needsAccessibility(): boolean {
@@ -185,6 +201,25 @@ const updates = mountUpdateNotice({
     return queue;
   },
   moveFocus: () => activeView().querySelector("h1")?.focus({ preventScroll: true }),
+});
+
+function quickStartHint(): string {
+  return translate(preferences.startToolsOnLaunch ? "quickStartOnLaunch" : "quickStartOnDemand");
+}
+
+const proxy = mountProxy({
+  translate,
+  quickStartHint,
+  update: apply => updatePreference("proxy", {
+    key: "proxySettings",
+    apply: current => ({ ...current, proxy: apply(current.proxy) }),
+  }),
+  fail: message => {
+    feedback.proxy = message;
+    delete dismissedFeedback.proxy;
+    renderFeedback();
+  },
+  refreshIcons: renderIcons,
 });
 
 function renderFeedback(): void {
@@ -210,7 +245,7 @@ function renderFeedback(): void {
   const explicit = feedback[target];
   const applying = workerAction?.running && workerAction.target === target;
   const message = applying ? undefined
-    : explicit ?? (target === "activity" || target === "caffeinate" ? toolError(target) : undefined);
+    : explicit ?? (target !== "tools" && target !== "settings" ? toolError(target) : undefined);
   const toolActionFailure = !applying && target === "tools" && !explicit && toolFailures.length > 0;
   const lines: FeedbackLine[] = toolActionFailure ? [...toolFailures] : message ? [{ message }] : [];
   if (accessibilityRequestIssue === target) lines.push({ message: "accessibilityRequestFailed" });
@@ -411,9 +446,12 @@ function renderControls(): void {
     setDisabled(toggle, unavailable || !statuses[tool].supported);
     if (toggle.checked !== preferences.quickStart[tool]) toggle.checked = preferences.quickStart[tool];
   }
+  for (const hint of quickStartHints) setAttribute(hint, "data-quick-start-hint", quickStartHint());
+  proxy.render(preferences.proxy, preferences.quickStart.proxy, statuses.proxy.mode !== "off", loaded);
   updateToolOrder(preferences.quickStart);
   if (!workerAction?.keepQuickStartLayout) {
-    const canStartSelected = !unavailable && tools.some(({ id }) => preferences.quickStart[id] && canChangeTool(id, true));
+    const canStartSelected = !unavailable &&
+      (tools.some(({ id }) => preferences.quickStart[id] && canChangeTool(id, true)) || proxy.hasQuickStart());
     const canStopSelected = !unavailable && tools.some(({ id }) => preferences.quickStart[id] && canChangeTool(id, false));
     if (canStartSelected) setDisabled(startSelected, false);
     if (canStopSelected) setDisabled(stopSelected, false);
@@ -753,7 +791,7 @@ async function runToolChanges(ids: readonly ToolId[], active: boolean, failureTi
         await setToolActive(id, active);
         message = toolError(id);
       } catch (error) {
-        message = errorMessage(error, id === "caffeinate" && active ? "caffeinateStartFailed" : "workerUnavailable");
+        message = errorMessage(error, active ? startFailures[id] : "workerUnavailable");
       }
       delete dismissedFeedback[id];
       if (message) toolFailures.push({ tool: id, message });
@@ -825,7 +863,7 @@ powerButtons.forEach(button => button.addEventListener("click", () => {
         renderStatus();
       },
     }]);
-  }, { fallback: id === "caffeinate" && active ? "caffeinateStartFailed" : "workerUnavailable" });
+  }, { fallback: active ? startFailures[id] : "workerUnavailable" });
 }));
 includeSwitches.forEach(toggle => toggle.addEventListener("change", () => {
   const id = toggle.dataset.toolInclude as ToolId;
@@ -843,6 +881,7 @@ function changeSelected(active: boolean): void {
     const ids = tools.filter(({ id }) => requested.quickStart[id] && canChangeTool(id, active)).map(({ id }) => id);
     if (active && ids.includes("activity") && requested.duration !== savedPreferences.duration) throw "saveFailed";
     await runToolChanges(ids, active, active ? "selectedStartFailed" : "selectedStopFailed");
+    if (active) await proxy.launchQuickStart();
   }, { fallback: "workerUnavailable", keepQuickStartLayout: true });
 }
 
@@ -944,6 +983,7 @@ async function refreshSystemLanguage(): Promise<void> {
 systemAppearance.addEventListener("change", () => renderTheme(true));
 window.addEventListener("languagechange", () => { void refreshSystemLanguage(); });
 desktop.onFocus(() => {
+  proxy.refresh();
   refreshPermissions();
   if (activeView().dataset.moduleView === "settings") void updateLoginLaunch();
   void refreshSystemLanguage();
