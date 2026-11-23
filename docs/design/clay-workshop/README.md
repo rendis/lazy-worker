@@ -28,9 +28,9 @@ Run commands from this directory. Use `npm run dev` for the local timeline and `
 
 | File | Use |
 | --- | --- |
-| `docs/images/<tool>.gif` | The tool's block in the main README. 480 px wide at 12 fps. |
+| `docs/images/<tool>.gif` | The top of the tool's section in the user guide. 480 px wide at 12 fps. |
 | `src/assets/clips/<tool>-loop.mp4` | The tool's help inside the app. 960 × 540 and silent. |
-| `src/assets/clips/<tool>-poster.jpg` | The last frame, for reduced motion. |
+| `src/assets/clips/<tool>-poster.jpg` | The last frame, for reduced motion and for the tool's card in the main README. |
 | `docs/design/clay-workshop/renders/<tool>.mp4` | The 1080p master. Git ignores it. |
 
 Name every file after the tool's ID so the README and the app find a new tool's clip the same way.

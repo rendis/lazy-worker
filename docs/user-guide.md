@@ -30,6 +30,8 @@ In **Settings**, turn on **Open Lazy Worker at login** to open the installed app
 
 ## Activity
 
+<img src="images/activity.gif" width="560" alt="Without Activity, nobody touches the Mac and the chat status turns amber. With Activity, Miga pushes the pointer and the status turns green again.">
+
 Activity needs the [Accessibility permission](#accessibility).
 
 - In **Duration**, choose 15 minutes, 30 minutes, one hour, or until stopped. The power button starts or stops a session immediately. The header counts down for a fixed-duration session and shows elapsed time for an open-ended or scheduled session.
@@ -38,6 +40,8 @@ Activity needs the [Accessibility permission](#accessibility).
 The macOS helper holds an idle-sleep assertion while enabled. It measures the system idle time and moves the pointer briefly only after 45 seconds without input, at most once per 45 seconds. Resumed input postpones the next movement. The helper reads an elapsed time counter and records no keystrokes. The activity indicator describes the local session. Presence in a third-party app depends on what that app observes.
 
 ## Caffeinate
+
+<img src="images/caffeinate.gif" width="560" alt="Without Caffeinate, the Mac falls asleep in the middle of a download. With Caffeinate, Miga offers it an espresso, it wakes up, and the download finishes.">
 
 Caffeinate uses the macOS system utility to hold sleep assertions for the display, system, or disk and to declare the user active. System sleep assertions apply on AC power. The user-active assertion defaults to five seconds without a timer.
 
@@ -56,6 +60,8 @@ If your Mac already stays awake with the lid closed, because of a setting you ma
 ## AI
 
 ### Proxy
+
+<img src="images/proxy.gif" width="560" alt="Without Proxy, the Inspector blocks every request this Mac sends to its AI services. With Proxy, Miga throws a network cable to the other Mac, the requests reach the AI services through it, and the answers come back.">
 
 Use Proxy when one computer cannot reach an AI service and another computer on the same network can. The second computer shares its connection, and the AI tool on the first one sends its traffic through it.
 

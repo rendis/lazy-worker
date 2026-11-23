@@ -2,7 +2,7 @@
 
 - Write code, comments, and documentation in English. Keep English and Spanish webview strings together in `src/messages.ts`. Localize the native menu in `src-tauri/src/tray.rs`.
 - Keep the new-tool checklist in `CONTRIBUTING.md` in step with these notes.
-- Introduce the toolbox independently of its current tools in the README. Give each tool the same block under Tools: its clip, its name, one line, and a link to its user guide section. Build the block as a two-cell table, with the clip in one cell and the text centered in the other, so GitHub keeps a gap between them. Alternate the clip between left and right. List every function of each tool under "What each tool can do" in the README, one line each, so a reader learns what the toolbox does from the README alone. Keep the steps to use them in the user guide.
+- Introduce the toolbox independently of its current tools in the README. Give each tool the same card under Tools: the poster of its clip, its name, one line, and a link to its user guide section. Put three cards in a row, so the README stays short as tools grow. Show the moving clip at the top of the tool's section in the user guide. List every function of each tool under "What each tool can do" in the README, one line each, so a reader learns what the toolbox does from the README alone. Keep the steps to use them in the user guide.
 - Use the [clay workshop](docs/design/clay-workshop/README.md) as the starting point for feature clips. Produce every clip file with its `npm run export -- <tool>` command.
 - Hide the macOS panel on close and keep workers running until explicitly stopped or the app quits.
 - Acquire the macOS instance lock before app setup. Route repeat launches through the shared panel show path.

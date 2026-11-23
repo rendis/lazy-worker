@@ -34,44 +34,30 @@ Lazy Worker gives you one small tool for each of these limits, and one place to 
 
 ## Tools
 
-Each tool does one job. Miga, the wind-up helper, shows the desk without the tool, then with it.
+Each tool does one job. Select a tool to watch Miga, the wind-up helper, show the desk without it, then with it.
 
 <br>
 
-<!-- Tool block. Copy one table for each new tool and put its clip on the other side: swap the two cells. -->
+<!-- Tool cards, three in a row. Add a cell for each new tool, and start a new row after the third. -->
 <table>
   <tr>
-    <td width="56%"><img src="docs/images/activity.gif" width="100%" alt="Without Activity, nobody touches the Mac and the chat status turns amber. With Activity, Miga pushes the pointer and the status turns green again."></td>
-    <td valign="middle">
+    <td width="33%" valign="top">
+      <a href="docs/user-guide.md#activity"><img src="src/assets/clips/activity-poster.jpg" width="100%" alt="Activity: a scene from its clip"></a>
       <h3>Activity</h3>
       <p>Moves the pointer briefly when your Mac is idle. Run it on a timer or a daily schedule.</p>
-      <p><a href="docs/user-guide.md#activity">Activity in the user guide →</a></p>
+      <p><a href="docs/user-guide.md#activity">Watch it in the user guide →</a></p>
     </td>
-  </tr>
-</table>
-
-<br>
-
-<table>
-  <tr>
-    <td valign="middle">
+    <td width="33%" valign="top">
+      <a href="docs/user-guide.md#caffeinate"><img src="src/assets/clips/caffeinate-poster.jpg" width="100%" alt="Caffeinate: a scene from its clip"></a>
       <h3>Caffeinate</h3>
       <p>Keeps your Mac awake for a set time, while a process runs, or until you stop it.</p>
-      <p><a href="docs/user-guide.md#caffeinate">Caffeinate in the user guide →</a></p>
+      <p><a href="docs/user-guide.md#caffeinate">Watch it in the user guide →</a></p>
     </td>
-    <td width="56%"><img src="docs/images/caffeinate.gif" width="100%" alt="Without Caffeinate, the Mac falls asleep in the middle of a download. With Caffeinate, Miga offers it an espresso, it wakes up, and the download finishes."></td>
-  </tr>
-</table>
-
-<br>
-
-<table>
-  <tr>
-    <td width="56%"><img src="docs/images/proxy.gif" width="100%" alt="Without Proxy, the Inspector blocks every request this Mac sends to its AI services. With Proxy, Miga throws a network cable to the other Mac, the requests reach the AI services through it, and the answers come back."></td>
-    <td valign="middle">
+    <td width="33%" valign="top">
+      <a href="docs/user-guide.md#proxy"><img src="src/assets/clips/proxy-poster.jpg" width="100%" alt="AI Proxy: a scene from its clip"></a>
       <h3>AI Proxy</h3>
       <p>Sends your AI tools' traffic through another computer on your network, when this one can't reach the service.</p>
-      <p><a href="docs/user-guide.md#proxy">Proxy in the user guide →</a></p>
+      <p><a href="docs/user-guide.md#proxy">Watch it in the user guide →</a></p>
     </td>
   </tr>
 </table>
