@@ -831,6 +831,11 @@ export function mountProxy(host: Host) {
   document.addEventListener("keydown", event => {
     if (event.key === "Escape") setLogOpen(false);
   });
+  // The server's row in Tools leads to the server, whatever role was showing last.
+  element("ai-group-rows").addEventListener("click", event => {
+    if (!(event.target as Element).closest(".tool-row-link") || settings?.role === "server") return;
+    host.update(current => ({ ...current, role: "server" }));
+  });
   groupToggle.addEventListener("click", () => {
     const expanded = groupToggle.getAttribute("aria-expanded") !== "true";
     groupToggle.setAttribute("aria-expanded", String(expanded));
