@@ -216,6 +216,37 @@
                 </label>
               </section>
 
+              <section class="caffeinate-lid" aria-labelledby="caffeinate-lid-heading">
+                <h2 class="section-label" id="caffeinate-lid-heading" data-text="caffeinateLidSection">Closed lid</h2>
+                <div class="setting-row">
+                  <i data-lucide="laptop-minimal"></i>
+                  <span class="option-name">
+                    <span class="setting-label" id="caffeinate-lid-label" data-text="caffeinateLid">With the lid closed</span>
+                    <span class="tip option-info" tabindex="0" role="img" data-tip-text="caffeinateLidHelp"><i data-lucide="info" aria-hidden="true"></i></span>
+                  </span>
+                  <div class="segments radio-segments segment-icons caffeinate-lid-modes" id="caffeinate-lid" role="radiogroup" aria-labelledby="caffeinate-lid-label" data-selection="sleep">
+                    <label>
+                      <input type="radio" name="caffeinate-lid" value="sleep" checked />
+                      <span><i data-lucide="moon"></i><span data-text="caffeinateLidSleep">Sleep</span></span>
+                    </label>
+                    <label>
+                      <input type="radio" name="caffeinate-lid" value="charger" />
+                      <span><i data-lucide="plug-zap"></i><span data-text="caffeinateLidCharger">Awake on charger</span></span>
+                    </label>
+                    <label>
+                      <input type="radio" name="caffeinate-lid" value="always" />
+                      <span><i data-lucide="infinity"></i><span data-text="caffeinateLidAlways">Always awake</span></span>
+                    </label>
+                    <span class="segment-indicator" aria-hidden="true"></span>
+                  </div>
+                </div>
+                <div class="collapse" id="caffeinate-lid-collapse" inert>
+                  <div>
+                    <p class="setting-note caffeinate-lid-note" id="caffeinate-lid-note-box" role="status"><i data-lucide="triangle-alert" aria-hidden="true"></i><span id="caffeinate-lid-note"></span></p>
+                  </div>
+                </div>
+              </section>
+
               <details class="command-preview">
                 <summary><span data-text="caffeinatePreview">Command preview</span><i data-lucide="chevron-right"></i></summary>
                 <code id="caffeinate-preview">/usr/bin/caffeinate -i</code>

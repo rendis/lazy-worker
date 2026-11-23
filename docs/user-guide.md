@@ -43,6 +43,16 @@ Caffeinate uses the macOS system utility to hold sleep assertions for the displa
 
 Choose to run until stopped, for a duration, or while a running process stays open. Choose a process from the list or enter its PID. Stopping Caffeinate releases the sleep assertions. The target process can finish independently. Valid changes save automatically after a short pause and apply to a running session. Quick start uses the saved settings. Saved command mode migrates to Until stopped and drops the old executable and arguments.
 
+**Stay awake with the lid closed** decides what the Mac does when you close its lid with no screen connected. The sleep options above do not cover that case.
+
+- **Never** leaves macOS as it is: the Mac sleeps.
+- **On charger** keeps the Mac awake while the charger is connected. On battery, the Mac sleeps.
+- **Always** keeps the Mac awake on battery too. A closed Mac inside a bag gets hot, so the row shows a warning.
+
+The choice applies only while Caffeinate is on. When Caffeinate stops or Lazy Worker quits, the Mac sleeps as usual again. The first time you choose **On charger** or **Always**, macOS asks for an administrator password. Lazy Worker never sees it. The password installs one rule, `/etc/sudoers.d/lazy-worker-lid`, that lets your user run `pmset -a disablesleep` without a password. Delete that file to take the permission back.
+
+If your Mac already stays awake with the lid closed, because of a setting you made before, the row shows **Always** and Lazy Worker leaves that setting alone. Choose **Never** or **On charger** to put Lazy Worker in charge of it.
+
 ## AI
 
 ### Proxy

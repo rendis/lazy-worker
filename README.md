@@ -91,6 +91,7 @@ This is the full list for each tool. The [user guide](docs/user-guide.md) shows 
 
 - Prevents sleep with the macOS `caffeinate` utility. You choose what stays awake: the display, the system when idle, the system on AC power, or the disk.
 - Can declare the user active.
+- Keeps the Mac awake with the lid closed while it runs: never, only on the charger, or always. It detects a Mac that is already set that way.
 - Runs until you stop it, for a set duration, or while a process you choose stays open. Choose the process from a list or enter its PID.
 - Saves each change automatically and applies it to a running session.
 

@@ -29,6 +29,9 @@
   --pending-badge: rgba(130, 74, 55, .08);
   --pending-icon: rgba(130, 74, 55, .12);
   --launch: #f03a2a;
+  --warning: #c22d1b;
+  --warning-border: rgba(194, 45, 27, .55);
+  --warning-panel: rgba(194, 45, 27, .10);
   --launch-ink: #191410;
   --selected: #cccac2;
   --selected-ink: #19344e;
@@ -70,6 +73,9 @@
   --pending-badge: rgba(233, 169, 118, .08);
   --pending-icon: rgba(233, 169, 118, .12);
   --launch: #c17d6d;
+  --warning: #ff8a6b;
+  --warning-border: rgba(255, 138, 107, .60);
+  --warning-panel: rgba(255, 110, 80, .16);
   --launch-ink: #191410;
   --selected: #555653;
   --selected-ink: #eee7d8;

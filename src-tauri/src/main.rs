@@ -2,6 +2,7 @@
 
 mod activity;
 mod caffeinate;
+mod lid;
 mod preferences;
 mod proxy;
 mod resume;
@@ -51,6 +52,7 @@ struct Tools {
     activity: Activity,
     caffeinate: Caffeinate,
     proxy: Proxy,
+    lid: lid::Lid,
 }
 
 impl Tools {
@@ -74,6 +76,13 @@ impl Tools {
         .into_iter()
         .filter_map(|(tool, on)| on.then_some(tool))
         .collect()
+    }
+
+    /// Applies the closed-lid choice to the system for the current Caffeinate state.
+    fn reconcile_lid(&mut self) {
+        let mode = self.activity.preferences().lid_awake;
+        let active = self.caffeinate.status().mode != "off";
+        self.lid.reconcile(mode, active);
     }
 
     fn set_active(&mut self, tool: ToolId, active: bool) {
@@ -173,6 +182,7 @@ fn save_preferences(
 ) -> Result<(), &'static str> {
     let mut tools = controller.lock().map_err(|_| "saveFailed")?;
     preferences.caffeinate = tools.activity.preferences().caffeinate;
+    preferences.lid_awake = tools.activity.preferences().lid_awake;
     preferences.proxy.sanitize();
     let proxy = preferences.proxy.clone();
     #[cfg(target_os = "macos")]
@@ -296,6 +306,38 @@ fn set_tool_active(
     Ok(tools.statuses())
 }
 
+#[tauri::command]
+fn get_lid_status(controller: State<'_, Controller>) -> Result<lid::Status, &'static str> {
+    Ok(controller.lock().map_err(|_| "workerUnavailable")?.lid.status())
+}
+
+/// Saves the closed-lid choice. A choice that changes the system asks for the one-time permission first.
+#[tauri::command]
+async fn set_lid_mode(
+    controller: State<'_, Controller>,
+    mode: lid::LidMode,
+) -> Result<lid::Status, &'static str> {
+    let external = controller
+        .lock()
+        .map_err(|_| "workerUnavailable")?
+        .lid
+        .status()
+        .external;
+    if mode != lid::LidMode::Sleep || external {
+        // The administrator prompt can stay open for a long time, so it runs without the lock.
+        tauri::async_runtime::spawn_blocking(lid::Lid::authorize)
+            .await
+            .map_err(|_| "lidAuthorizationFailed")??;
+    }
+    let mut tools = controller.lock().map_err(|_| "workerUnavailable")?;
+    let mut preferences = tools.activity.preferences();
+    preferences.lid_awake = mode;
+    tools.activity.save_preferences(preferences)?;
+    tools.lid.adopt();
+    tools.reconcile_lid();
+    Ok(tools.lid.status())
+}
+
 fn main() {
     let builder = tauri::Builder::default();
     #[cfg(target_os = "macos")]
@@ -314,6 +356,7 @@ fn main() {
                 activity: Activity::new(preferences, path),
                 caffeinate: Caffeinate::new(),
                 proxy: Proxy::new(),
+                lid: lid::Lid::new(directory.clone()),
             };
             // After an update, the tools that were on return. Their clients are still open.
             if let Some(resumed) = resume::take(&directory) {
@@ -353,6 +396,7 @@ fn main() {
                 tools.activity.tick();
                 tools.caffeinate.status();
                 tools.proxy.status();
+                tools.reconcile_lid();
                 drop(tools);
                 #[cfg(target_os = "macos")]
                 {
@@ -366,6 +410,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_preferences,
             get_first_run,
+            get_lid_status,
+            set_lid_mode,
             get_system_language,
             save_preferences,
             save_caffeinate_settings,
@@ -408,6 +454,7 @@ fn main() {
                 tools.set_active(ToolId::Activity, false);
                 tools.set_active(ToolId::Caffeinate, false);
                 tools.set_active(ToolId::Proxy, false);
+                tools.reconcile_lid();
             };
         }
         #[cfg(target_os = "macos")]

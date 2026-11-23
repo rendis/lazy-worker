@@ -126,6 +126,8 @@ pub struct Preferences {
     pub caffeinate: CaffeinateSettings,
     pub hide_while_sharing: bool,
     pub proxy: ProxySettings,
+    /// What the Mac does with its lid closed while Caffeinate is on.
+    pub lid_awake: crate::lid::LidMode,
     /// The version whose changes the user has seen.
     pub seen_version: Option<String>,
 }
@@ -142,6 +144,7 @@ impl Default for Preferences {
             caffeinate: CaffeinateSettings::default(),
             hide_while_sharing: true,
             proxy: ProxySettings::default(),
+            lid_awake: crate::lid::LidMode::default(),
             seen_version: None,
         }
     }

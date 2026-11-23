@@ -46,6 +46,8 @@
 - Keep active power buttons visibly recessed in terracotta until their module stops.
 - Derive each sidebar running dot from its module's runtime status, independent of the current page.
 - Keep system input and power APIs inside the activity adapters. Shared scheduling and preferences must work with the unsupported-platform adapter.
+- Change the closed-lid sleep switch only through `src-tauri/src/lid.rs`, and only while Caffeinate is on. Leave a switch the user set before as it is until the user chooses another option. Keep its marker file in step with the switch, so a launch after a forced exit turns it off.
+- Open and close a note that depends on a choice through `.collapse`, and keep its last text while it closes.
 - List Caffeinate process targets by PID and executable basename. Preserve the current sleep assertion if switching to a process fails.
 - Check Accessibility in the same helper that posts Activity events and keep feedback outside the module layout.
 - Anchor permission notices to their warning icon and keep them outside the scrolling content.

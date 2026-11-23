@@ -1,13 +1,13 @@
 import "./style.css";
 import {
   Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
-  Cpu, createIcons, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Infinity as InfinityIcon, Info, Laptop, LayoutGrid, Link, LockKeyhole,
-  Maximize2, MessageSquare, Monitor, Moon, Pencil, Play, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
+  Cpu, createIcons, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Infinity as InfinityIcon, Info, Laptop, LaptopMinimal, LayoutGrid, Link, LockKeyhole,
+  Maximize2, MessageSquare, Monitor, Moon, Pencil, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
   Shield, Sparkles, Square, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserRound, X, Zap,
 } from "lucide";
 import { mountCaffeinateForm } from "./caffeinate-form";
 import {
-  defaults, desktop, offStatus, type ActivityAccessibility, type CaffeinateSettings, type Duration, type Preferences,
+  defaults, desktop, offStatus, type ActivityAccessibility, type LidMode, type LidStatus, type CaffeinateSettings, type Duration, type Preferences,
   type Statuses, type Theme,
 } from "./desktop";
 import { messages, type Language, type Message } from "./messages";
@@ -30,8 +30,8 @@ function renderIcons(): void {
   createIcons({
     icons: {
       Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
-      Cpu, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Infinity: InfinityIcon, Info, Laptop, LayoutGrid, Link, LockKeyhole,
-      Maximize2, MessageSquare, Monitor, Moon, Pencil, Play, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server,
+      Cpu, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Infinity: InfinityIcon, Info, Laptop, LaptopMinimal, LayoutGrid, Link, LockKeyhole,
+      Maximize2, MessageSquare, Monitor, Moon, Pencil, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server,
       Settings, Shield, Sparkles, Square, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserRound, X, Zap,
     },
     attrs: { "aria-hidden": "true", "stroke-width": 1.75 },
@@ -200,6 +200,54 @@ const onboarding = mountOnboarding({
   accessibility: () => accessibility,
   openAccessibility: () => { void openAccessibility("settings"); },
   onClose: markVersionSeen,
+});
+const lidModes = element("caffeinate-lid");
+const lidChoices = [...lidModes.querySelectorAll<HTMLInputElement>("input")];
+const lidCollapse = element("caffeinate-lid-collapse");
+const lidNote = element("caffeinate-lid-note");
+const lidNotes: Record<Exclude<LidMode, "sleep">, Message> = { charger: "caffeinateLidChargerNote", always: "caffeinateLidAlwaysNote" };
+let lidStatus: LidStatus | undefined;
+let lidPending: LidMode | undefined;
+function renderLid(): void {
+  // A Mac that already stays awake shows that choice, whatever is saved.
+  // While macOS asks for the password, the row shows the requested choice.
+  const shown = lidPending ?? (lidStatus?.external ? "always" : preferences.lidAwake);
+  for (const choice of lidChoices) {
+    choice.checked = choice.value === shown;
+    setDisabled(choice, !loaded || lidPending !== undefined || !lidStatus?.supported);
+  }
+  lidModes.dataset.selection = shown;
+  // The note keeps its last text while it closes.
+  if (shown !== "sleep") setText(lidNote, translate(lidStatus?.external && !lidPending ? "caffeinateLidExternalNote" : lidNotes[shown]));
+  element("caffeinate-lid-note-box").toggleAttribute("data-warning", shown === "always");
+  lidCollapse.toggleAttribute("data-open", shown !== "sleep");
+  lidCollapse.inert = shown === "sleep";
+}
+async function refreshLid(): Promise<void> {
+  if (lidPending) return;
+  lidStatus = await desktop.getLidStatus().catch(() => lidStatus);
+  renderLid();
+}
+async function chooseLid(mode: LidMode): Promise<void> {
+  lidPending = mode;
+  clearFeedback("caffeinate");
+  renderLid();
+  try {
+    lidStatus = await desktop.setLidMode(mode);
+    preferences = { ...preferences, lidAwake: mode };
+    savedPreferences = { ...savedPreferences, lidAwake: mode };
+  } catch (error) {
+    // A canceled password prompt leaves the choice as it was, with no error.
+    if (error !== "lidAuthorizationCanceled") feedback.caffeinate = errorMessage(error, "lidAuthorizationFailed");
+  } finally {
+    lidPending = undefined;
+    renderLid();
+    renderFeedback();
+  }
+}
+lidModes.addEventListener("input", event => {
+  event.stopPropagation();
+  void chooseLid((event.target as HTMLInputElement).value as LidMode);
 });
 const changelog = mountChangelog({ translate, language: preferredLanguage, onClose: markVersionSeen });
 element("changelog-open").addEventListener("click", event => changelog.open(undefined, event.currentTarget as HTMLElement));
@@ -529,6 +577,7 @@ function renderPreferences(previous?: Preferences): void {
     updates.render();
     onboarding.render();
     changelog.render();
+    renderLid();
     renderStatus();
   } else {
     renderControls();
@@ -1007,6 +1056,7 @@ window.addEventListener("languagechange", () => { void refreshSystemLanguage(); 
 desktop.onFocus(() => {
   proxy.refresh();
   refreshPermissions();
+  void refreshLid();
   if (activeView().dataset.moduleView === "settings") void updateLoginLaunch();
   void refreshSystemLanguage();
   void updates.refresh();
@@ -1035,6 +1085,7 @@ async function initialize(): Promise<void> {
     feedback.tools = "saveFailed";
   }
   renderPreferences();
+  void refreshLid();
   runningVersion = await desktop.getVersion().catch(() => undefined);
   if (await desktop.getFirstRun().catch(() => false)) onboarding.open();
   else if (loaded && runningVersion && preferences.seenVersion !== runningVersion) {

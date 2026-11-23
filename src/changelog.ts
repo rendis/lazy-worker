@@ -10,6 +10,14 @@ export type Release = { version: string; date: string; changes: readonly Change[
 
 export const releases: readonly Release[] = [
   {
+    version: "0.6.0",
+    date: "2026-11-23",
+    changes: [
+      { en: "Caffeinate can keep your Mac awake with the lid closed: only on the charger, or always.",
+        es: "Caffeinate puede mantener tu Mac despierto con la tapa cerrada: solo con el cargador, o siempre." },
+    ],
+  },
+  {
     version: "0.5.0",
     date: "2026-11-23",
     changes: [

@@ -42,6 +42,9 @@ export type ProxyLogEntry = {
   target: string;
   outcome: "ok" | "denied" | "blocked" | "unreachable" | "invalid";
 };
+export type LidMode = "sleep" | "charger" | "always";
+/** `external` means the Mac already stays awake with its lid closed, and the app did not set that. */
+export type LidStatus = { supported: boolean; external: boolean };
 /** `checked` is the time of the last check that got an answer, in seconds since the Unix epoch. */
 export type UpdateStatus = { version: string | null; checked: number | null };
 export type ProxyInstalls = { claudeCode: boolean; claudeApp: boolean; codexCode: boolean; codexApp: boolean };
@@ -55,6 +58,8 @@ export type Preferences = {
   caffeinate: CaffeinateSettings;
   hideWhileSharing: boolean;
   proxy: ProxySettings;
+  /** What the Mac does with its lid closed while Caffeinate is on. */
+  lidAwake: LidMode;
   /** The version whose changes the user has seen. `null` until the setup or What’s new closes. */
   seenVersion: string | null;
 };
@@ -76,6 +81,7 @@ export const defaults: Preferences = {
   quickStart: { activity: false, caffeinate: false, proxy: false },
   startToolsOnLaunch: false,
   hideWhileSharing: true,
+  lidAwake: "sleep",
   seenVersion: null,
   caffeinate: {
     mode: "untilStopped",
@@ -334,6 +340,16 @@ export const desktop = {
   /** True on the first launch of a new installation. A preview shows the setup with `?onboarding`. */
   async getFirstRun(): Promise<boolean> {
     return native ? invoke("get_first_run") : previewQuery.has("onboarding");
+  },
+  async getLidStatus(): Promise<LidStatus> {
+    // A preview shows a Mac that already stays awake with `?lid-external`.
+    return native ? invoke("get_lid_status") : { supported: true, external: previewQuery.has("lid-external") };
+  },
+  /** Saves the choice. macOS can ask for an administrator password before it answers. */
+  async setLidMode(mode: LidMode): Promise<LidStatus> {
+    if (native) return invoke("set_lid_mode", { mode });
+    await new Promise(resolve => setTimeout(resolve, 500));
+    return { supported: true, external: false };
   },
   async getUpdateStatus(): Promise<UpdateStatus> {
     return macApp ? invoke("get_update_status") : previewUpdate;
