@@ -1,6 +1,6 @@
 import "./style.css";
 import {
-  Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronDown, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
+  Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
   Cpu, createIcons, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Infinity as InfinityIcon, Info, Laptop, LaptopMinimal, LayoutGrid, Link, LockKeyhole, LockKeyholeOpen,
   Maximize2, Megaphone, MessageSquare, Monitor, Moon, MousePointer2, Pencil, Pin, PinOff, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
   Shield, Sparkles, Square, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserRound, X, Zap,
@@ -29,7 +29,7 @@ const updateToolOrder = mountTools();
 function renderIcons(): void {
   createIcons({
     icons: {
-      Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronDown, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
+      Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
       Cpu, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Infinity: InfinityIcon, Info, Laptop, LaptopMinimal, LayoutGrid, Link, LockKeyhole, LockKeyholeOpen,
       Maximize2, Megaphone, MessageSquare, Monitor, Moon, MousePointer2, Pencil, Pin, PinOff, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server,
       Settings, Shield, Sparkles, Square, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserRound, X, Zap,

@@ -1255,30 +1255,6 @@ h1:focus { outline: none; }
 }
 .tool-arrow.lucide { width: 16px; height: 16px; color: var(--secondary); }
 
-/* The arrow that opens a group sits in the row's last column, above the link that covers the row. */
-.tool-group-toggle-tip { position: relative; z-index: 2; justify-self: center; }
-.tool-group-toggle {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  /* Its icon lines up with the arrows of the other rows, and its hover keeps clear of the row's edge. */
-  margin: -5px;
-  padding: 0;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--secondary);
-  transition: background-color .16s ease, color .16s ease;
-}
-.tool-group-toggle:hover { background: var(--glass); color: var(--text); }
-.tool-group-toggle .lucide { width: 16px; height: 16px; transition: transform var(--selection-duration) var(--selection-easing); }
-.tool-group-toggle[aria-expanded="true"] .lucide { transform: rotate(180deg); }
-.tool-group-toggle-tip[data-tip]::after { right: -6px; }
-.tool-app-state { color: var(--secondary); font-size: 13px; font-weight: 640; }
-.tool-group-rows { margin-inline-start: 13px; padding-inline-start: 14px; border-inline-start: 1px solid var(--hairline); }
-.tool-group-rows .tool-name { font-size: 14px; }
-.tool-app-row[data-missing] :is(.tool-name, .tool-app-state) { opacity: .55; }
 .round-action {
   z-index: 2;
   display: grid;
@@ -1368,7 +1344,7 @@ h1:focus { outline: none; }
   white-space: nowrap;
 }
 .text-link:hover:enabled { color: var(--text); }
-.text-link:enabled:active, .icon-button:enabled:active, .tool-group-toggle:enabled:active, .proxy-add-button:enabled:active { box-shadow: none; }
+.text-link:enabled:active, .icon-button:enabled:active, .proxy-add-button:enabled:active { box-shadow: none; }
 .danger-link { color: var(--pending-color); }
 .proxy-addresses { display: grid; justify-items: end; gap: 2px; }
 .proxy-address { display: flex; align-items: center; gap: 4px; }
@@ -1894,7 +1870,7 @@ h1:focus { outline: none; }
   grid-template-areas:
     "name name pin"
     "status status status"
-    "include arrow power";
+    "include . power";
   align-items: center;
   gap: 10px 8px;
   min-height: 0;
@@ -1911,7 +1887,6 @@ h1:focus { outline: none; }
 .tool-catalog > .tool-row .catalog-switch { grid-area: include; justify-self: start; }
 .tool-catalog > .tool-row .catalog-power { grid-area: power; }
 .tool-catalog > .tool-row .tool-arrow { display: none; }
-.tool-catalog > .tool-row .tool-group-toggle-tip { grid-area: arrow; }
 .tool-catalog > .tool-row[data-pinned] { border-color: var(--choice); }
 
 .tool-pin-tip { grid-area: pin; position: relative; z-index: 2; margin: -6px -6px 0 0; }
@@ -1933,8 +1908,3 @@ h1:focus { outline: none; }
 .tool-pin:hover { background: var(--glass); color: var(--text); }
 .tool-pin[aria-pressed="true"] { opacity: 1; color: var(--choice); transform: rotate(-35deg); }
 .tool-pin-tip[data-tip]::after { right: -4px; }
-.tool-group-rows .tool-pin-tip, #tool-catalog ~ * .tool-pin-tip { display: none; }
-
-/* The AI tools of the proxy card open as one panel under the cards. */
-#ai-group-body { margin-top: 8px; }
-#ai-group-body .tool-group-rows { margin-inline-start: 0; padding-inline-start: 0; border-inline-start: 0; }

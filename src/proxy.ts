@@ -123,13 +123,8 @@ export function mountProxy(host: Host) {
   const addIcons = element("proxy-add-icons");
   const addName = element<HTMLInputElement>("proxy-add-name");
   const addCommand = element<HTMLInputElement>("proxy-add-command");
-  const groupToggle = element<HTMLButtonElement>("ai-group-toggle");
-  const groupBody = element("ai-group-body");
-  const groupApps = element("ai-group-apps");
   // The proxy's own row heads the group. Its arrow takes the place of the row's arrow to the module.
-  const groupHead = document.querySelector<HTMLElement>('#tool-catalog [data-tool-power="proxy"]')!.closest<HTMLElement>(".tool-row")!;
-  const groupToggleTip = groupToggle.parentElement!;
-  groupHead.querySelector(".tool-arrow")?.replaceWith(groupToggleTip);
+  const serverCard = document.querySelector<HTMLElement>('#tool-catalog [data-tool-power="proxy"]')!.closest<HTMLElement>(".tool-row")!;
 
   let settings: ProxySettings | undefined;
   let running = false;
@@ -233,7 +228,6 @@ export function mountProxy(host: Host) {
   type Row = { root: HTMLElement; update(app: ProxyApp): void };
   type Rows = Map<string, { signature: string; row: Row }>;
   const clientRows: Rows = new Map();
-  const groupRows: Rows = new Map();
 
   function quickSwitch(app: ProxyApp): { root: HTMLElement; input: HTMLInputElement } {
     const input = h("input", {
@@ -481,28 +475,6 @@ export function mountProxy(host: Host) {
     };
   }
 
-  function groupRow(app: ProxyApp): Row {
-    const name = h("strong");
-    const state = h("span", { class: "tool-app-state" });
-    const quick = quickSwitch(app);
-    const open = openButton(app, true);
-    const root = h("div", { class: "tool-row tool-app-row" },
-      h("span", { class: "tool-name" }, appIcon(app), name),
-      state, quick.root, open.root, h("span", {}));
-    return {
-      root,
-      update(current) {
-        const present = installed(current);
-        root.toggleAttribute("data-missing", !present);
-        name.textContent = title(current);
-        state.textContent = host.translate(present || !installs ? "roleClient" : "proxyMissing");
-        quick.input.checked = current.quickStart;
-        quick.input.disabled = !present;
-        open.update(current);
-      },
-    };
-  }
-
   const rowMotion = { duration: 240, easing: "cubic-bezier(.22, .7, .36, 1)" };
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
@@ -574,7 +546,6 @@ export function mountProxy(host: Host) {
 
   function renderApps(): void {
     reconcile(apps, clientRows, clientRow);
-    reconcile(groupApps, groupRows, groupRow);
   }
 
   function renderServerState(): void {
@@ -776,10 +747,8 @@ export function mountProxy(host: Host) {
     addressDelay = window.setTimeout(saveServerAddress, 500);
   });
   serverAddress.addEventListener("change", saveServerAddress);
-  for (const container of [apps, groupApps]) {
-    container.addEventListener("click", act);
-    container.addEventListener("change", act);
-  }
+  apps.addEventListener("click", act);
+  apps.addEventListener("change", act);
   apps.addEventListener("keydown", event => {
     const field = event.target instanceof HTMLInputElement && event.target.dataset.command;
     if (!field) return;
@@ -871,16 +840,10 @@ export function mountProxy(host: Host) {
   document.addEventListener("keydown", event => {
     if (event.key === "Escape") setLogOpen(false);
   });
-  // The server's row in Tools leads to the server, whatever role was showing last.
-  groupHead.addEventListener("click", event => {
+  // The server's card in Tools leads to the server, whatever role was showing last.
+  serverCard.addEventListener("click", event => {
     if (!(event.target as Element).closest(".tool-row-link") || settings?.role === "server") return;
     host.update(current => ({ ...current, role: "server" }));
-  });
-  groupToggle.addEventListener("click", () => {
-    const expanded = groupToggle.getAttribute("aria-expanded") !== "true";
-    groupToggle.setAttribute("aria-expanded", String(expanded));
-    groupBody.toggleAttribute("data-open", expanded);
-    groupBody.inert = !expanded;
   });
   refreshEnvironment();
 
