@@ -496,11 +496,16 @@
                 <i data-lucide="external-link" aria-hidden="true"></i><span data-text="openAccessibility">Open Accessibility settings</span>
               </button>
             </section>
-            <section class="settings-update" id="settings-update" aria-labelledby="settings-update-title" hidden>
-              <h2 id="settings-update-title" data-text="updates">Updates</h2>
-              <p id="settings-update-description" class="notice-description"></p>
-              <button class="accessibility-button" id="settings-update-restart" type="button" data-text="restartToUpdate" aria-describedby="settings-update-description">Restart to update</button>
-            </section>
+            <div class="settings-footer">
+              <div class="collapse" id="settings-update" inert>
+              <div>
+                <section class="settings-update" aria-labelledby="settings-update-title">
+                  <h2 id="settings-update-title" data-text="updates">Updates</h2>
+                  <p id="settings-update-description" class="notice-description"></p>
+                  <button class="accessibility-button" id="settings-update-restart" type="button" data-text="restartToUpdate" aria-describedby="settings-update-description">Restart to update</button>
+                </section>
+              </div>
+            </div>
             <div class="settings-version" id="settings-version" hidden>
               <p>
                 <span data-text="appVersion">Version</span> <span id="app-version"></span><span id="update-check-status" role="status"></span>
@@ -509,6 +514,7 @@
                 <button class="text-link" id="changelog-open" type="button" data-text="whatsNew">What’s new</button>
                 <button class="text-link" id="update-check" type="button" data-text="checkForUpdates" hidden>Check for updates</button>
               </span>
+            </div>
             </div>
           </div>
         </div>

@@ -61,7 +61,9 @@ export function mountUpdateNotice({ translate, setNoticeOpen, beforeRestart, mov
       moveFocus();
     }
     setNoticeOpen(notice, open);
-    settings.hidden = version === null;
+    // The section opens and closes over a short time, like every other part of the panel.
+    settings.toggleAttribute("data-open", version !== null);
+    settings.inert = version === null;
     for (const node of [description, settingsDescription]) node.textContent = status;
     for (const button of [restart, settingsRestart, later]) {
       button.setAttribute("aria-disabled", String(installing));

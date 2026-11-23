@@ -854,9 +854,12 @@ h1:focus { outline: none; }
   padding-top: 15px;
   border-top: 1px solid var(--line);
 }
+/* The update section and the version line share one grid row, so a closed section leaves no gap. */
+.settings-footer { grid-column: 1 / -1; }
+/* Tight enough that the card fits the panel while an update waits. */
 .settings-update {
-  grid-column: 1 / -1;
-  padding-top: 12px;
+  margin-bottom: 12px;
+  padding-top: 9px;
   border-top: 1px solid var(--line);
 }
 .settings-update h2 { font-size: 14px; font-weight: 700; }

@@ -358,7 +358,8 @@ export const desktop = {
   async checkForUpdate(): Promise<UpdateStatus> {
     if (macApp) return invoke("check_for_update");
     await new Promise(resolve => setTimeout(resolve, 700));
-    previewUpdate = { version: null, checked: Math.floor(Date.now() / 1000) };
+    // A preview finds an update with `?update=<version>`.
+    previewUpdate = { version: previewQuery.get("update"), checked: Math.floor(Date.now() / 1000) };
     return previewUpdate;
   },
   async onAvailableUpdate(refresh: () => void): Promise<void> {
