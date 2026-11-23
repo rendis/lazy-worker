@@ -3,6 +3,8 @@ import activityClip from "./assets/clips/activity-loop.mp4";
 import activityPoster from "./assets/clips/activity-poster.jpg";
 import caffeinateClip from "./assets/clips/caffeinate-loop.mp4";
 import caffeinatePoster from "./assets/clips/caffeinate-poster.jpg";
+import proxyClip from "./assets/clips/proxy-loop.mp4";
+import proxyPoster from "./assets/clips/proxy-poster.jpg";
 import type { Preferences, Status } from "./desktop";
 import { messages, type Message } from "./messages";
 
@@ -31,7 +33,7 @@ export const tools: readonly Tool[] = [
   },
   {
     id: "proxy", title: "proxy", description: "proxyDescription", icon: "server",
-    help: { text: "proxyExplanation" },
+    help: { text: "proxyExplanation", clip: { video: proxyClip, poster: proxyPoster, label: "proxyClip" } },
     section: { title: "ai", icon: "sparkles" },
     row: { title: "proxyServer", group: "ai-group-rows" },
   },
