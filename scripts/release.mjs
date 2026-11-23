@@ -86,6 +86,19 @@ function sha256(file) {
 
 // ---------------------------------------------------------------------------------------------- input
 
+/** Sends a file to Apple, waits for the answer, and staples the ticket to `target`. */
+function notarize(upload, target, label) {
+  const result = JSON.parse(run("xcrun", ["notarytool", "submit", upload, "--keychain-profile", local.notaryProfile,
+    "--wait", "--output-format", "json"], { quiet: true }));
+  if (result.status !== "Accepted") {
+    fail(`Apple answered "${result.status}" for ${label}. See \`xcrun notarytool log ${result.id}\`.`);
+  }
+  run("xcrun", ["stapler", "staple", "-q", target], { quiet: true });
+  // The ticket check reaches Apple and can fail once without a real fault.
+  const stapled = [1, 2, 3].some(() => run("xcrun", ["stapler", "validate", "-q", target], { quiet: true, allowFailure: true }) !== undefined);
+  if (!stapled) fail(`the notarization ticket on ${label} does not validate.`);
+}
+
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
 const summaryIndex = args.indexOf("--summary");
@@ -125,6 +138,7 @@ const tag = `v${version}`;
 const stage = path.join(root, "src-tauri/target/release-candidate", version);
 const packages = path.join(stage, "packages");
 const artifact = (arch, extension) => path.join(packages, `Lazy-Worker-${version}-macos-${arch}.${extension}`);
+const diskImage = arch => path.join(packages, `Lazy-Worker-${arch === "arm64" ? "apple-silicon" : "intel"}.dmg`);
 
 // ---------------------------------------------------------------------------------------------- checks
 
@@ -142,6 +156,13 @@ if (dryRun) {
     fail("main is behind origin/main. Pull first.");
   }
   if (run("git", ["tag", "--list", tag], { quiet: true })) fail(`the tag ${tag} already exists.`);
+}
+
+// The panel shows the changes of each release from this file.
+if (!read("src/changelog.ts").includes(`version: "${version}"`)) {
+  const missing = `src/changelog.ts has no entry for ${version}`;
+  if (dryRun) console.log(`Note: ${missing}. A release needs one.`);
+  else fail(`${missing}. Add its changes in English and Spanish first.`);
 }
 
 run("gh", ["auth", "status"], { quiet: true });
@@ -229,16 +250,8 @@ for (const { arch, triple } of targets) {
   step(`Notarize ${arch}`);
   const upload = path.join(stage, `notarize-${arch}.zip`);
   run("ditto", ["-c", "-k", "--keepParent", app, upload]);
-  const result = JSON.parse(run("xcrun", ["notarytool", "submit", upload, "--keychain-profile", local.notaryProfile,
-    "--wait", "--output-format", "json"], { quiet: true }));
-  if (result.status !== "Accepted") {
-    fail(`Apple answered "${result.status}" for ${arch}. See \`xcrun notarytool log ${result.id}\`.`);
-  }
+  notarize(upload, app, `the ${arch} app`);
   fs.rmSync(upload);
-  run("xcrun", ["stapler", "staple", "-q", app], { quiet: true });
-  // The ticket check reaches Apple and can fail once without a real fault.
-  const stapled = [1, 2, 3].some(() => run("xcrun", ["stapler", "validate", "-q", app], { quiet: true, allowFailure: true }) !== undefined);
-  if (!stapled) fail(`the notarization ticket on the ${arch} app does not validate.`);
   if (!report("spctl", "-a", "-vv", app).includes("Notarized Developer ID")) {
     fail(`Gatekeeper does not accept the ${arch} app as notarized.`);
   }
@@ -263,13 +276,29 @@ for (const { arch, platform } of targets) {
     env: { TAURI_SIGNING_PRIVATE_KEY: updaterKey.privateKey, TAURI_SIGNING_PRIVATE_KEY_PASSWORD: updaterKey.password ?? "" },
     quiet: true,
   });
+  // The disk image is for people who install by dragging the app to Applications.
+  // Its name has no version, so a link to the latest release always finds it.
+  const volume = path.join(stage, arch, "disk-image");
+  fs.rmSync(volume, { recursive: true, force: true });
+  fs.mkdirSync(volume);
+  run("ditto", [app, path.join(volume, path.basename(app))]);
+  fs.symlinkSync("/Applications", path.join(volume, "Applications"));
+  run("hdiutil", ["create", "-quiet", "-volname", "Lazy Worker", "-srcfolder", volume, "-fs", "HFS+", "-format", "UDZO",
+    "-ov", diskImage(arch)]);
+  fs.rmSync(volume, { recursive: true });
+  run("codesign", ["--sign", local.signingIdentity, "--timestamp", diskImage(arch)], { quiet: true });
+  notarize(diskImage(arch), diskImage(arch), `the ${arch} disk image`);
+  if (!report("spctl", "-a", "-t", "open", "--context", "context:primary-signature", "-vv", diskImage(arch))
+    .includes("Notarized Developer ID")) {
+    fail(`Gatekeeper does not accept the ${arch} disk image as notarized.`);
+  }
   manifest.platforms[platform] = {
     signature: fs.readFileSync(artifact(arch, "app.tar.gz.sig"), "utf8").trim(),
     url: `https://github.com/${repository}/releases/download/${tag}/${path.basename(artifact(arch, "app.tar.gz"))}`,
   };
 }
 fs.writeFileSync(path.join(packages, "latest.json"), JSON.stringify(manifest, null, 2) + "\n");
-const checksums = targets.flatMap(({ arch }) => ["zip", "app.tar.gz"].map(extension => artifact(arch, extension)))
+const checksums = targets.flatMap(({ arch }) => [diskImage(arch), artifact(arch, "zip"), artifact(arch, "app.tar.gz")])
   .map(file => `${sha256(file)}  ${path.basename(file)}`).join("\n") + "\n";
 fs.writeFileSync(path.join(packages, "SHA256SUMS.txt"), checksums);
 console.log(fs.readdirSync(packages).sort().join("\n"));
@@ -338,7 +367,7 @@ step("Publish a draft");
 const notes = path.join(stage, "release-notes.md");
 fs.writeFileSync(notes, `${summary}
 
-If you use an earlier Lazy Worker, choose **Restart to update** when the update appears. For manual installation, download the ZIP for Apple silicon or Intel, extract it, and move **Lazy Worker.app** to Applications. Both packages are signed with Developer ID and notarized.
+If you use an earlier Lazy Worker, choose **Restart to update** when the update appears. To install it for the first time, download **Lazy-Worker-apple-silicon.dmg** or **Lazy-Worker-intel.dmg**, open it, and drag **Lazy Worker** to Applications. The [README](https://github.com/${repository}#install) shows how to tell which Mac you have. Every package is signed with Developer ID and notarized.
 `);
 run("git", ["tag", "-a", tag, "-m", `Lazy Worker ${version}`]);
 run("git", ["push", "--quiet", "origin", "main", tag]);

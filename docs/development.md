@@ -58,7 +58,7 @@ Run it on a clean `main`. It does these steps in order and stops at the first on
 3. Sets the version in the five files that hold it and commits.
 4. Builds Apple silicon and Intel with Developer ID, and verifies each app's version, architecture, signature, hardened runtime, and macOS 12.0 target.
 5. Notarizes and staples each app.
-6. Packages each one as a ZIP for manual installation and as a signed `.app.tar.gz` for the updater, with `latest.json` and `SHA256SUMS.txt`.
+6. Packages each one as a notarized disk image and a ZIP for manual installation, and as a signed `.app.tar.gz` for the updater, with `latest.json` and `SHA256SUMS.txt`.
 7. Rehearses the update: installs the last published release in a scratch folder and updates it with the real Tauri updater.
 8. Tags, pushes, and creates a draft release on GitHub.
 

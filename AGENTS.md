@@ -61,9 +61,13 @@
 - For signing, Accessibility after an update, or release automation, follow [issue #1](https://github.com/rendis/lazy-worker/issues/1). Describe test platforms by architecture and macOS version.
 - Set `APPLE_SIGNING_IDENTITY` to the Developer ID Application identity for release builds. Verify the app and its Activity helper against that certificate in both architecture bundles.
 - Run every update check through `check` in `src-tauri/src/updates.rs`, so the time of the last check in Settings stays true. A release needs a few minutes to reach the update address, so keep the automatic checks frequent.
+- Add the changes of a release to `src/changelog.ts` before the release, in English and Spanish, for a user who is not technical. Give a change that adds a tool its `tool`. The release command stops without that entry.
+- Show the setup guide on a new installation only, which is a launch without saved preferences. Record the version the user has seen in `seenVersion` when the guide or What’s new closes.
+- Build each setup guide control on the control of the same setting in Settings: the same `data-` attribute, or `data-mirror` with the id of that control. Give `data-mirror-when="leave"` to a control that changes the system, so it applies when the user leaves its step.
 - Record the running tools through `resume::remember` before an update restarts the app, and start them from `resume::take` at launch in place of startup Quick start. Leave proxy clients alone there, because they are still open.
 - Require the Tauri updater to verify the signed version. Call `request_restart` after installing so `RunEvent::Exit` releases active tools.
 - Local builds default to ad-hoc signing. If Accessibility fails after reinstall, compare the installed app's CDHash with the requirement in the macOS TCC log. Keep the app and Activity helper signing identities stable across releases. Keep private signing keys outside the repository.
+- Keep the disk image names free of the version, because the README links to them through the latest release.
 - Archive the stapled app for the Tauri updater and bind its signature to the release version before publishing `latest.json`.
 - Publish with `npm run release -- <version> --summary "<one line>"`, from a clean `main`. It sets the version, builds and notarizes both architectures, rehearses the update from the last release, and leaves a draft on GitHub. Rehearse a change to the release steps with `npm run release -- --dry-run`.
 - Keep the release steps in `scripts/release.mjs`. Keep local names, such as the signing identity, in `.release.local.json`, which git ignores.

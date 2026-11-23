@@ -12,7 +12,9 @@
 
 ## Get started
 
-Lazy Worker opens in **Tools**. Select **?** next to a module’s title to see what the tool does, with a short clip. Select the clip to enlarge it.
+The first time you open Lazy Worker, a setup guide asks for your language and your look. It offers to open Lazy Worker when you sign in, asks for the [Accessibility permission](#accessibility), and shows Activity and Caffeinate so you can mark them for Quick start. Each choice is saved at once, and **Settings** keeps all of them. **Skip setup** closes the guide, and you can grant the permission later. Opening at login starts on, and the guide applies it when you leave that step or skip.
+
+After the guide, Lazy Worker opens in **Tools**. Select **?** next to a module’s title to see what the tool does, with a short clip. Select the clip to enlarge it.
 
 In **Settings**, choose Light or Dark and English or Spanish, or leave either setting on System. For language, System uses your first supported preferred language and falls back to English.
 
@@ -87,4 +89,4 @@ If Activity still reports a permission error while Lazy Worker is enabled, selec
 
 ## Updates
 
-Lazy Worker checks GitHub Releases at launch and every hour. It also checks when you open the panel and the last check is older than 15 minutes. After a check that fails, for example with no network, it tries again in five minutes. **Settings** shows the time of the last check beside the version, and **Check for updates** checks at once. A new version appears in the menu and in the panel. Choose **Later** to keep working and find the update again in Settings. **Restart to update** downloads and verifies the package, then replaces and restarts Lazy Worker. The restart stops the tools that are on, and the new version starts them again with their saved settings. Their sessions start from zero. A Proxy server drops its open connections for the restart, and the clients you opened stay open.
+Lazy Worker checks GitHub Releases at launch and every hour. It also checks when you open the panel and the last check is older than 15 minutes. After a check that fails, for example with no network, it tries again in five minutes. **Settings** shows the time of the last check beside the version, and **Check for updates** checks at once. After an update, **What’s new** shows the changes once. **What’s new** in Settings lists the changes of the last versions. A new version appears in the menu and in the panel. Choose **Later** to keep working and find the update again in Settings. **Restart to update** downloads and verifies the package, then replaces and restarts Lazy Worker. The restart stops the tools that are on, and the new version starts them again with their saved settings. Their sessions start from zero. A Proxy server drops its open connections for the restart, and the clients you opened stay open.

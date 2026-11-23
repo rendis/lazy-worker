@@ -157,9 +157,36 @@ Every tool gets the same support from the toolbox.
 
 ## Install
 
-1. Open the [latest release](https://github.com/rendis/lazy-worker/releases/latest). Choose the ZIP ending in `arm64.zip` for Apple silicon or `x86_64.zip` for Intel.
-2. Unzip it, move **Lazy Worker** to **Applications**, and open it.
-3. Click the wind-up key in the menu bar and choose **Open Panel**.
+You need no technical knowledge. Follow these four steps.
+
+1. **Find out which Mac you have.** Click the Apple logo in the top left corner of the screen and choose **About This Mac**.
+   - If you see **Chip** and a name that starts with **Apple**, such as Apple M1, you have **Apple silicon**.
+   - If you see **Processor** and a name with **Intel**, you have **Intel**.
+2. **Download the installer for your Mac.**
+   - [Download for Apple silicon](https://github.com/rendis/lazy-worker/releases/latest/download/Lazy-Worker-apple-silicon.dmg)
+   - [Download for Intel](https://github.com/rendis/lazy-worker/releases/latest/download/Lazy-Worker-intel.dmg)
+3. **Install it.** Open the file you downloaded. A window shows Lazy Worker and the Applications folder. Drag **Lazy Worker** onto **Applications**.
+4. **Open it.** Open **Lazy Worker** from Applications. A short setup guide asks for your language and your look, and shows each tool. After that, the wind-up key in the menu bar opens the panel.
+
+The wrong installer does no harm. macOS tells you that it cannot open the app, and you download the other one.
+
+### Let an AI agent install it
+
+If you use an AI agent that can run commands on your Mac, such as Claude Code or Codex, give it this prompt:
+
+```text
+Install Lazy Worker on this Mac.
+
+1. Run `uname -m`. `arm64` means Apple silicon. `x86_64` means Intel.
+2. Download the installer for that Mac to a temporary folder:
+   - Apple silicon: https://github.com/rendis/lazy-worker/releases/latest/download/Lazy-Worker-apple-silicon.dmg
+   - Intel: https://github.com/rendis/lazy-worker/releases/latest/download/Lazy-Worker-intel.dmg
+3. Run `spctl -a -t open --context context:primary-signature -vv <file>`. Go on only if the answer says "Notarized Developer ID".
+4. Mount the file with `hdiutil attach`, copy "Lazy Worker.app" to /Applications with `ditto`, and unmount it with `hdiutil detach`.
+5. Open the app with `open -a "Lazy Worker"`.
+
+Tell me when the setup guide is on screen. Do not grant any permission for me.
+```
 
 Lazy Worker runs on macOS 12 or later. Activity and Hide while sharing need the Accessibility permission. The [user guide](docs/user-guide.md#accessibility) shows how to grant it.
 
