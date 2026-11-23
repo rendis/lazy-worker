@@ -10,6 +10,14 @@ export type Release = { version: string; date: string; changes: readonly Change[
 
 export const releases: readonly Release[] = [
   {
+    version: "0.6.5",
+    date: "2026-11-23",
+    changes: [
+      { en: "Caffeinate saves a change in silence while it is off. The notice shows only when a running session takes the change.",
+        es: "Caffeinate guarda un cambio en silencio cuando está apagado. El aviso sale solo cuando una sesión en marcha aplica el cambio." },
+    ],
+  },
+  {
     version: "0.6.4",
     date: "2026-11-23",
     changes: [
