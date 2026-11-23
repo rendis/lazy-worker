@@ -145,6 +145,7 @@ export function mountProxy(host: Host) {
   let editingApp: string | undefined;
   let launchedApp: string | undefined;
   let copiedApp: string | undefined;
+  let deletingApp: string | undefined;
   let serverRequested = false;
   let copied: string | undefined;
   let addIcon = customIcons[0];
@@ -181,10 +182,15 @@ export function mountProxy(host: Host) {
     return true;
   }
 
+  /** A command needs the server address only when it names it. */
+  function needsServer(app: ProxyApp): boolean {
+    return command(app).includes("{server}") && !hasServer();
+  }
+
   /** Why a tool cannot open now. The Open button shows it as its tooltip. */
   function blocked(app: ProxyApp): Message | undefined {
     if (!installed(app)) return "proxyNotDetected";
-    if (!hasServer()) return "proxyNeedsServer";
+    if (needsServer(app)) return "proxyNeedsServer";
   }
 
   function hasServer(): boolean {
@@ -197,7 +203,7 @@ export function mountProxy(host: Host) {
 
   async function launch(app: ProxyApp): Promise<void> {
     if (!installed(app)) return;
-    if (!hasServer()) {
+    if (needsServer(app)) {
       // Start selected reaches this point for a marked tool without a server address.
       serverRequested = true;
       host.fail("proxyServerMissing");
@@ -415,10 +421,15 @@ export function mountProxy(host: Host) {
       tipButton("edit", app, "pencil", "edit"), restore, custom && tipButton("delete", app, "trash-2", "remove", "danger"));
     const editLinks = h("span", { class: "proxy-app-links", hidden: true },
       tipButton("save", app, "check", "save", "confirm"), tipButton("cancel", app, "x", "cancel"));
+    // Deleting asks first, in the same place, because it cannot be undone.
+    const confirmLinks = h("span", { class: "proxy-app-links proxy-delete-confirm", hidden: true },
+      h("span", { class: "setting-note" }, host.translate("proxyDeleteConfirm")),
+      tipButton("confirm-delete", app, "trash-2", "remove", "danger"), tipButton("cancel", app, "x", "cancel"));
     const hint = h("p", { class: "setting-note proxy-command-hint", hidden: true }, host.translate("proxyCommandHint"));
     const detail = h("div", { class: "collapse", id: `proxy-app-${app.id}-detail`, inert: true },
       h("div", { class: "proxy-app-detail" },
-        h("span", { class: "setting-note" }, host.translate("proxyCommand")), code, field, viewLinks, editLinks, hint));
+        h("span", { class: "setting-note" }, host.translate("proxyCommand")), code, field, viewLinks, editLinks,
+        confirmLinks, hint));
     const disclosure = h("button", {
       type: "button", class: "icon-button disclosure", "data-action": "toggle", "data-app": app.id,
       "aria-controls": detail.id, "aria-label": host.translate("showCommand").replace("{app}", title(app)),
@@ -448,8 +459,8 @@ export function mountProxy(host: Host) {
         quick.input.checked = current.quickStart;
         quick.input.disabled = !present;
         open.update(current);
-        copy.disabled = !hasServer();
-        copyTip.dataset.tip = host.translate(hasServer() ? "copyCommand" : "proxyNeedsServer");
+        copy.disabled = needsServer(current);
+        copyTip.dataset.tip = host.translate(needsServer(current) ? "proxyNeedsServer" : "copyCommand");
         if (setIcon(copy, copiedApp === current.id ? "check" : "copy")) host.refreshIcons();
         disclosure.setAttribute("aria-expanded", String(isOpen));
         detail.toggleAttribute("data-open", isOpen);
@@ -458,8 +469,10 @@ export function mountProxy(host: Host) {
         code.hidden = editing;
         if (!editing) field.value = command(current);
         field.hidden = !editing;
-        viewLinks.hidden = editing;
+        const deleting = isOpen && deletingApp === current.id;
+        viewLinks.hidden = editing || deleting;
         editLinks.hidden = !editing;
+        confirmLinks.hidden = !deleting;
         hint.hidden = !editing;
         if (restore) restore.disabled = current.command === null;
       },
@@ -622,11 +635,19 @@ export function mountProxy(host: Host) {
     if (action === "toggle") {
       openApp = openApp === app.id ? undefined : app.id;
       editingApp = undefined;
+      deletingApp = undefined;
     }
     if (action === "edit") editingApp = app.id;
-    if (action === "cancel") editingApp = undefined;
+    if (action === "cancel") {
+      editingApp = undefined;
+      deletingApp = undefined;
+    }
     if (action === "restore") updateApp(app.id, current => ({ ...current, command: null }));
-    if (action === "delete") host.update(current => ({ ...current, apps: current.apps.filter(entry => entry.id !== app.id) }));
+    if (action === "delete") deletingApp = app.id;
+    if (action === "confirm-delete") {
+      deletingApp = undefined;
+      host.update(current => ({ ...current, apps: current.apps.filter(entry => entry.id !== app.id) }));
+    }
     if (action === "save") {
       const value = apps.querySelector<HTMLInputElement>(`[data-command="${app.id}"]`)!.value.trim();
       if (!value) return;
@@ -734,6 +755,7 @@ export function mountProxy(host: Host) {
     setLogOpen(false);
     setAdding(false);
     editingApp = undefined;
+    deletingApp = undefined;
     renderLists();
   }).observe(view, { attributes: true, attributeFilter: ["hidden"] });
   document.addEventListener("pointerdown", event => {
@@ -766,7 +788,7 @@ export function mountProxy(host: Host) {
       id: `custom-${Date.now().toString(36)}`,
       name,
       icon: addIcon,
-      command: entered.includes("{server}") ? entered : `${proxyEnvironment} ${entered}`,
+      command: entered,
       quickStart: false,
       variant: "code",
     };
@@ -830,6 +852,8 @@ export function mountProxy(host: Host) {
         input.disabled = !enabled;
       }
       roleCaption.textContent = host.translate(current.role === "server" ? "roleServerCaption" : "roleClientCaption");
+      addName.placeholder = host.translate("proxyName");
+      addCommand.placeholder = host.translate("proxyCommand");
       serverPanel.hidden = current.role !== "server";
       clientPanel.hidden = current.role !== "client";
       for (const field of [port, allow, serverAddress, addButton]) field.disabled = !enabled;

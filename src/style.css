@@ -1489,7 +1489,8 @@ h1:focus { outline: none; }
   padding: 0 2px 12px 34px;
 }
 .proxy-app-detail code { overflow-wrap: anywhere; }
-.proxy-app-links { display: flex; gap: 2px; }
+.proxy-app-links { display: flex; align-items: center; gap: 2px; }
+.proxy-delete-confirm .setting-note { margin-inline-end: 6px; color: var(--pending-color); white-space: nowrap; }
 .proxy-command-hint { grid-column: 2 / -1; }
 .proxy-add-button { width: 100%; border-width: 0 0 1px; background: transparent; color: var(--secondary); text-align: start; }
 .proxy-add-button:hover:enabled { color: var(--text); }

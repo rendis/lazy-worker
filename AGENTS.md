@@ -20,7 +20,8 @@
 - Mark Quick start with the bolt switch only. Its hint states when the tool starts, based on the startup setting.
 - Give a module that sits under a broader sidebar section a `section` in `src/modules.ts`, and a `row` when its Tools row belongs to a group.
 - Keep proxy logic in `src/proxy.ts` and reach the system only through `desktop`. Give each `desktop` proxy call a browser-preview result.
-- Store a proxy command as a template where `{server}` stands for the server address. Store `null` for an unchanged built-in command.
+- Store a proxy command as a template where `{server}` stands for the server address. Store `null` for an unchanged built-in command. Save a command of the user's own exactly as written, and ask for the server address only when the command names it.
+- Ask before an action that cannot be undone, in the place where the user started it.
 - Treat proxy clients as apps to open, with no running state. Start selected opens the marked ones. Stop selected leaves them open.
 - Run the proxy server on standard threads in `src-tauri/src/proxy/server.rs`. Admit only the local network when the allow list is empty. Refuse targets on the server's own machine.
 - Keep the built-in client commands equal in `src/proxy.ts` and `src-tauri/src/proxy/apps.rs`. Launch a client from its saved id, and check the server address before it enters a command.

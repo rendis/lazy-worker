@@ -45,14 +45,18 @@ fn command(settings: &ProxySettings, id: &str) -> Result<String, &'static str> {
         .iter()
         .find(|app| app.id == id)
         .ok_or("proxyLaunchFailed")?;
-    if !valid_server(&settings.server) {
-        return Err("proxyServerInvalid");
-    }
     let template = app
         .command
         .clone()
         .or_else(|| built_in(id, app.variant))
         .ok_or("proxyLaunchFailed")?;
+    // A command of the user's own runs as written. Only one that names the server needs its address.
+    if !template.contains("{server}") {
+        return Ok(template);
+    }
+    if !valid_server(&settings.server) {
+        return Err("proxyServerInvalid");
+    }
     Ok(template.replace("{server}", &settings.server))
 }
 
@@ -324,5 +328,7 @@ mod tests {
         assert_eq!(command(&settings, "missing"), Err("proxyLaunchFailed"));
         settings.server = "studio.local".into();
         assert_eq!(command(&settings, "claude"), Err("proxyServerInvalid"));
+        settings.apps[1].command = Some("gemini --sandbox".into());
+        assert_eq!(command(&settings, "codex").unwrap(), "gemini --sandbox");
     }
 }
