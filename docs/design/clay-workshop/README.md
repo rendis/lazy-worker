@@ -16,6 +16,12 @@ Each episode explains one tool in seven to ten seconds. It shows the problem wit
 
 The idle ring stands for the chat's own timeout and compresses a 45-second idle interval. Chat presence depends on each platform. The job bar stands for any process Caffeinate waits for. The cloud stands for the internet. The sparkle, robot and brain stand for AI services in general, so the clip shows no brand.
 
+## Set up
+
+You need [Node.js](https://nodejs.org) 22.12 or newer and [FFmpeg](https://ffmpeg.org) on your `PATH`. The export script also uses `perl` and `awk`, which macOS and Linux include.
+
+There is nothing to install in this directory. Each command downloads HyperFrames 0.9.72 the first time it runs, so everyone renders with the same version. The cast, the workbench and the props are in [assets](assets), each with the record of how it was generated.
+
 ## Edit or reuse
 
 Run commands from this directory. Use `npm run dev` for the local timeline and `npm run check` to validate it. The [root timeline](index.html) plays the episodes one after another, because HyperFrames accepts one root file. Export one episode with `npm run export -- caffeinate`, using its ID in the root timeline. The [export script](export.sh) validates the timeline, renders the episode's span and writes every format:
