@@ -12,7 +12,7 @@
 - Crossfade the theme canvas layers and keep the Settings card geometry stable when its status text is translated.
 - Read the full macOS preferred-language list in native code because WebKit may expose only its first entry.
 - Read the running version through Tauri's app API. Use the configured bundle version in browser previews.
-- Register each module in `src/modules.ts` and mount its shared header so its help, status, timer, and quick-start switch stay consistent with Tools. Keep the timer slot reserved when idle so it can fade without moving the layout.
+- Register each module in `src/modules.ts` and mount its shared header so its help, status, timer, and quick-start switch stay consistent with Tools. Keep the timer slot reserved when idle so it can fade without moving the layout. Show a session of a day or more as days with hours and minutes, such as `28d 04:12`.
 - Give each module a help popover with one plain paragraph and its `-loop.mp4` clip and poster from `src/assets/clips`. The clay workshop export writes them there, because its renders folder stays out of git.
 - Lay out module settings as `.setting-row` lines with an icon, a label, and the control at the end. Use `.segments` for exclusive choices and `.switch` for on/off options.
 - Mark Quick start with the bolt switch only. Its hint states when the tool starts, based on the startup setting.

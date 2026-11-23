@@ -192,7 +192,8 @@ h1:focus { outline: none; }
   opacity: 1;
 }
 .session-timer {
-  inline-size: 8ch;
+  /* Wide enough for a session of weeks, such as "28d 04:12". */
+  inline-size: 9ch;
   color: var(--secondary);
   font-size: 13px;
   font-weight: 650;

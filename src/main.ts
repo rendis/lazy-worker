@@ -154,9 +154,13 @@ function errorMessage(error: unknown, fallback: Message): Message {
     ? error as Message : fallback;
 }
 
+/** Shows seconds under a day. From one day on, shows days with hours and minutes, so the width stays fixed. */
 function formatTime(seconds: number): string {
-  return [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60]
-    .map(part => String(part).padStart(2, "0")).join(":");
+  const pad = (part: number) => String(part).padStart(2, "0");
+  const days = Math.floor(seconds / 86_400);
+  const hours = Math.floor(seconds / 3600) % 24;
+  const minutes = Math.floor(seconds / 60) % 60;
+  return days > 0 ? `${days}d ${pad(hours)}:${pad(minutes)}` : `${pad(hours)}:${pad(minutes)}:${pad(seconds % 60)}`;
 }
 
 function setText(node: HTMLElement, text: string): void {
