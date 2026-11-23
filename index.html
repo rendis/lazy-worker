@@ -50,20 +50,16 @@
             <div id="tool-catalog" class="tool-catalog">
               <div class="catalog-heading" aria-hidden="true" hidden></div>
             </div>
-            <!-- A tool whose row opens more rows: its own row is the heading, and its arrow shows the rows under it. -->
-            <div class="tool-group">
-              <div id="ai-group-head">
-                <span class="tip tool-group-toggle-tip" data-tip-text="proxyClientsShow">
-                  <button type="button" class="tool-group-toggle" id="ai-group-toggle" aria-expanded="false" aria-controls="ai-group-body"
-                    data-label="proxyClientsShow" aria-label="Show the AI tools">
-                    <i data-lucide="chevron-down"></i>
-                  </button>
-                </span>
-              </div>
-              <div class="collapse" id="ai-group-body" inert>
-                <div class="tool-group-rows">
-                  <div id="ai-group-apps"></div>
-                </div>
+            <!-- A card that opens more rows shows them in a panel under the cards. -->
+            <span class="tip tool-group-toggle-tip" data-tip-text="proxyClientsShow">
+              <button type="button" class="tool-group-toggle" id="ai-group-toggle" aria-expanded="false" aria-controls="ai-group-body"
+                data-label="proxyClientsShow" aria-label="Show the AI tools">
+                <i data-lucide="chevron-down"></i>
+              </button>
+            </span>
+            <div class="collapse" id="ai-group-body" inert>
+              <div class="tool-group-rows">
+                <div id="ai-group-apps"></div>
               </div>
             </div>
           </section>
@@ -746,6 +742,9 @@
           <i data-lucide="power"></i>
         </button>
         <i class="tool-arrow" data-lucide="chevron-right"></i>
+        <span class="tip tool-pin-tip">
+          <button class="tool-pin" type="button" aria-pressed="false"><i data-lucide="pin"></i></button>
+        </span>
       </div>
     </template>
     <template id="tool-header-template">

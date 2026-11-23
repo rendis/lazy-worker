@@ -19,7 +19,7 @@ type Tool = {
   /** Sidebar entry, when the module sits under a broader section. */
   section?: { title: Message; icon: string };
   /** Tools row, when the module belongs to a group there. */
-  row?: { title: Message; group: string };
+  row?: { title: Message; group?: string };
 };
 
 export const tools: readonly Tool[] = [
@@ -35,7 +35,7 @@ export const tools: readonly Tool[] = [
     id: "proxy", title: "proxy", description: "proxyDescription", icon: "server",
     help: { text: "proxyExplanation", clip: { video: proxyClip, poster: proxyPoster, label: "proxyClip" } },
     section: { title: "ai", icon: "sparkles" },
-    row: { title: "aiProxy", group: "ai-group-head" },
+    row: { title: "aiProxy" },
   },
 ];
 
@@ -135,7 +135,10 @@ function mountTool(tool: Tool, navigation: HTMLElement, catalog: HTMLElement): H
   row.querySelector<HTMLElement>(".tool-icon")!.dataset.lucide = tool.icon;
   mountStatus(row.querySelector<HTMLElement>("[data-tool-status]")!, tool.id);
   label(rowTitle, tool.row?.title ?? tool.title);
-  (tool.row ? document.getElementById(tool.row.group)! : catalog).append(row);
+  (tool.row?.group ? document.getElementById(tool.row.group)! : catalog).append(row);
+  const pin = row.querySelector<HTMLButtonElement>(".tool-pin")!;
+  pin.dataset.toolPin = tool.id;
+  pin.setAttribute("aria-labelledby", rowTitle.id);
 
   const header = instantiate("tool-header-template");
   const heading = header.querySelector("h1")!;
@@ -203,21 +206,66 @@ export function updateQuickStartMode(mode: "start" | "stop" | "mixed"): void {
   }
 }
 
-export function mountTools(): (quickStart: Preferences["quickStart"]) => void {
+const pinsKey = "lazy-worker-pinned-tools";
+
+/** The tools the user pinned, in the order they were pinned. */
+function readPins(): ToolId[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem(pinsKey) ?? "[]");
+    return Array.isArray(saved) ? saved.filter((id): id is ToolId => tools.some(tool => tool.id === id)) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function mountTools(): (translate: (message: Message) => string) => void {
   const navigation = document.getElementById("tool-navigation")!;
   const catalog = document.getElementById("tool-catalog")!;
   const rows = tools.map(tool => ({ tool, id: tool.id, row: mountTool(tool, navigation, catalog) }))
-    .filter(({ tool }) => !tool.row);
+    .filter(({ tool }) => !tool.row?.group);
   let currentOrder = rows;
+  let pins = readPins();
+  let translate: ((message: Message) => string) | undefined;
 
-  function updateToolOrder(quickStart: Preferences["quickStart"]): void {
-    const order = [...rows].sort((a, b) => Number(quickStart[b.id]) - Number(quickStart[a.id]));
+  function renderPins(): void {
+    for (const { id, row } of rows) {
+      const pinned = pins.includes(id);
+      const button = row.querySelector<HTMLButtonElement>(".tool-pin")!;
+      button.setAttribute("aria-pressed", String(pinned));
+      row.toggleAttribute("data-pinned", pinned);
+      if (translate) {
+        const tip = translate(pinned ? "unpinTool" : "pinTool");
+        button.parentElement!.dataset.tip = tip;
+        button.setAttribute("aria-label", tip);
+      }
+    }
+  }
+
+  for (const { id, row } of rows) {
+    row.querySelector(".tool-pin")!.addEventListener("click", () => {
+      pins = pins.includes(id) ? pins.filter(pinned => pinned !== id) : [...pins, id];
+      try {
+        localStorage.setItem(pinsKey, JSON.stringify(pins));
+      } catch {
+        // Without storage, the pin lasts until the panel reloads.
+      }
+      renderPins();
+      reorder();
+    });
+  }
+
+  /** Pinned tools come first, in the order they were pinned. The others keep their own order. */
+  function reorder(): void {
+    const order = [...rows].sort((a, b) => {
+      const pa = pins.indexOf(a.id), pb = pins.indexOf(b.id);
+      return (pa < 0 ? Infinity : pa) - (pb < 0 ? Infinity : pb) || rows.indexOf(a) - rows.indexOf(b);
+    });
     if (order.every((entry, index) => entry === currentOrder[index])) return;
     currentOrder = order;
 
     const animate = !reducedMotion.matches && !catalog.closest("[hidden]");
     // Use the current on-screen positions when reversing a move in progress.
-    const startingTops = animate ? order.map(({ row }) => row.getBoundingClientRect().top) : [];
+    const starting = animate ? order.map(({ row }) => row.getBoundingClientRect()) : [];
     const focused = document.activeElement;
     let previous = catalog.firstElementChild!;
     for (const { row } of order) {
@@ -230,15 +278,23 @@ export function mountTools(): (quickStart: Preferences["quickStart"]) => void {
     }
 
     if (!animate) return;
-    const offsets = order.map(({ row }, index) => startingTops[index] - row.getBoundingClientRect().top);
+    // Each card glides from its old place to its new one, across rows and columns.
     for (const [index, { row }] of order.entries()) {
-      const offset = offsets[index];
-      if (!offset || !row.animate) continue;
+      const now = row.getBoundingClientRect();
+      const x = starting[index].left - now.left;
+      const y = starting[index].top - now.top;
+      if ((!x && !y) || !row.animate) continue;
       rowAnimations.set(row, row.animate([
-        { transform: `translateY(${offset}px)` },
-        { transform: "translateY(0)" },
-      ], { duration: 260, easing: "cubic-bezier(.22, .7, .36, 1)" }));
+        { transform: `translate(${x}px, ${y}px)` },
+        { transform: "translate(0, 0)" },
+      ], { duration: 320, easing: "cubic-bezier(.22, .7, .36, 1)" }));
     }
+  }
+
+  function updateToolOrder(next: (message: Message) => string): void {
+    translate = next;
+    renderPins();
+    reorder();
   }
 
   const views = document.querySelectorAll<HTMLElement>("[data-module-view]");

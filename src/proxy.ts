@@ -127,9 +127,9 @@ export function mountProxy(host: Host) {
   const groupBody = element("ai-group-body");
   const groupApps = element("ai-group-apps");
   // The proxy's own row heads the group. Its arrow takes the place of the row's arrow to the module.
-  const groupHead = element("ai-group-head");
+  const groupHead = document.querySelector<HTMLElement>('#tool-catalog [data-tool-power="proxy"]')!.closest<HTMLElement>(".tool-row")!;
   const groupToggleTip = groupToggle.parentElement!;
-  groupHead.querySelector(".tool-row .tool-arrow")?.replaceWith(groupToggleTip);
+  groupHead.querySelector(".tool-arrow")?.replaceWith(groupToggleTip);
 
   let settings: ProxySettings | undefined;
   let running = false;

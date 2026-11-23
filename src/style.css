@@ -1223,9 +1223,12 @@ h1:focus { outline: none; }
   background: var(--dial-bottom);
   box-shadow: var(--action-press-shadow);
 }
+/* Tools stand as compact cards, three to a row, so the list grows sideways before it grows down. */
 .tool-catalog {
-  margin-top: 14px;
-  border-top: 1px solid var(--hairline);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
 }
 .tool-row {
   position: relative;
@@ -1884,3 +1887,54 @@ h1:focus { outline: none; }
 #caffeinate-copy .lucide:last-child { position: absolute; opacity: 0; transform: scale(.7); color: var(--online); }
 #caffeinate-copy[data-copied] .lucide:first-child { opacity: 0; transform: scale(.7); }
 #caffeinate-copy[data-copied] .lucide:last-child { opacity: 1; transform: none; }
+
+/* A card: its name and pin on top, its status in the middle, Quick start and power at the bottom. */
+.tool-catalog > .tool-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "name name pin"
+    "status status status"
+    "include arrow power";
+  align-items: center;
+  gap: 10px 8px;
+  min-height: 0;
+  padding: 14px 14px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--glass);
+  box-shadow: inset 0 1px 0 var(--light-edge);
+  transition: border-color .2s ease, background-color .2s ease;
+}
+.tool-catalog > .tool-row:hover { border-color: var(--secondary); background: var(--glass); }
+.tool-catalog > .tool-row .tool-name { grid-area: name; font-size: 15px; }
+.tool-catalog > .tool-row .status { grid-area: status; justify-self: start; }
+.tool-catalog > .tool-row .catalog-switch { grid-area: include; justify-self: start; }
+.tool-catalog > .tool-row .catalog-power { grid-area: power; }
+.tool-catalog > .tool-row .tool-arrow { display: none; }
+.tool-catalog > .tool-row .tool-group-toggle-tip { grid-area: arrow; }
+.tool-catalog > .tool-row[data-pinned] { border-color: var(--choice); }
+
+.tool-pin-tip { grid-area: pin; position: relative; z-index: 2; margin: -6px -6px 0 0; }
+.tool-pin {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--secondary);
+  opacity: .55;
+  transition: opacity .16s ease, color .16s ease, background-color .16s ease, transform var(--selection-duration) var(--selection-easing);
+}
+.tool-pin .lucide { width: 15px; height: 15px; }
+.tool-row:hover .tool-pin, .tool-pin:focus-visible { opacity: 1; }
+.tool-pin:hover { background: var(--glass); color: var(--text); }
+.tool-pin[aria-pressed="true"] { opacity: 1; color: var(--choice); transform: rotate(-35deg); }
+.tool-pin-tip[data-tip]::after { right: -4px; }
+.tool-group-rows .tool-pin-tip, #tool-catalog ~ * .tool-pin-tip { display: none; }
+
+/* The AI tools of the proxy card open as one panel under the cards. */
+#ai-group-body { margin-top: 8px; }
+#ai-group-body .tool-group-rows { margin-inline-start: 0; padding-inline-start: 0; border-inline-start: 0; }

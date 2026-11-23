@@ -2,7 +2,7 @@ import "./style.css";
 import {
   Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronDown, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
   Cpu, createIcons, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Infinity as InfinityIcon, Info, Laptop, LaptopMinimal, LayoutGrid, Link, LockKeyhole, LockKeyholeOpen,
-  Maximize2, Megaphone, MessageSquare, Monitor, Moon, MousePointer2, Pencil, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
+  Maximize2, Megaphone, MessageSquare, Monitor, Moon, MousePointer2, Pencil, Pin, PinOff, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
   Shield, Sparkles, Square, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserRound, X, Zap,
 } from "lucide";
 import { mountCaffeinateForm } from "./caffeinate-form";
@@ -31,7 +31,7 @@ function renderIcons(): void {
     icons: {
       Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronDown, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
       Cpu, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Infinity: InfinityIcon, Info, Laptop, LaptopMinimal, LayoutGrid, Link, LockKeyhole, LockKeyholeOpen,
-      Maximize2, Megaphone, MessageSquare, Monitor, Moon, MousePointer2, Pencil, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server,
+      Maximize2, Megaphone, MessageSquare, Monitor, Moon, MousePointer2, Pencil, Pin, PinOff, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server,
       Settings, Shield, Sparkles, Square, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserRound, X, Zap,
     },
     attrs: { "aria-hidden": "true", "stroke-width": 1.75 },
@@ -524,7 +524,7 @@ function renderControls(): void {
   }
   for (const hint of quickStartHints) setAttribute(hint, "data-quick-start-hint", quickStartHint());
   proxy.render(preferences.proxy, preferences.quickStart.proxy, statuses.proxy.mode !== "off", loaded);
-  updateToolOrder(preferences.quickStart);
+  updateToolOrder(translate);
   if (!workerAction?.keepQuickStartLayout) {
     const canStartSelected = !unavailable &&
       (tools.some(({ id }) => preferences.quickStart[id] && canChangeTool(id, true)) || proxy.hasQuickStart());
