@@ -1,7 +1,7 @@
 import "./style.css";
 import {
   Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
-  Cpu, createIcons, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Infinity as InfinityIcon, Info, Laptop, LaptopMinimal, LayoutGrid, Link, LockKeyhole,
+  Cpu, createIcons, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Infinity as InfinityIcon, Info, Laptop, LaptopMinimal, LayoutGrid, Link, LockKeyhole, LockKeyholeOpen,
   Maximize2, Megaphone, MessageSquare, Monitor, Moon, MousePointer2, Pencil, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
   Shield, Sparkles, Square, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserRound, X, Zap,
 } from "lucide";
@@ -30,7 +30,7 @@ function renderIcons(): void {
   createIcons({
     icons: {
       Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
-      Cpu, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Infinity: InfinityIcon, Info, Laptop, LaptopMinimal, LayoutGrid, Link, LockKeyhole,
+      Cpu, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Infinity: InfinityIcon, Info, Laptop, LaptopMinimal, LayoutGrid, Link, LockKeyhole, LockKeyholeOpen,
       Maximize2, Megaphone, MessageSquare, Monitor, Moon, MousePointer2, Pencil, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server,
       Settings, Shield, Sparkles, Square, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserRound, X, Zap,
     },
@@ -301,6 +301,7 @@ function renderFeedback(): void {
   const unsupported = accessibility === "unsupported";
   const permissionPending = desktop.macApp && accessibility === "required";
   settingsPreferences.toggleAttribute("data-permission-pending", permissionPending);
+  settingsPreferences.toggleAttribute("data-permission-granted", desktop.macApp && accessibility === "granted");
   settingsPermissionDot.hidden = !permissionPending;
   settingsPermissionState.hidden = !permissionPending;
   permissionFeatures.hidden = !permissionPending;

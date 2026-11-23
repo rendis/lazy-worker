@@ -106,13 +106,12 @@ export function mountUpdateNotice({ translate, setNoticeOpen, beforeRestart, mov
 
   async function apply(): Promise<void> {
     if (installing || version === null) return;
-    const chosen = version;
     installing = true;
     failed = false;
     render();
     try {
       await beforeRestart();
-      await desktop.restartToUpdate(chosen);
+      await desktop.restartToUpdate();
     } catch (error) {
       installing = false;
       if (error === "updateChanged") await refresh();

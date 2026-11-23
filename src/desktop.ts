@@ -364,8 +364,9 @@ export const desktop = {
   async onAvailableUpdate(refresh: () => void): Promise<void> {
     if (macApp) await listen("available-update-changed", refresh);
   },
-  async restartToUpdate(version: string): Promise<void> {
-    if (macApp) await invoke("restart_to_update", { version });
+  /** Installs the latest release, which can be newer than the one the notice named, and restarts. */
+  async restartToUpdate(): Promise<void> {
+    if (macApp) await invoke("restart_to_update");
   },
   onFocus(refresh: () => void): void {
     if (native) {

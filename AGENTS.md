@@ -28,6 +28,7 @@
 - Keep the built-in client commands equal in `src/proxy.ts` and `src-tauri/src/proxy/apps.rs`. Launch a client from its saved id, and check the server address before it enters a command.
 - Keep the element of a rendered list row and update it in place, so its switch, selector, and disclosure can animate. Rebuild a row only when its name, icon, or language changes. Open a new row and close a removed one over a short time, so the rows under it move instead of jumping.
 - Open and close content through `.collapse` with `data-open` and `inert`. Keep `hidden` for content that swaps with other content.
+- Give a closed popover no height. A hidden element that keeps its size still adds to the scroll area of its view.
 - Style every scroll bar through the shared `::-webkit-scrollbar` rules, thin and in the line color. Keep the space of the main scroll bar reserved, so content does not shift when it appears.
 - Keep every image a file under `src/assets`. The content policy allows no `data:` images, so Vite must not inline assets.
 - Show the brand mark of a built-in proxy tool from `src/assets/brands`. The marks come from Simple Icons. To offer a new brand in the icon picker, add its file there and its name to `brandNames` in `src/proxy.ts`.
@@ -63,6 +64,7 @@
 
 - For signing, Accessibility after an update, or release automation, follow [issue #1](https://github.com/rendis/lazy-worker/issues/1). Describe test platforms by architecture and macOS version.
 - Set `APPLE_SIGNING_IDENTITY` to the Developer ID Application identity for release builds. Verify the app and its Activity helper against that certificate in both architecture bundles.
+- Check for a newer release again right before an update installs, so one restart reaches the latest version. Show the changes of every version between the one the user had and the one that runs.
 - Run every update check through `check` in `src-tauri/src/updates.rs`, so the time of the last check in Settings stays true. A release needs a few minutes to reach the update address, so keep the automatic checks frequent.
 - Add the changes of a release to `src/changelog.ts` before the release, in English and Spanish, for a user who is not technical. Give a change that adds a tool its `tool`. The release command stops without that entry.
 - Set the theme in `public/boot.js`, which runs before the first paint, and show the brand mark while the panel loads. The app saves the chosen theme for that script.

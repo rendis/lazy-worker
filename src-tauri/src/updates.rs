@@ -106,19 +106,17 @@ pub async fn check_for_update(app: AppHandle) -> Result<UpdateStatus, &'static s
 }
 
 #[tauri::command]
-pub async fn restart_to_update(app: AppHandle, version: String) -> Result<(), &'static str> {
+pub async fn restart_to_update(app: AppHandle) -> Result<(), &'static str> {
+    // A newer release can appear after the app found this one. Look again first, so one restart reaches the latest.
+    // Without an answer, for example with no network, the update the app already found is installed.
+    let _ = check(&app).await;
     let state = app.state::<Mutex<Updates>>();
     let mut update = {
         let mut state = state.lock().map_err(|_| "updateFailed")?;
         if state.installing {
             return Err("updateFailed");
         }
-        let update = state
-            .available
-            .as_ref()
-            .filter(|update| update.version == version)
-            .ok_or("updateChanged")?
-            .clone();
+        let update = state.available.as_ref().ok_or("updateChanged")?.clone();
         state.installing = true;
         update
     };
