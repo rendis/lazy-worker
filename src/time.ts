@@ -57,3 +57,17 @@ export function formatMoment(epochSeconds: number, locale: string, now = new Dat
     ? moment.toLocaleTimeString(locale, { hour12: false })
     : moment.toLocaleString(locale, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
 }
+
+/**
+ * A time of day that is still to come or just passed, such as when a shell ends or an action runs next:
+ * the time alone when it falls today, and the date with the time otherwise. Its longest text has 12 characters.
+ * `now` exists for tests.
+ */
+export function formatClock(epochSeconds: number, locale: string, now = new Date()): string {
+  const moment = new Date(epochSeconds * 1000);
+  const today = moment.getFullYear() === now.getFullYear() && moment.getMonth() === now.getMonth() &&
+    moment.getDate() === now.getDate();
+  return today
+    ? moment.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hour12: false })
+    : moment.toLocaleString(locale, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+}

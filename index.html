@@ -22,6 +22,10 @@
         </nav>
         <span id="tool-running-description" data-text="toolRunning" hidden>Running</span>
 
+        <button class="nav-button devices-button" type="button" data-view="devices">
+          <i data-lucide="monitor-smartphone"></i><span data-text="devices">Devices</span>
+        </button>
+
         <button id="settings-button" class="nav-button settings-button" type="button" data-view="settings">
           <i data-lucide="settings"></i><span data-text="settings">Settings</span>
           <span class="settings-permission-dot" id="settings-permission-dot" aria-hidden="true" hidden></span>
@@ -388,6 +392,19 @@
               </form>
             </div>
           </section>
+        </div>
+
+        <div data-module-view="devices" hidden>
+          <header class="module-header devices-header">
+            <h1 data-text="devices" tabindex="-1">Devices</h1>
+            <span class="tip" id="add-device-tip">
+              <button class="add-device-button" id="add-device" type="button">
+                <i data-lucide="plus"></i><span data-text="addDevice">Add device</span>
+              </button>
+            </span>
+            <p class="module-description" data-text="devicesDescription">This device and the ones you control from here.</p>
+          </header>
+          <div class="device-list" id="device-list"></div>
         </div>
 
         <div data-module-view="settings" hidden>

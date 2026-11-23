@@ -21,6 +21,7 @@
 - Mark Quick start with the bolt switch only. Its hint states when the tool starts, based on the startup setting.
 - Give a module that sits under a broader sidebar section a `section` in `src/modules.ts`, and a `row` when its Tools row belongs to a group. A tool whose row opens more rows heads its group with its own row, so its status shows while the group is closed.
 - Send every webview call through the `dispatch` command in `src-tauri/src/dispatch.rs`. Add a `Request` variant and declare its access in `access`, which has no default arm. Keep a setting that stores a command to run, an address list, or a permission Local-only. Take the origin from the window label, never from request data.
+- Keep the Devices view in `src/devices.ts`. It is not a tool, so it has no entry in `src/modules.ts`. Set every name and text it shows as text, because other devices will send them. Natively show only what is real, and keep the sample list in the browser preview in `src/desktop.ts`.
 - Keep proxy logic in `src/proxy.ts` and reach the system only through `desktop`. Give each `desktop` proxy call a browser-preview result.
 - Store a proxy command as a template where `{server}` stands for the server address. Store `null` for an unchanged built-in command. Save a command of the user's own exactly as written, and ask for the server address only when the command names it.
 - Ask before an action that cannot be undone, in the place where the user started it.

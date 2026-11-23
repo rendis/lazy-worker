@@ -1,0 +1,151 @@
+/* The Devices view. A device is a row that opens into its details. */
+.devices-button { margin-top: 5px; }
+.add-device-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 640;
+  transition: background-color .16s ease;
+}
+.add-device-button:hover:enabled { background: var(--glass); }
+.add-device-button .lucide { width: 16px; height: 16px; }
+.device-list {
+  --catalog-power-size: 34px;
+  margin-top: 18px;
+  border-top: 1px solid var(--hairline);
+}
+.device { border-bottom: 1px solid var(--hairline); }
+.device-head, .section-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 4px;
+}
+.device-head { min-height: 58px; }
+.section-head { min-height: 46px; gap: 10px; }
+.device-head:hover, .section-head:hover { background: var(--glass); }
+/* The toggle covers the row. The row's own buttons sit above it. */
+.device-toggle { position: absolute; z-index: 1; inset: 0; border: 0; border-radius: inherit; background: transparent; }
+.device-toggle:focus-visible { outline-offset: -3px; }
+.device-head .tip, .section-head .tip { position: relative; z-index: 2; }
+.device-kind.lucide { flex: none; width: 20px; height: 20px; color: var(--secondary); }
+.device-name { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; font-size: 16px; }
+.device-name strong { min-width: 0; overflow-wrap: anywhere; font-weight: 700; }
+.device-badge {
+  flex: none;
+  padding: 2px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--glass);
+  color: var(--secondary);
+  font-size: 12.5px;
+  font-weight: 640;
+}
+.device-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--secondary);
+  font-size: 13px;
+  font-weight: 640;
+  white-space: nowrap;
+}
+.device-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: .5; }
+.device-state[data-on] { color: var(--text); }
+.device-state[data-on]::before { background: var(--online); opacity: 1; }
+.device-chevron.lucide { flex: none; width: 16px; height: 16px; color: var(--secondary); transition: transform var(--selection-duration) var(--selection-easing); }
+:is(.device-head, .section-head)[data-open] .device-chevron { transform: rotate(90deg); }
+.section-head .device-chevron { order: -1; }
+
+.device-body { margin-inline-start: 13px; }
+.device-body[data-remote] { padding-inline-start: 14px; border-inline-start: 1px solid var(--hairline); }
+.device-section { border-bottom: 1px solid var(--hairline); }
+.device-section:last-child { border-bottom: 0; }
+.section-title { font-size: 15px; font-weight: 680; }
+.section-summary { margin-inline-start: auto; color: var(--secondary); font-size: 13.5px; font-weight: 620; white-space: nowrap; }
+.device-offline { padding: 12px 2px; }
+
+.device-end { display: flex; align-items: center; gap: 10px; }
+.device-subhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 46px; padding: 0 2px; border-bottom: 1px solid var(--hairline); }
+.device-subhead h3 { margin: 0; font-size: 14.5px; font-weight: 680; }
+.device-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 6px 2px;
+  border-bottom: 1px solid var(--hairline);
+}
+.device-row-text { display: grid; flex: 1; gap: 1px; min-width: 0; }
+.device-row-text strong { font-size: 14.5px; overflow-wrap: anywhere; }
+.device-row > .lucide:last-child:not(.device-kind) { flex: none; width: 16px; height: 16px; color: var(--secondary); }
+.device-row .tool-name { flex: 1; }
+.device-row .tool-name .tool-icon { flex: none; }
+.device-row .status { min-inline-size: 5.5rem; }
+.device-row .device-state { min-inline-size: 6rem; }
+.action-icon, .app-icon { display: grid; flex: none; place-items: center; width: 26px; height: 26px; }
+.action-icon .lucide { width: 22px; height: 22px; color: var(--secondary); }
+.app-icon { overflow: hidden; border-radius: 7px; }
+.app-icon img { display: block; width: 100%; height: 100%; }
+.app-icon .lucide { width: 20px; height: 20px; color: var(--secondary); }
+
+.permission-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.permission-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--secondary);
+  font-size: 13px;
+  font-weight: 640;
+}
+.permission-chip[data-on] { border-color: transparent; background: var(--choice); color: var(--choice-ink); }
+.permission-chip .lucide { width: 14px; height: 14px; }
+
+.icon-button.outlined { border: 1px solid var(--line); }
+.round-button {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text);
+  transition: background-color .16s ease;
+}
+.round-button:hover:enabled { background: var(--glass); }
+.round-button .lucide { width: 15px; height: 15px; }
+
+.device-more {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 46px;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--control-accent);
+  font-size: 14.5px;
+  font-weight: 640;
+  text-align: start;
+}
+.device-more .lucide { margin-inline-start: auto; width: 16px; height: 16px; color: var(--secondary); }
+.device-body > .collapse .setting-note { padding: 10px 2px; }
+.device-cut-tip { display: flex; width: 100%; }
+.device-cut { flex: 1; border-width: 0; background: transparent; color: var(--control-accent); text-align: start; }
+.device-cut .lucide { color: inherit; }
+.device-cut .setting-label { font-size: 14.5px; }
+.device-cut:disabled { opacity: .45; }
+.collapse[data-settle]:not([data-settled]) > * { overflow: hidden; }

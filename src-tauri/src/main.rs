@@ -2,6 +2,7 @@
 
 mod activity;
 mod caffeinate;
+mod devices;
 mod dispatch;
 mod lid;
 mod preferences;

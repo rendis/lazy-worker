@@ -1,11 +1,12 @@
 import "./style.css";
 import {
   Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronDown, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
-  Cpu, createIcons, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Infinity as InfinityIcon, Info, Laptop, LaptopMinimal, LayoutGrid, Link, LockKeyhole, LockKeyholeOpen,
-  Maximize2, Megaphone, MessageSquare, Monitor, Moon, MousePointer2, Pencil, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
-  Shield, Sparkles, Square, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserRound, X, Zap,
+  Cpu, createIcons, Database, ExternalLink, EyeOff, Globe, Hand, Hash, Hourglass, Infinity as InfinityIcon, Info, Laptop, LaptopMinimal, LayoutGrid, Link, List, LockKeyhole, LockKeyholeOpen,
+  Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, Moon, MousePointer2, Pencil, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
+  Shield, ShieldCheck, Sparkles, Square, SquareArrowOutUpRight, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserMinus, UserRound, X, Zap,
 } from "lucide";
 import { mountCaffeinateForm } from "./caffeinate-form";
+import { mountDevices } from "./devices";
 import {
   defaults, desktop, offStatus, type ActivityAccessibility, type LidMode, type LidStatus, type CaffeinateSettings, type Duration, type Preferences,
   type ProxySettings, type Statuses, type Theme,
@@ -30,9 +31,9 @@ function renderIcons(): void {
   createIcons({
     icons: {
       Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronDown, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
-      Cpu, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Infinity: InfinityIcon, Info, Laptop, LaptopMinimal, LayoutGrid, Link, LockKeyhole, LockKeyholeOpen,
-      Maximize2, Megaphone, MessageSquare, Monitor, Moon, MousePointer2, Pencil, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server,
-      Settings, Shield, Sparkles, Square, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserRound, X, Zap,
+      Cpu, Database, ExternalLink, EyeOff, Globe, Hand, Hash, Hourglass, Infinity: InfinityIcon, Info, Laptop, LaptopMinimal, LayoutGrid, Link, List, LockKeyhole, LockKeyholeOpen,
+      Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, Moon, MousePointer2, Pencil, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server,
+      Settings, Shield, ShieldCheck, Sparkles, Square, SquareArrowOutUpRight, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserMinus, UserRound, X, Zap,
     },
     attrs: { "aria-hidden": "true", "stroke-width": 1.75 },
   });
@@ -98,7 +99,7 @@ element("settings-presentation").hidden = !desktop.showPresentationPrivacy;
 element("login-launch-setting").hidden = !desktop.macApp;
 
 type ActivityMode = "duration" | "schedule";
-type FeedbackTarget = ToolId | "tools" | "settings";
+type FeedbackTarget = ToolId | "tools" | "settings" | "devices";
 type FeedbackLine = { message: Message; tool?: ToolId };
 type PreferenceChoice = "duration" | "language" | "theme" | "hideWhileSharing" | "startToolsOnLaunch" | "seenVersion";
 type PreferenceChange = {
@@ -297,6 +298,8 @@ const proxy = mountProxy({
   refreshIcons: renderIcons,
 });
 
+const devices = mountDevices({ translate, language: preferredLanguage, refreshIcons: renderIcons });
+
 function renderFeedback(): void {
   const unsupported = accessibility === "unsupported";
   const permissionPending = desktop.macApp && accessibility === "required";
@@ -321,7 +324,7 @@ function renderFeedback(): void {
   const explicit = feedback[target];
   const applying = workerAction?.running && workerAction.target === target;
   const message = applying ? undefined
-    : explicit ?? (target !== "tools" && target !== "settings" ? toolError(target) : undefined);
+    : explicit ?? (target !== "tools" && target !== "settings" && target !== "devices" ? toolError(target) : undefined);
   const toolActionFailure = !applying && target === "tools" && !explicit && toolFailures.length > 0;
   const lines: FeedbackLine[] = toolActionFailure ? [...toolFailures] : message ? [{ message }] : [];
   if (accessibilityRequestIssue === target) lines.push({ message: "accessibilityRequestFailed" });
@@ -524,6 +527,7 @@ function renderControls(): void {
   }
   for (const hint of quickStartHints) setAttribute(hint, "data-quick-start-hint", quickStartHint());
   proxy.render(preferences.proxy, preferences.quickStart.proxy, statuses.proxy.mode !== "off", loaded);
+  devices.render();
   updateToolOrder(preferences.quickStart);
   if (!workerAction?.keepQuickStartLayout) {
     const canStartSelected = !unavailable &&
@@ -1111,6 +1115,7 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-view]")
       refreshPermissions();
       void updateLoginLaunch();
     }
+    if (button.dataset.view === "devices") void devices.refresh();
   });
 }
 async function refreshSystemLanguage(): Promise<void> {
@@ -1124,6 +1129,7 @@ systemAppearance.addEventListener("change", () => renderTheme(true));
 window.addEventListener("languagechange", () => { void refreshSystemLanguage(); });
 desktop.onFocus(() => {
   proxy.refresh();
+  if (activeView().dataset.moduleView === "devices") void devices.refresh();
   refreshPermissions();
   void refreshLid();
   if (activeView().dataset.moduleView === "settings") void updateLoginLaunch();
@@ -1154,6 +1160,7 @@ async function initialize(): Promise<void> {
     feedback.tools = "saveFailed";
   }
   renderPreferences();
+  void devices.refresh();
   void refreshLid();
   runningVersion = await desktop.getVersion().catch(() => undefined);
   if (await desktop.getFirstRun().catch(() => false)) onboarding.open();

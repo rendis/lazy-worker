@@ -5,6 +5,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { version as previewVersion } from "../src-tauri/tauri.conf.json";
 import type { Language } from "./messages";
 import type { ToolId } from "./modules";
+import claudeIcon from "./assets/apps/claude.svg";
+import notesIcon from "./assets/apps/notes.svg";
+import safariIcon from "./assets/apps/safari.svg";
 
 export type Theme = "system" | "light" | "dark";
 export type Duration = "minutes15" | "minutes30" | "hour" | "untilStopped";
@@ -72,6 +75,57 @@ export type Status = {
 };
 export type Statuses = Record<ToolId, Status>;
 export type ActivityAccessibility = "granted" | "required" | "unsupported" | "unavailable";
+
+export type DeviceKind = "laptop" | "desktop";
+export type ControllerPermission = "control" | "applications" | "actions" | "shell";
+/** A device that may control this one. `lastAccess` is in seconds since the Unix epoch. */
+export type Controller = {
+  id: string;
+  name: string;
+  kind: DeviceKind;
+  lastAccess: number | null;
+  permissions: Record<ControllerPermission, boolean>;
+};
+/** `weekday` counts from 0 on Sunday. `time` is a time of day as `HH:MM`. */
+export type ActionSchedule =
+  | { every: "manual" }
+  | { every: "daily"; time: string }
+  | { every: "weekly"; weekday: number; time: string };
+/** A command saved on a device. Times are in seconds since the Unix epoch. */
+export type SavedAction = {
+  id: string;
+  name: string;
+  schedule: ActionSchedule;
+  lastRun: { time: number; ok: boolean } | null;
+  nextRun: number | null;
+};
+export type RemoteTool = { id: ToolId; running: boolean };
+/** `icon` is the address of an image file, or `null` for the generic icon. */
+export type RemoteApp = { id: string; name: string; icon: string | null; open: boolean };
+export type RemoteDevice = {
+  id: string;
+  name: string;
+  kind: DeviceKind;
+  online: boolean;
+  tools: RemoteTool[];
+  /** `pinned` holds the apps the user chose to see first. `total` and `open` count every app on the device. */
+  apps: { pinned: RemoteApp[]; total: number; open: number };
+  actions: SavedAction[];
+  /** The shell is on until this time, or `null` while it is off. Only that device can turn it on. */
+  shell: { until: number } | null;
+};
+export type DevicesOverview = {
+  thisDevice: {
+    /** Empty when the system gives no name. */
+    name: string;
+    kind: DeviceKind;
+    remoteAccess: "unknown" | "off" | "on";
+    pairing: "closed" | "open";
+    controllers: Controller[];
+    actions: SavedAction[];
+  };
+  devices: RemoteDevice[];
+};
 
 export const defaults: Preferences = {
   language: "system",
@@ -242,8 +296,63 @@ function updatePreviewCaffeinateSession(settings: CaffeinateSettings): void {
   });
 }
 
+/** The sample list a preview shows, so the whole Devices view can be checked. Times follow the clock. */
+function previewDevices(): DevicesOverview {
+  const now = Math.floor(Date.now() / 1000);
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(2, 0, 0, 0);
+  const shellEnd = new Date();
+  shellEnd.setHours(shellEnd.getHours() + 3, 0, 0, 0);
+  const backup: SavedAction = {
+    id: "backup", name: "Backup", schedule: { every: "daily", time: "02:00" },
+    lastRun: { time: now - 8 * 3600, ok: true }, nextRun: Math.floor(tomorrow.getTime() / 1000),
+  };
+  const docker: SavedAction = {
+    id: "docker", name: "Restart Docker", schedule: { every: "manual" }, lastRun: null, nextRun: null,
+  };
+  return {
+    thisDevice: {
+      name: "MacBook Pro", kind: "laptop", remoteAccess: "on", pairing: "closed",
+      controllers: [{
+        id: "studio", name: "iMac del estudio", kind: "desktop", lastAccess: now - 5 * 60,
+        permissions: { control: true, applications: true, actions: true, shell: false },
+      }],
+      actions: [
+        {
+          id: "xcode", name: "Clear the Xcode cache", schedule: { every: "weekly", weekday: 1, time: "09:00" },
+          lastRun: { time: now - 2 * 86400, ok: false }, nextRun: null,
+        },
+        { id: "downloads", name: "Clean downloads", schedule: { every: "manual" }, lastRun: null, nextRun: null },
+      ],
+    },
+    devices: [
+      {
+        id: "studio", name: "iMac del estudio", kind: "desktop", online: true,
+        tools: [{ id: "activity", running: true }, { id: "caffeinate", running: false }],
+        apps: {
+          total: 27, open: 2,
+          pinned: [
+            { id: "safari", name: "Safari", icon: safariIcon, open: true },
+            { id: "notes", name: "Notes", icon: notesIcon, open: false },
+            { id: "claude", name: "Claude", icon: claudeIcon, open: true },
+          ],
+        },
+        actions: [backup, docker],
+        shell: { until: Math.floor(shellEnd.getTime() / 1000) },
+      },
+      {
+        id: "old", name: "MacBook Air de la oficina con un nombre muy largo para probar el ajuste", kind: "laptop",
+        online: false, tools: [], apps: { pinned: [], total: 0, open: 0 }, actions: [], shell: null,
+      },
+    ],
+  };
+}
+
 export const desktop = {
   macApp,
+  /** True when the Devices view shows sample data, because no native app answers. */
+  sampleDevices: !native,
   showWindowTitlebar: !native || macApp,
   showUpdateCheck: !native || macApp,
   showPresentationPrivacy: !native || macApp,
@@ -381,6 +490,9 @@ export const desktop = {
         outcome: id % 7 === 6 ? "denied" : target.startsWith("localhost") ? "blocked" : "ok",
       };
     });
+  },
+  async getDevices(): Promise<DevicesOverview> {
+    return native ? call("getDevices") : previewDevices();
   },
   async detectProxyApps(): Promise<ProxyInstalls> {
     return native ? call("detectProxyApps") : { claudeCode: true, claudeApp: true, codexCode: false, codexApp: true };

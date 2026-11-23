@@ -58,9 +58,9 @@ type Host = {
   fail(message: Message): void;
   refreshIcons(): void;
 };
-type Child = Node | string | false | undefined;
+export type Child = Node | string | false | undefined;
 
-function h<K extends keyof HTMLElementTagNameMap>(
+export function h<K extends keyof HTMLElementTagNameMap>(
   tag: K, attributes: Record<string, string | boolean | undefined> = {}, ...children: Child[]
 ): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -72,7 +72,7 @@ function h<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-function icon(name: string): HTMLElement {
+export function icon(name: string): HTMLElement {
   return h("i", { "data-lucide": name });
 }
 

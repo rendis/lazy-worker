@@ -6,7 +6,7 @@
 use crate::{
     activity, caffeinate,
     caffeinate::CaffeinateSettings,
-    lid,
+    devices, lid,
     lid::LidMode,
     preferences::{Language, ManualDuration, Preferences, Schedule, Theme},
     proxy,
@@ -101,6 +101,7 @@ pub enum Request {
     GetProxyNetwork,
     GetProxyPeers,
     GetProxyLog,
+    GetDevices,
     DetectProxyApps,
     ListCaffeinateProcesses,
     CheckForUpdate,
@@ -174,7 +175,8 @@ impl Request {
                     Access::Control
                 }
             }
-            Self::SaveProxyApps { .. }
+            Self::GetDevices
+            | Self::SaveProxyApps { .. }
             | Self::SaveProxyAllowed { .. }
             | Self::RequestActivityAccessibility => Access::LocalOnly,
         }
@@ -268,6 +270,11 @@ async fn run(
         ),
         Request::GetProxyPeers => json(locked("workerUnavailable")?.proxy.peers()),
         Request::GetProxyLog => json(locked("workerUnavailable")?.proxy.log()),
+        Request::GetDevices => json(
+            tauri::async_runtime::spawn_blocking(devices::overview)
+                .await
+                .map_err(|_| "workerUnavailable")?,
+        ),
         Request::DetectProxyApps => json(
             tauri::async_runtime::spawn_blocking(proxy::detect)
                 .await
@@ -500,6 +507,15 @@ mod tests {
         assert_eq!(CONTROL.lid_prompt(false, false), Ok(false));
         assert_eq!(Origin::Local.lid_prompt(true, false), Ok(true));
         assert_eq!(Origin::Local.lid_prompt(false, false), Ok(false));
+    }
+
+    #[test]
+    fn device_management_is_local_only() {
+        let preferences = Preferences::default();
+        let devices = request(json!({"command": "getDevices"}));
+        assert_eq!(allowed(CONTROL, &devices, &preferences), Err("localOnly"));
+        assert_eq!(allowed(ACTIONS, &devices, &preferences), Err("localOnly"));
+        assert_eq!(allowed(Origin::Local, &devices, &preferences), Ok(()));
     }
 
     #[test]
