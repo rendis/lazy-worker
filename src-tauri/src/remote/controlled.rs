@@ -170,7 +170,6 @@ impl Store {
         Ok(result)
     }
 
-    #[cfg_attr(not(test), allow(dead_code))] // Used by the step that sends requests over ssh.
     pub fn get(&self, id: &str) -> Option<Controlled> {
         self.lock().devices.iter().find(|device| device.id == id).cloned()
     }

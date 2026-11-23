@@ -26,7 +26,6 @@ const SSH: &str = "/usr/bin/ssh";
 /// What the remote side runs. The words are fixed here and never come from the caller's text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RemoteCommand {
-    #[cfg_attr(not(test), allow(dead_code))] // Used by the step that sends requests over ssh.
     Dispatch,
     Pair,
 }
@@ -192,7 +191,6 @@ fn rejected_options(stderr: &str) -> Vec<String> {
 /// Writes our config file. The local ssh checks it first (`ssh -G`), and an option that it does
 /// not know is left out. Returns the names that were left out, in lowercase. A missing option
 /// that guards the rules is an error instead.
-#[cfg_attr(not(test), allow(dead_code))] // Used by the step that sends requests over ssh.
 pub fn write_config(layout: &Layout) -> Result<Vec<String>, &'static str> {
     write_profile(layout, Profile::Device)
 }
@@ -470,7 +468,7 @@ pub(super) fn execute(
 
 /// Runs a command built by this module and returns its stdout. The error is a code only. The
 /// text of stderr is never passed on.
-#[cfg_attr(not(test), allow(dead_code))] // Used by the step that sends requests over ssh.
+#[cfg_attr(not(test), allow(dead_code))] // Only tests run a one-shot call. Sessions go through `client`.
 pub fn run(command: Command, input: &[u8], timeout: Duration) -> Result<Vec<u8>, &'static str> {
     let done = execute(command, input, timeout)?;
     if done.timed_out {

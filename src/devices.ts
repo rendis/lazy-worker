@@ -2,17 +2,21 @@ import "./devices.css";
 import {
   desktop, type ActionSchedule, type Controller, type ControllerPermission, type DeviceKind, type DevicesOverview,
   type DiscoveredDevice, type ProxyNetwork, type RemoteApp, type RemoteDevice, type RemoteLogEntry, type RemoteTool, type SavedAction,
+  type Statuses,
 } from "./desktop";
 import guideImage13 from "./assets/guide/remote-login-13.png";
 import { messages, type Language, type Message } from "./messages";
 import { tools } from "./modules";
 import { h, icon, type Child } from "./proxy";
+import { isLinkError, isRefusal, refusal, type Session } from "./remote";
 import { age, formatClock, formatMoment, formatSession, type AgeUnit } from "./time";
 
 // Every name and text below comes from data that other devices will send, so it is only ever set as text.
 const openKey = "lazy-worker-devices-open";
 const appRows = 3;
 const closeDelay = 300;
+/** How often the tools of an open device are read, in milliseconds. */
+const toolPoll = 2000;
 const settleDelay = 260;
 const ageMessages: Record<Exclude<AgeUnit, "seconds">, Message> = {
   minutes: "minutesAgo", hours: "hoursAgo", days: "daysAgo",
@@ -105,6 +109,10 @@ export function mountDevices(host: Host) {
   let built = false;
   let sequence = 0;
   let shownLanguage: Language | undefined;
+  /** What the last read of each device's tools found. `error` is the code that ended the last read, if one did. */
+  const live = new Map<string, { tools: RemoteTool[]; error?: string; permissions?: Session["permissions"] }>();
+  const polling = new Set<string>();
+  let toolTicker: number | undefined;
 
   function isOpen(key: string, fallback = false): boolean {
     return opened[key] ?? fallback;
@@ -218,6 +226,8 @@ export function mountDevices(host: Host) {
       const open = !body.hasAttribute("data-open");
       remember(key, open);
       apply(open, true);
+      // An opened Tools section reads its device now. A closed one stops the reading.
+      watchTools(true);
     });
     head.prepend(toggle);
     return toggle;
@@ -1224,6 +1234,7 @@ export function mountDevices(host: Host) {
     addOverlay.close(false);
     pairOverlay.close(false);
     syncTicker();
+    watchTools();
     if (confirming) {
       confirming = undefined;
       render();
@@ -1240,7 +1251,78 @@ export function mountDevices(host: Host) {
     return { root: h("section", { class: "device-section" }, head, body), summary, rows };
   }
 
-  function toolRow(tool: RemoteTool): Row<RemoteTool> {
+  /** The tools of a device as the Devices view lists them, from the statuses that it sent. Tools it cannot run are left out. */
+  function listTools(statuses: Statuses): RemoteTool[] {
+    return tools.filter(({ id }) => statuses[id]?.supported).map(({ id }) => ({ id, running: statuses[id].mode !== "off" }));
+  }
+
+  /** Reads the tools of one device. A device that has a read in progress is skipped, so a slow link never piles requests up. */
+  async function readTools(id: string): Promise<void> {
+    if (polling.has(id)) return;
+    polling.add(id);
+    try {
+      const entry = live.get(id);
+      const found = listTools(await desktop.remoteStatuses(id));
+      live.set(id, { tools: found, permissions: entry?.permissions });
+      if (!entry?.permissions) {
+        void desktop.remoteSession(id).then(session => {
+          const current = live.get(id);
+          if (current) current.permissions = session.permissions;
+          render();
+        }).catch(() => {});
+      }
+    } catch (error) {
+      live.set(id, { ...live.get(id), tools: live.get(id)?.tools ?? [], error: typeof error === "string" ? error : "remoteFailed" });
+    } finally {
+      polling.delete(id);
+    }
+    render();
+  }
+
+  /** The devices whose Tools section the user can see now: the view, the device row, and the section are all open. */
+  function watchedDevices(): RemoteDevice[] {
+    if (deviceList.closest("[hidden]") || !overview) return [];
+    return overview.devices.filter(device =>
+      device.online !== false && isOpen(`r:${device.id}`) && isOpen(`r:${device.id}/tools`));
+  }
+
+  /** Starts or stops the reading of tools. It reads at once when it starts, and when `now` says so. */
+  function watchTools(now = false): void {
+    const wanted = watchedDevices();
+    if (wanted.length === 0) {
+      if (toolTicker !== undefined) window.clearInterval(toolTicker);
+      toolTicker = undefined;
+      return;
+    }
+    const starting = toolTicker === undefined;
+    toolTicker ??= window.setInterval(() => {
+      const current = watchedDevices();
+      if (current.length === 0) watchTools();
+      else for (const device of current) void readTools(device.id);
+    }, toolPoll);
+    if (starting || now) for (const device of wanted) void readTools(device.id);
+  }
+
+  /** Turns a tool of another device on or off. The device decides, and a refusal is shown in the section. */
+  async function changeTool(device: { id: string }, tool: RemoteTool): Promise<void> {
+    try {
+      const found = listTools(await desktop.remoteSetToolActive(device.id, tool.id, !tool.running));
+      live.set(device.id, { ...live.get(device.id), tools: found, error: undefined });
+    } catch (error) {
+      if (isRefusal(error) || isLinkError(error)) live.set(device.id, { ...live.get(device.id), tools: live.get(device.id)?.tools ?? [], error });
+      else host.fail(error);
+    }
+    render();
+  }
+
+  /** Why a tool of another device cannot be turned on or off from here, in the words of the interface. */
+  function toolReason(tool: RemoteTool, name: string, entry: ReturnType<typeof live.get>): string | undefined {
+    if (entry?.error && isLinkError(entry.error)) return t("remoteLost");
+    const reason = refusal("setToolActive", { tool: tool.id, active: !tool.running }, entry?.permissions);
+    return reason && fill(t(reason), { name });
+  }
+
+  function toolRow(device: { id: string; name: string }, tool: RemoteTool): Row<RemoteTool> {
     const definition = tools.find(({ id }) => id === tool.id)!;
     const name = t(definition.title);
     const status = h("span", { class: "status" });
@@ -1251,13 +1333,18 @@ export function mountDevices(host: Host) {
     const root = h("div", { class: "device-row" },
       h("span", { class: "tool-name" }, icon(definition.icon), h("strong", {}, name)), status, tip);
     root.querySelector(".tool-name > i")!.classList.add("tool-icon");
+    let latest = tool;
+    power.addEventListener("click", () => void changeTool(device, latest));
     return {
       root,
       update(current) {
+        latest = current;
         status.dataset.mode = current.running ? "manual" : "off";
         setText(status, t(current.running ? "manual" : "off"));
         setAttribute(power, "aria-checked", String(current.running));
-        setTip(tip, fill(t(current.running ? "toolPowerOff" : "toolPowerOn"), { tool: name }));
+        const reason = toolReason(current, device.name, live.get(device.id));
+        if (power.disabled !== (reason !== undefined)) power.disabled = reason !== undefined;
+        setTip(tip, reason ?? fill(t(current.running ? "toolPowerOff" : "toolPowerOn"), { tool: name }));
       },
     };
   }
@@ -1299,7 +1386,8 @@ export function mountDevices(host: Host) {
     const actionsSection = section(`${key}/actions`, "sectionActions");
     const shellSection = section(`${key}/shell`, "sectionShell");
 
-    const toolList = list<RemoteTool>(toolsSection.rows, tool => JSON.stringify([host.language(), tool.id]), toolRow);
+    const toolList = list<RemoteTool>(toolsSection.rows, tool => JSON.stringify([host.language(), tool.id, device.name]),
+      tool => toolRow(device, tool));
     const appHost = h("div", {});
     appsSection.rows.append(appHost);
     const appList = list<RemoteApp>(appHost, app => JSON.stringify([host.language(), app.name, app.icon]), appRow);
@@ -1323,11 +1411,13 @@ export function mountDevices(host: Host) {
       update(current: RemoteDevice): void {
         sections.hidden = current.online !== true;
         offline.hidden = current.online === true;
-        const known = current.tools.filter(tool => tools.some(({ id }) => id === tool.id));
+        const found = live.get(current.id);
+        const known = (found?.tools ?? current.tools).filter(tool => tools.some(({ id }) => id === tool.id));
         toolList.sync(known);
-        setText(toolsSection.summary, fill(t("deviceToolsSummary"), {
-          on: known.filter(tool => tool.running).length, total: known.length,
-        }));
+        // A device that refuses, or a link that fails, says so where the tools would count.
+        setText(toolsSection.summary, found?.error
+          ? (isLinkError(found.error) ? t("remoteLost") : fill(t(found.error as "localOnly"), { name: current.name }))
+          : fill(t("deviceToolsSummary"), { on: known.filter(tool => tool.running).length, total: known.length }));
 
         const shown = current.apps.pinned.slice(0, appRows);
         appList.sync(shown);
@@ -1362,6 +1452,9 @@ export function mountDevices(host: Host) {
     });
     const confirm = h("div", { class: "device-confirm", hidden: true },
       h("span", { class: "setting-note" }, t("forgetConfirm")), accept.root, cancel.root);
+    open.button.addEventListener("click", () => {
+      if (remote) void desktop.openRemoteWindow(remote.id).catch(error => host.fail(error));
+    });
     forget.button.addEventListener("click", () => {
       if (!remote) return;
       confirming = `forget:${remote.id}`;
@@ -1391,7 +1484,7 @@ export function mountDevices(host: Host) {
         confirm.hidden = !asking;
         state.toggleAttribute("data-on", device.online === true);
         setText(state, t(device.online === true ? "deviceOnline" : "deviceOffline"));
-        open.disable(device.online === true ? (desktop.sampleDevices ? undefined : t("notAvailableYet")) : t("deviceOfflineTip"), t("openInterface"));
+        open.disable(device.online === true ? undefined : t("deviceOfflineTip"), t("openInterface"));
         (content as ReturnType<typeof remoteBody>).update(device);
       },
     };
@@ -1418,6 +1511,7 @@ export function mountDevices(host: Host) {
       renderPairWindow();
     }
     syncTicker();
+    watchTools();
     if (built) {
       built = false;
       host.refreshIcons();

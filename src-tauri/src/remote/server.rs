@@ -13,6 +13,7 @@ use super::{
     peer_uid,
     peers::Peers,
     wire::{error_line, read_line, LineError, MAX_REQUEST_LINE},
+    SOCKET_PATH_MAX,
 };
 use crate::dispatch::{Origin, Permissions, Request};
 use serde::Deserialize;
@@ -66,8 +67,6 @@ const LIMITS: Limits = Limits {
     write: Duration::from_secs(10),
 };
 const MAX_RESPONSE: usize = 1024 * 1024;
-/// `sun_path` holds 104 bytes with its end mark on macOS.
-const SOCKET_PATH_MAX: usize = 103;
 
 /// Runs one request for an origin. The app runs the same dispatcher as the webview does.
 pub trait Handler: Send + Sync + 'static {
@@ -1122,5 +1121,113 @@ mod tests {
         setup.server.close_all();
         let mut reader = BufReader::new(stream);
         assert!(at_end(&mut reader));
+    }
+
+    /// A controller that reaches the app socket through the real helper, in this process.
+    fn controller(setup: &Setup, peer: &str) -> (crate::remote::client::Clients, Arc<AtomicUsize>) {
+        let opened = Arc::new(AtomicUsize::new(0));
+        let clients = crate::remote::client::Clients::with_limits(
+            crate::remote::client::testing::HelperTransport {
+                socket: setup.socket.clone(),
+                peer: peer.to_owned(),
+                opened: opened.clone(),
+            },
+            Duration::from_secs(5),
+            Duration::from_millis(150),
+        );
+        (clients, opened)
+    }
+
+    fn target() -> crate::remote::controlled::Controlled {
+        crate::remote::controlled::testing::device(ID_B, "Studio")
+    }
+
+    #[test]
+    fn the_client_gets_answers_and_refusals_from_the_real_helper_and_server() {
+        let setup = setup("client-round");
+        setup.pair(ID_A, true, false);
+        let (clients, opened) = controller(&setup, ID_A);
+        assert_eq!(clients.call(&target(), &status()), Ok(serde_json::json!("done")));
+        assert!(clients.connected(&target().id));
+        // The refusals of the target reach the controller as they are.
+        assert_eq!(
+            clients.call(&target(), &serde_json::json!({"command": "getDevices"})),
+            Err("localOnly")
+        );
+        let launch = serde_json::json!({"command": "setSeenVersion", "args": {"version": null}});
+        assert_eq!(clients.call(&target(), &launch), Ok(serde_json::json!("done")));
+        let own_command = serde_json::json!({"command": "getViewer"});
+        assert_eq!(clients.call(&target(), &own_command), Err("localOnly"));
+        assert_eq!(opened.load(Ordering::SeqCst), 1, "one link carried all of it");
+        // Unknown words and bad requests come back as codes of ours.
+        assert_eq!(
+            clients.call(&target(), &serde_json::json!({"command": "nope"})),
+            Err("badRequest")
+        );
+    }
+
+    #[test]
+    fn a_paired_device_with_no_permission_may_ask_who_answers_and_nothing_else() {
+        let setup = setup("client-session");
+        setup.pair(ID_A, false, false);
+        let (clients, _) = controller(&setup, ID_A);
+        assert_eq!(
+            clients.call(&target(), &serde_json::json!({"command": "getSession"})),
+            Ok(serde_json::json!("done"))
+        );
+        assert_eq!(clients.call(&target(), &status()), Err("notPermitted"));
+    }
+
+    #[test]
+    fn an_unknown_device_cannot_even_ask_who_answers() {
+        let setup = setup("client-unknown");
+        let (clients, _) = controller(&setup, ID_A);
+        assert_eq!(
+            clients.call(&target(), &serde_json::json!({"command": "getSession"})),
+            Err("notPaired")
+        );
+        assert!(!clients.connected(&target().id));
+    }
+
+    #[test]
+    fn a_server_that_stops_ends_the_session_and_the_next_call_after_the_wait_reconnects() {
+        let setup = setup("client-restart");
+        setup.pair(ID_A, true, false);
+        let (clients, opened) = controller(&setup, ID_A);
+        assert!(clients.call(&target(), &status()).is_ok());
+        setup.server.stop();
+        // The app is gone, so the retry reaches a helper that says so.
+        let ended = clients.call(&target(), &status());
+        assert_eq!(ended, Err("appNotRunning"));
+        assert!(!clients.connected(&target().id));
+        let links = opened.load(Ordering::SeqCst);
+        assert_eq!(links, 2, "one retry for that request and no more");
+        // Inside the wait there is no new link.
+        assert_eq!(clients.call(&target(), &status()), Err("appNotRunning"));
+        assert_eq!(opened.load(Ordering::SeqCst), links);
+        // The app starts again, and the next call after the wait works.
+        let again = Server::start(
+            setup.socket.clone(),
+            setup.peers.clone(),
+            setup.log.clone(),
+            setup.pairing.clone(),
+            Fake,
+        )
+        .unwrap();
+        thread::sleep(Duration::from_millis(200));
+        assert_eq!(clients.call(&target(), &status()), Ok(serde_json::json!("done")));
+        assert!(clients.connected(&target().id));
+        again.stop();
+    }
+
+    #[test]
+    fn a_peer_that_is_removed_ends_the_session_of_the_client() {
+        let setup = setup("client-removed");
+        setup.pair(ID_A, true, false);
+        let (clients, _) = controller(&setup, ID_A);
+        assert!(clients.call(&target(), &status()).is_ok());
+        setup.peers.remove(ID_A).unwrap();
+        setup.server.close_peer(ID_A);
+        assert_eq!(clients.call(&target(), &status()), Err("notPaired"));
     }
 }

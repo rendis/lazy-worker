@@ -17,6 +17,8 @@ import { mountOperationProgress } from "./operation-progress";
 import { mountChangelog, releasesSince } from "./changelog";
 import { mountOnboarding } from "./onboarding";
 import { mountProxy } from "./proxy";
+import { mountRemoteBanner } from "./remote-banner";
+import { isLinkError, refusal, type Reason, type Session } from "./remote";
 import { formatSession, SESSION_WIDTH } from "./time";
 import { mountUpdateNotice } from "./update-notice";
 
@@ -25,6 +27,14 @@ function element<T extends HTMLElement = HTMLElement>(id: string): T {
 }
 
 element("window-titlebar").hidden = !desktop.showWindowTitlebar;
+/** The device that this window controls, or `null` in the panel. Rust decides it by the window label, and this only shapes the interface. */
+const remote = desktop.remote;
+let remoteName = "";
+let session: Session | undefined;
+if (remote) {
+  document.querySelector<HTMLElement>(".workspace")!.dataset.remote = "";
+  for (const node of document.querySelectorAll<HTMLElement>("[data-local-only]")) node.hidden = true;
+}
 document.documentElement.style.setProperty("--session-width", `${SESSION_WIDTH}ch`);
 const updateToolOrder = mountTools();
 function renderIcons(): void {
@@ -42,6 +52,16 @@ renderIcons();
 
 const caffeinate = mountCaffeinateForm();
 const progress = mountOperationProgress(element("operation-progress"));
+const banner = mountRemoteBanner({ translate: key => translate(key) });
+if (remote) {
+  let wasLost = false;
+  desktop.onLink(error => {
+    banner.setLink(error);
+    // The link came back, possibly after the other device restarted. Its version and settings may have changed.
+    if (error === undefined && wasLost) void reloadRemote();
+    wasLost = error !== undefined;
+  });
+}
 const activityModes = element("activity-modes");
 const modeChoices = activityModes.querySelectorAll<HTMLInputElement>('input[name="activity-mode"]');
 const activityDuration = element("activity-duration");
@@ -106,6 +126,10 @@ type PreferenceChange = {
   key: PreferenceChoice | ToolId | "proxySettings";
   apply: (current: Preferences) => Preferences;
 };
+/** The notices that report no failure: a saved change, and a request that another device keeps for itself. */
+const calmMessages = new Set<Message>([
+  "saved", "forgetRemoveThere", "localOnly", "notPermitted", "lidNeedsLocalPermission", "remoteLost",
+]);
 const accessibilityLabels: Record<ActivityAccessibility, Message> = {
   granted: "accessibilityGranted",
   required: "accessibilityRequired",
@@ -156,10 +180,13 @@ function preferredLanguage(): Language {
 }
 
 function translate(key: Message): string {
-  return messages[preferredLanguage()][key];
+  const text = messages[preferredLanguage()][key];
+  // In a window that controls a device, `{name}` is that device. No other text has one there.
+  return remote ? text.split("{name}").join(remoteName) : text;
 }
 
 function errorMessage(error: unknown, fallback: Message): Message {
+  if (remote && isLinkError(error)) return "remoteLost";
   return typeof error === "string" && Object.prototype.hasOwnProperty.call(messages.en, error)
     ? error as Message : fallback;
 }
@@ -267,7 +294,7 @@ element("changelog-open").addEventListener("click", event => changelog.open(unde
 let runningVersion: string | undefined;
 /** Records that the user saw the setup or the changes of the running version. */
 function markVersionSeen(): void {
-  if (runningVersion) updateChoice("settings", "seenVersion", runningVersion);
+  if (runningVersion && !remote) updateChoice("settings", "seenVersion", runningVersion);
 }
 const updates = mountUpdateNotice({
   translate,
@@ -296,6 +323,8 @@ const proxy = mountProxy({
     renderFeedback();
   },
   refreshIcons: renderIcons,
+  // The proxy's role, port, address list, and client commands are kept by the person at the device.
+  lockTip: () => remote ? translate(refusal("setProxyRole", undefined, session?.permissions) ?? "localOnly") : undefined,
 });
 
 const devices = mountDevices({
@@ -351,7 +380,7 @@ function renderFeedback(): void {
     const titleText = translate(title);
     const canOpenAccessibility = !unsupported && lines.some(({ message }) =>
       message === "permissionRequired" || message === "accessibilityRequestFailed");
-    const informational = lines.every(({ message }) => message === "saved" || message === "forgetRemoveThere");
+    const informational = lines.every(({ message }) => calmMessages.has(message));
     if (!canOpenAccessibility && document.activeElement === noticeAccessibility) view.querySelector("h1")?.focus();
     noticeAccessibility.toggleAttribute("hidden", !canOpenAccessibility);
     setAttribute(noticeRegion, "data-tone", informational ? "info" : "error");
@@ -365,6 +394,34 @@ function renderFeedback(): void {
     visibleNotice = undefined;
   }
   setNoticeOpen(noticeRegion, open);
+  renderBlocks();
+}
+
+/** Turns off a control with the reason as its tip. The reason shows on hover and focus, so the control keeps its place. */
+function setBlock(control: HTMLElement, reason: Reason | undefined): void {
+  if (reason) {
+    const tip = translate(reason);
+    control.classList.add("reason");
+    setAttribute(control, "data-blocked", "");
+    setAttribute(control, "data-tip", tip);
+    setAttribute(control, "aria-description", tip);
+    setAttribute(control, "aria-disabled", "true");
+  } else if (control.hasAttribute("data-blocked")) {
+    control.classList.remove("reason");
+    for (const name of ["data-blocked", "data-tip", "aria-description"]) control.removeAttribute(name);
+  }
+}
+
+/** The controls that the controlled device will refuse, so the window says so before the click. */
+function renderBlocks(): void {
+  if (!remote) return;
+  for (const power of powerButtons) {
+    const tool = power.dataset.toolPower as ToolId;
+    setBlock(power, refusal("setToolActive", { tool, active: statuses[tool].mode === "off" }, session?.permissions));
+  }
+  for (const button of [settingsAccessibility, noticeAccessibility, permissionAccessibility]) {
+    setBlock(button, refusal("requestActivityAccessibility", undefined, session?.permissions));
+  }
 }
 
 function renderPermissionNotice(view = activeView()): void {
@@ -559,6 +616,7 @@ function renderControls(): void {
   setDisabled(startToolsOnLaunch, !loaded);
   for (const button of [...languageButtons, ...themeButtons]) setDisabled(button, !loaded);
   caffeinate.setDisabled(unavailable || !statuses.caffeinate.supported);
+  renderBlocks();
 }
 
 function renderTheme(animate: boolean): void {
@@ -614,6 +672,7 @@ function renderPreferences(previous?: Preferences): void {
     setAttribute(activityPower, "aria-label", translate("activitySession"));
     progress.renderLabel();
     updates.render();
+    if (remote) banner.render();
     onboarding.render();
     changelog.render();
     renderLid();
@@ -673,7 +732,8 @@ function refreshPermissions(pendingOnly = false): void {
 }
 
 async function openAccessibility(target: FeedbackTarget): Promise<void> {
-  if (accessibilityOpening || accessibility === "unsupported") return;
+  // Only the person at the device can answer its system prompt.
+  if (remote || accessibilityOpening || accessibility === "unsupported") return;
   accessibilityOpening = true;
   renderFeedback();
   try {
@@ -689,19 +749,28 @@ async function openAccessibility(target: FeedbackTarget): Promise<void> {
   }
 }
 
+/** True while a status request waits. The next tick skips, so a slow link never piles requests up. */
+let statusPending = false;
+
 async function refreshStatus(): Promise<void> {
-  if (workerAction?.running || caffeinateSaving) return;
+  if (workerAction?.running || caffeinateSaving || statusPending) return;
   const revision = ++statusRevision;
+  statusPending = true;
   try {
     const current = await desktop.getStatuses();
     if (revision !== statusRevision) return;
     setStatuses(current);
-    if (!ready && feedback.tools === "workerUnavailable") delete feedback.tools;
+    if (!ready && (feedback.tools === "workerUnavailable" || feedback.tools === "notPermitted")) delete feedback.tools;
     ready = true;
-  } catch {
+  } catch (error) {
     if (revision !== statusRevision) return;
     ready = false;
-    feedback.tools = "workerUnavailable";
+    // A lost link shows in the banner. A device that refuses shows a calm note.
+    if (!remote) feedback.tools = "workerUnavailable";
+    else if (isLinkError(error)) delete feedback.tools;
+    else feedback.tools = errorMessage(error, "workerUnavailable");
+  } finally {
+    statusPending = false;
   }
   renderStatus();
 }
@@ -998,6 +1067,7 @@ for (const button of [startSelected, stopSelected, ...powerButtons]) {
 }
 
 powerButtons.forEach(button => button.addEventListener("click", () => {
+  if (button.hasAttribute("data-blocked")) return;
   const id = button.dataset.toolPower as ToolId;
   const active = statuses[id].mode === "off";
   const target = button.closest('[data-module-view="tools"]') ? "tools" : id;
@@ -1142,28 +1212,98 @@ systemAppearance.addEventListener("change", () => renderTheme(true));
 window.addEventListener("languagechange", () => { void refreshSystemLanguage(); });
 desktop.onFocus(() => {
   proxy.refresh();
-  if (activeView().dataset.moduleView === "devices") void devices.refresh();
+  if (!remote && activeView().dataset.moduleView === "devices") void devices.refresh();
   refreshPermissions();
   void refreshLid();
   if (activeView().dataset.moduleView === "settings") void updateLoginLaunch();
   void refreshSystemLanguage();
-  void updates.refresh();
+  if (remote) void refreshViewer();
+  else void updates.refresh();
 });
+
+/** What the device keeps and what the viewer sees. The language and theme are the viewer's, whatever the device has saved. */
+async function readRemote(): Promise<void> {
+  const [next, device, viewer] = await Promise.all([
+    desktop.getSession(),
+    desktop.getPreferences().catch((error: unknown) => {
+      if (isLinkError(error)) throw error;
+      // A device that does not share its settings still lets this window show its tools.
+      return defaults;
+    }),
+    desktop.getViewer(),
+  ]);
+  session = next;
+  remoteName = next.device.name;
+  banner.setSession(next);
+  savedPreferences = { ...device, language: viewer.language, theme: viewer.theme };
+  setText(element("app-version"), next.version);
+  element("settings-version").hidden = false;
+  if (document.title !== `${remoteName} — Lazy Worker`) document.title = `${remoteName} — Lazy Worker`;
+}
+
+/** Reads the session and the settings again after the link came back. A change in progress keeps the settings it has. */
+async function reloadRemote(): Promise<void> {
+  try {
+    const keep = pendingPreferences.length > 0 || caffeinateSaveDelay !== undefined;
+    const before = savedPreferences;
+    await readRemote();
+    if (keep) savedPreferences = before;
+    preferences = pendingPreferences.reduce((current, change) => change.apply(current), savedPreferences);
+    renderPreferences(before);
+  } catch {
+    // The link failed again. The banner says so, and the next return tries again.
+  }
+}
+
+/** Follows the language and theme of the person here, which can change in the panel while this window is open. */
+async function refreshViewer(): Promise<void> {
+  const viewer = await desktop.getViewer().catch(() => undefined);
+  if (!viewer || (viewer.language === savedPreferences.language && viewer.theme === savedPreferences.theme)) return;
+  savedPreferences = { ...savedPreferences, ...viewer };
+  renderPendingPreferences();
+}
+
+/** Opens the window of a device: the first read waits for the link, which can take a few seconds or fail. */
+async function loadRemote(): Promise<void> {
+  remoteName = await desktop.remoteName();
+  banner.render();
+  // The window shows at once, with its banner, so a device that does not answer is seen and not a blank panel.
+  delete element("onboarding").closest<HTMLElement>(".workspace")!.dataset.booting;
+  systemLanguage = await desktop.getSystemLanguage();
+  for (;;) {
+    try {
+      await readRemote();
+      preferences = savedPreferences;
+      loaded = true;
+      return;
+    } catch {
+      // The banner shows the lost link. The window keeps trying until the device answers.
+      await new Promise(resolve => window.setTimeout(resolve, 5000));
+    }
+  }
+}
 
 async function initialize(): Promise<void> {
   renderTheme(false);
   renderStatus();
-  void desktop.getVersion().then(version => {
-    setText(element("app-version"), version);
-    element("settings-version").hidden = false;
-  }).catch(() => {});
+  if (!remote) {
+    void desktop.getVersion().then(version => {
+      setText(element("app-version"), version);
+      element("settings-version").hidden = false;
+    }).catch(() => {});
+  }
   try {
-    [savedPreferences, systemLanguage] = await Promise.all([
-      desktop.getPreferences(),
-      desktop.getSystemLanguage(),
-    ]);
-    preferences = savedPreferences;
-    loaded = true;
+    if (remote) {
+      void desktop.getVersion().then(version => banner.setLocalVersion(version)).catch(() => {});
+      await loadRemote();
+    } else {
+      [savedPreferences, systemLanguage] = await Promise.all([
+        desktop.getPreferences(),
+        desktop.getSystemLanguage(),
+      ]);
+      preferences = savedPreferences;
+      loaded = true;
+    }
     selectActivityMode(preferences.schedule.enabled ? "schedule" : "duration");
     start.value = preferences.schedule.start;
     end.value = preferences.schedule.end;
@@ -1173,18 +1313,21 @@ async function initialize(): Promise<void> {
     feedback.tools = "saveFailed";
   }
   renderPreferences();
-  void devices.refresh();
   void refreshLid();
-  runningVersion = await desktop.getVersion().catch(() => undefined);
-  if (await desktop.getFirstRun().catch(() => false)) onboarding.open();
-  else if (loaded && runningVersion && preferences.seenVersion !== runningVersion) {
-    const news = releasesSince(preferences.seenVersion, runningVersion);
-    if (news.length) changelog.open(news);
-    else markVersionSeen();
+  // The setup guide, What’s new, and the update notice belong to this app, so a window of a device shows none of them.
+  if (!remote) {
+    void devices.refresh();
+    runningVersion = await desktop.getVersion().catch(() => undefined);
+    if (await desktop.getFirstRun().catch(() => false)) onboarding.open();
+    else if (loaded && runningVersion && preferences.seenVersion !== runningVersion) {
+      const news = releasesSince(preferences.seenVersion, runningVersion);
+      if (news.length) changelog.open(news);
+      else markVersionSeen();
+    }
   }
   // The panel stays hidden until here, so a new installation never shows the tools before the setup guide.
   delete element("onboarding").closest<HTMLElement>(".workspace")!.dataset.booting;
-  void updates.start();
+  if (!remote) void updates.start();
   await refreshStatus();
   refreshPermissions();
   window.setInterval(() => { void refreshStatus(); }, 1000);

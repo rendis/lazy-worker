@@ -5,6 +5,7 @@
 
 pub mod access;
 pub mod authorized_keys;
+pub mod client;
 pub mod controlled;
 pub mod destination;
 pub mod discovery;
@@ -20,6 +21,7 @@ pub mod peers;
 pub mod server;
 pub mod service;
 pub mod ssh;
+pub mod window;
 pub mod wire;
 
 use std::{
@@ -34,6 +36,8 @@ use std::{
 #[derive(Clone, Debug)]
 pub struct Layout {
     remote: PathBuf,
+    /// The app socket. It is in `remote`, or in a short private directory when that path is too long.
+    socket: PathBuf,
     /// The private directory of the multiplexing sockets. None when no socket path fits.
     control: Option<PathBuf>,
 }
@@ -43,6 +47,10 @@ impl Layout {
     pub fn open(config_dir: &Path, temp_dir: &Path) -> Result<Self, &'static str> {
         let remote = config_dir.join("remote");
         ensure_private_dir(&remote)?;
+        let socket = socket_path(&remote, our_uid());
+        if let Some(directory) = socket.parent().filter(|_| !socket.starts_with(&remote)) {
+            ensure_private_dir(directory)?;
+        }
         let mut control = None;
         for candidate in control_candidates(temp_dir, our_uid()) {
             if socket_fits(&candidate) && ensure_private_dir(&candidate).is_ok() {
@@ -50,12 +58,21 @@ impl Layout {
                 break;
             }
         }
-        Ok(Self { remote, control })
+        Ok(Self {
+            remote,
+            socket,
+            control,
+        })
     }
 
     #[cfg(test)]
     pub fn for_paths(remote: PathBuf, control: Option<PathBuf>) -> Self {
-        Self { remote, control }
+        let socket = socket_path(&remote, our_uid());
+        Self {
+            remote,
+            socket,
+            control,
+        }
     }
 
     pub fn remote_dir(&self) -> &Path {
@@ -97,7 +114,7 @@ impl Layout {
     }
 
     pub fn socket_file(&self) -> PathBuf {
-        self.remote.join("app.sock")
+        self.socket.clone()
     }
 
     pub fn log_file(&self) -> PathBuf {
@@ -106,6 +123,21 @@ impl Layout {
 
     pub fn control_dir(&self) -> Option<&Path> {
         self.control.as_deref()
+    }
+}
+
+/// The longest socket path: `sun_path` holds 104 bytes with its end mark on macOS.
+pub(crate) const SOCKET_PATH_MAX: usize = 103;
+
+/// Where the app socket is, given the `remote` directory of the app. The helper and the app
+/// both apply this one rule, so they agree without talking. A path that is too long for a
+/// socket moves to `/tmp/lw-<uid>`, a private directory.
+pub(crate) fn socket_path(remote_dir: &Path, uid: u32) -> PathBuf {
+    let own = remote_dir.join("app.sock");
+    if own.as_os_str().len() <= SOCKET_PATH_MAX {
+        own
+    } else {
+        PathBuf::from(format!("/tmp/lw-{uid}/app.sock"))
     }
 }
 
@@ -306,6 +338,62 @@ mod tests {
         assert!(!socket_fits(Path::new(
             "/var/folders/_m/qwqcplzs1s7_6wd4vz4qf0180000gn/T/lw-ssh"
         )));
+    }
+
+    #[test]
+    fn the_socket_stays_in_the_app_directory_when_its_path_fits() {
+        let remote = Path::new("/Users/me/Library/Application Support/com.rendis.lazyworker/remote");
+        assert_eq!(socket_path(remote, 501), remote.join("app.sock"));
+        // 103 bytes is the longest that binds.
+        let edge = format!("/{}/app.sock", "a".repeat(SOCKET_PATH_MAX - "/app.sock".len() - 1));
+        assert_eq!(edge.len(), SOCKET_PATH_MAX);
+        let edge_dir = Path::new(&edge).parent().unwrap().to_owned();
+        assert_eq!(socket_path(&edge_dir, 501), Path::new(&edge));
+    }
+
+    #[test]
+    fn a_socket_path_that_is_too_long_moves_to_a_private_directory_for_both_sides() {
+        let long = format!("/Users/{}/Library/Application Support/com.rendis.lazyworker/remote", "n".repeat(60));
+        assert!(Path::new(&long).join("app.sock").as_os_str().len() > SOCKET_PATH_MAX);
+        assert_eq!(socket_path(Path::new(&long), 501), Path::new("/tmp/lw-501/app.sock"));
+        // One byte over the edge moves it too.
+        let over = format!("/{}", "a".repeat(SOCKET_PATH_MAX - "/app.sock".len()));
+        assert_eq!(socket_path(Path::new(&over), 7), Path::new("/tmp/lw-7/app.sock"));
+    }
+
+    #[test]
+    fn the_app_and_the_helper_agree_on_the_socket_in_both_cases() {
+        // A short home: the socket is in the app directory.
+        let short = Path::new("/Users/me");
+        let remote = short
+            .join("Library/Application Support")
+            .join(helper::IDENTIFIER)
+            .join("remote");
+        assert_eq!(helper::socket_path(short), socket_path(&remote, our_uid()));
+        assert_eq!(helper::socket_path(short), remote.join("app.sock"));
+        // A long home: both fall back to the same directory.
+        let long = PathBuf::from(format!("/Users/{}", "n".repeat(60)));
+        let remote = long
+            .join("Library/Application Support")
+            .join(helper::IDENTIFIER)
+            .join("remote");
+        let expected = PathBuf::from(format!("/tmp/lw-{}/app.sock", our_uid()));
+        assert_eq!(helper::socket_path(&long), expected);
+        assert_eq!(socket_path(&remote, our_uid()), expected);
+    }
+
+    #[test]
+    fn a_layout_with_a_long_path_binds_its_socket_in_a_private_directory() {
+        let base = testing::scratch("long-sock");
+        let long = base.join("x".repeat(80));
+        fs::create_dir_all(&long).unwrap();
+        let layout = Layout::open(&long, &std::env::temp_dir()).unwrap();
+        let socket = layout.socket_file();
+        assert_eq!(socket, PathBuf::from(format!("/tmp/lw-{}/app.sock", our_uid())));
+        let directory = socket.parent().unwrap();
+        assert_eq!(fs::metadata(directory).unwrap().mode() & 0o777, 0o700);
+        assert_eq!(fs::metadata(directory).unwrap().uid(), our_uid());
+        fs::remove_dir_all(base).unwrap();
     }
 
     #[test]

@@ -22,6 +22,7 @@ use tauri::{
 };
 
 const TRAY_ID: &str = "lazy-worker";
+const CONTROLLED: &str = "tray-controlled";
 const OPEN: &str = "tray-open";
 const START_SELECTED: &str = "tray-start-selected";
 const ACTIVITY: &str = "tray-activity";
@@ -36,9 +37,11 @@ struct ToolState {
     failed: bool,
 }
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 struct MenuState {
     spanish: bool,
+    /// The names of the devices that have an open connection to control this one.
+    controlled_by: Vec<String>,
     can_start_selected: bool,
     update_available: bool,
     activity: ToolState,
@@ -81,17 +84,18 @@ impl MenuState {
                     && !caffeinate.active)
                 || (preferences.quick_start.proxy && proxy.supported && !proxy.active),
             update_available: crate::updates::has_update(app),
+            controlled_by: controlled_by(app),
             activity,
             caffeinate,
             proxy,
         })
     }
 
-    fn has_active_tool(self) -> bool {
+    fn has_active_tool(&self) -> bool {
         self.activity.active || self.caffeinate.active || self.proxy.active
     }
 
-    fn labels(self) -> Labels {
+    fn labels(&self) -> Labels {
         let (
             open,
             start_selected,
@@ -132,7 +136,15 @@ impl MenuState {
             let suffix = if tool.failed { " (error)" } else { "" };
             format!("{action}{suffix}")
         };
+        let controlled = match (self.controlled_by.as_slice(), self.spanish) {
+            ([], _) => String::new(),
+            ([name], true) => format!("Controlado por {name}"),
+            ([name], false) => format!("Controlled by {name}"),
+            (all, true) => format!("Controlado por {} dispositivos", all.len()),
+            (all, false) => format!("Controlled by {} devices", all.len()),
+        };
         Labels {
+            controlled,
             open: match (self.spanish, self.update_available) {
                 (true, true) => "Abrir panel (actualización disponible)",
                 (false, true) => "Open Panel (Update Available)",
@@ -148,6 +160,7 @@ impl MenuState {
 }
 
 struct Labels {
+    controlled: String,
     open: &'static str,
     start_selected: &'static str,
     quit: &'static str,
@@ -157,6 +170,10 @@ struct Labels {
 }
 
 struct Controls {
+    menu: Menu<tauri::Wry>,
+    /// A disabled line and its separator, first in the menu while a device controls this one.
+    controlled: MenuItem<tauri::Wry>,
+    controlled_separator: PredefinedMenuItem<tauri::Wry>,
     open: MenuItem<tauri::Wry>,
     start_selected: MenuItem<tauri::Wry>,
     activity: MenuItem<tauri::Wry>,
@@ -168,11 +185,24 @@ struct Controls {
 
 impl Controls {
     fn update(&self, app: &AppHandle, state: MenuState) -> tauri::Result<()> {
-        let rendered = *self.rendered.lock().unwrap();
+        let rendered = self.rendered.lock().unwrap().clone();
         if rendered == state {
             return Ok(());
         }
         let labels = state.labels();
+        if rendered.controlled_by != state.controlled_by {
+            let (was, is) = (!rendered.controlled_by.is_empty(), !state.controlled_by.is_empty());
+            if is {
+                self.controlled.set_text(&labels.controlled)?;
+            }
+            if is && !was {
+                self.menu.insert(&self.controlled_separator, 0)?;
+                self.menu.insert(&self.controlled, 0)?;
+            } else if was && !is {
+                self.menu.remove(&self.controlled)?;
+                self.menu.remove(&self.controlled_separator)?;
+            }
+        }
         if rendered.spanish != state.spanish || rendered.update_available != state.update_available {
             self.open.set_text(labels.open)?;
         }
@@ -204,6 +234,9 @@ pub fn install(app: &App) -> tauri::Result<()> {
     let item =
         |id: &str, label: &str, enabled| MenuItem::with_id(app, id, label, enabled, None::<&str>);
     let controls = Controls {
+        menu: Menu::new(app)?,
+        controlled: item(CONTROLLED, &labels.controlled, false)?,
+        controlled_separator: PredefinedMenuItem::separator(app)?,
         open: item(OPEN, labels.open, true)?,
         start_selected: item(
             START_SELECTED,
@@ -214,31 +247,48 @@ pub fn install(app: &App) -> tauri::Result<()> {
         caffeinate: item(CAFFEINATE, &labels.caffeinate, state.caffeinate.supported)?,
         proxy: item(PROXY, &labels.proxy, state.proxy.supported)?,
         quit: item(QUIT, labels.quit, true)?,
-        rendered: Mutex::new(state),
+        rendered: Mutex::new(state.clone()),
     };
-    let menu = Menu::with_items(
-        app,
-        &[
-            &controls.open,
-            &PredefinedMenuItem::separator(app)?,
-            &controls.start_selected,
-            &controls.activity,
-            &controls.caffeinate,
-            &controls.proxy,
-            &PredefinedMenuItem::separator(app)?,
-            &controls.quit,
-        ],
-    )?;
+    let menu = &controls.menu;
+    if !state.controlled_by.is_empty() {
+        menu.append(&controls.controlled)?;
+        menu.append(&controls.controlled_separator)?;
+    }
+    menu.append_items(&[
+        &controls.open,
+        &PredefinedMenuItem::separator(app)?,
+        &controls.start_selected,
+        &controls.activity,
+        &controls.caffeinate,
+        &controls.proxy,
+        &PredefinedMenuItem::separator(app)?,
+        &controls.quit,
+    ])?;
     let tray = TrayIconBuilder::with_id(TRAY_ID)
         .icon(windup_icon()?)
         .icon_as_template(true)
         .tooltip("Lazy Worker")
-        .menu(&menu)
+        .menu(menu)
         .on_menu_event(handle_menu_event)
         .build(app)?;
     set_activity_dot(&tray, state.has_active_tool())?;
     app.manage(controls);
     Ok(())
+}
+
+/// The names of the devices that have an open connection to this one, each once and in order.
+fn controlled_by(app: &AppHandle) -> Vec<String> {
+    let Some(service) = app.try_state::<crate::remote::service::Service>() else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = service
+        .controllers()
+        .into_iter()
+        .filter(|controller| controller.connected)
+        .map(|controller| controller.name)
+        .collect();
+    names.sort();
+    names
 }
 
 pub fn refresh(app: &AppHandle) {
@@ -275,7 +325,7 @@ fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
         START_SELECTED => Action::StartSelected,
         ACTIVITY | CAFFEINATE | PROXY => {
             let controls = app.state::<Controls>();
-            let rendered = *controls.rendered.lock().unwrap();
+            let rendered = controls.rendered.lock().unwrap().clone();
             match event.id.as_ref() {
                 ACTIVITY => Action::SetActive(ToolId::Activity, !rendered.activity.active),
                 CAFFEINATE => Action::SetActive(ToolId::Caffeinate, !rendered.caffeinate.active),
@@ -434,6 +484,20 @@ impl ActivityDot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_menu_says_who_controls_this_device_in_both_languages() {
+        let mut state = MenuState::default();
+        assert_eq!(state.labels().controlled, "");
+        state.controlled_by = vec!["Studio".into()];
+        assert_eq!(state.labels().controlled, "Controlled by Studio");
+        state.controlled_by.push("Office".into());
+        assert_eq!(state.labels().controlled, "Controlled by 2 devices");
+        state.spanish = true;
+        assert_eq!(state.labels().controlled, "Controlado por 2 dispositivos");
+        state.controlled_by.pop();
+        assert_eq!(state.labels().controlled, "Controlado por Studio");
+    }
 
     #[test]
     fn activity_dot_stays_visible_until_both_tools_stop() {

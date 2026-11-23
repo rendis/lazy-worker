@@ -3,7 +3,8 @@
 
 use super::{
     authorized_keys::AuthorizedKeys,
-    controlled::Store,
+    client::{Clients, SshTransport},
+    controlled::{Controlled, Store},
     destination::Destination,
     identity::{self, DeviceId},
     known_hosts,
@@ -42,6 +43,8 @@ struct Running {
     own: OwnDevice,
     /// The devices that this one controls. An error code when the file could not be opened.
     controlled: Result<Store, &'static str>,
+    /// The open sessions with those devices.
+    clients: Clients,
     server: Result<Server, &'static str>,
 }
 
@@ -130,6 +133,7 @@ impl Service {
             pairing,
             own,
             controlled,
+            clients: Clients::new(SshTransport::new(layout.clone())),
             server,
         })
     }
@@ -161,6 +165,31 @@ impl Service {
                 Err(code) => Socket::unavailable(code),
             },
         }
+    }
+
+    /// A device that this one controls.
+    pub fn device(&self, id: &str) -> Option<Controlled> {
+        match &self.0 {
+            Ok(Running {
+                controlled: Ok(store),
+                ..
+            }) => store.get(id),
+            _ => None,
+        }
+    }
+
+    /// Sends a request to a device that this one controls, and returns its answer as it came.
+    /// It waits for the device, so call it off the main thread.
+    pub fn forward(&self, id: &str, request: &Value) -> Result<Value, &'static str> {
+        let running = self.running()?;
+        let device = self.device(id).ok_or("notPermitted")?;
+        running.clients.call(&device, request)
+    }
+
+    /// This device as the other devices see it. It reads the system, so call it off the main thread.
+    pub fn own_device(&self) -> impl FnOnce() -> Result<Own, &'static str> {
+        let own = self.running().map(|running| running.own.clone());
+        move || own.and_then(|own| own())
     }
 
     pub fn controllers(&self) -> Vec<Controller> {
@@ -252,9 +281,20 @@ impl Service {
         };
         let list = store.list();
         let online = store.online(&list);
+        let Ok(running) = self.running() else {
+            return Vec::new();
+        };
         list.iter()
             .zip(online)
-            .map(|(device, online)| Remote::new(device, online))
+            // A session that works says more than a check of the port.
+            .map(|(device, online)| {
+                let online = if running.clients.connected(&device.id) {
+                    Some(true)
+                } else {
+                    online
+                };
+                Remote::new(device, online)
+            })
             .collect()
     }
 
@@ -288,6 +328,7 @@ impl Service {
         let running = self.running()?;
         let store = running.controlled.as_ref().map_err(|code| *code)?;
         let device = store.remove(id)?.ok_or("notPaired")?;
+        running.clients.close(id);
         // The device is gone either way. A step that fails is reported after the others ran.
         let unpinned = known_hosts::unpin(&running.layout, &device_id);
         let stopped = device
@@ -336,6 +377,7 @@ impl Service {
         if let Ok(running) = &self.0 {
             // The window and its line must not outlive the app.
             let _ = running.pairing.close();
+            running.clients.close_all();
             if let Ok(server) = &running.server {
                 server.stop();
             }

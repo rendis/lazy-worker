@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { version as previewVersion } from "../src-tauri/tauri.conf.json";
 import type { Language } from "./messages";
 import type { ToolId } from "./modules";
+import { isLinkError, PROTOCOL, refusal, type Session, type Viewer } from "./remote";
 import claudeIcon from "./assets/apps/claude.svg";
 import notesIcon from "./assets/apps/notes.svg";
 import safariIcon from "./assets/apps/safari.svg";
@@ -255,7 +256,17 @@ function savePreviewPreferences(preferences: Preferences): void {
 
 /** Every native call goes through the one `dispatch` command, which decides the access in Rust. */
 function call<T>(command: string, args?: object): Promise<T> {
-  return invoke<T>("dispatch", { request: { command, args } });
+  return invoke<T>("dispatch", { request: { command, args } }).then(
+    value => {
+      if (remoteId !== null) reportLink(undefined);
+      return value;
+    },
+    (error: unknown) => {
+      // In a window that controls a device, a failed link is a state of the window and not of the request.
+      if (remoteId !== null && isLinkError(error)) reportLink(error);
+      throw error;
+    },
+  );
 }
 
 /** A preview keeps a saved setting in local storage. Caffeinate and the lid choice have their own calls. */
@@ -409,6 +420,46 @@ const previewAccess: RemoteAccess = { ...(previewStates[previewQuery.get("remote
 /** `?macos=12` shows the guide of macOS 12, and `?remote-fails` makes turning on fail until the user does it in Sharing. */
 if (previewQuery.has("macos")) previewAccess.macosMajor = Number(previewQuery.get("macos")) || 26;
 
+/**
+ * The device this window controls, or `null` in the panel. A native window must be `remote-<id>` for the id in its address,
+ * so a page of the panel cannot pose as one. A preview takes any name that is not an access state: `?remote=studio`.
+ * `?lost` drops the link after a moment, `?mismatch` gives the device another version, and `?perm=none|control` limits it.
+ */
+const remoteParam = previewQuery.get("remote");
+const remoteId: string | null = (() => {
+  if (!remoteParam || remoteParam in previewStates) return null;
+  if (!native) return remoteParam;
+  return getCurrentWindow().label === `remote-${remoteParam}` && /^[0-9a-f]{32}$/.test(remoteParam) ? remoteParam : null;
+})();
+const linkListeners = new Set<(error: string | undefined) => void>();
+let linkState: string | undefined;
+function reportLink(error: string | undefined): void {
+  if (error === linkState) return;
+  linkState = error;
+  linkListeners.forEach(listener => listener(error));
+}
+/** A preview link drops two and a half seconds after the window opens when the address has `?lost`. */
+function previewLinkDown(): boolean {
+  return previewQuery.has("lost") && performance.now() > 2500;
+}
+function previewPermissions(): Session["permissions"] {
+  const level = previewQuery.get("perm");
+  return { control: level !== "none", actions: level !== "none" && level !== "control" };
+}
+/** What a window that controls a device finds out before a call, as the device would answer it. */
+function previewGate(command: string, args?: { tool?: string; active?: boolean }): void {
+  if (remoteId === null) return;
+  if (previewLinkDown()) {
+    reportLink("sshUnreachable");
+    throw "sshUnreachable";
+  }
+  reportLink(undefined);
+  const reason = refusal(command, args, previewPermissions());
+  if (reason) throw reason;
+}
+/** The tools that a preview shows on another device. A change lasts until the page reloads. */
+const previewRemoteRunning = new Map<string, Set<ToolId>>();
+
 /** The sample list a preview shows, so the whole Devices view can be checked. Times follow the clock. */
 function previewDevices(): DevicesOverview {
   const now = Math.floor(Date.now() / 1000);
@@ -467,7 +518,74 @@ function previewDevices(): DevicesOverview {
   };
 }
 
+/** The tools of a sample device, as a preview shows them in the Devices view. */
+function previewRemoteStatuses(id: string): Statuses {
+  const device = previewDevices().devices.find(item => item.id === id);
+  const running = previewRemoteRunning.get(id)
+    ?? new Set(device?.tools.filter(tool => tool.running).map(tool => tool.id));
+  previewRemoteRunning.set(id, running);
+  const status = (tool: ToolId): Status => ({
+    ...offStatus, supported: true, mode: running.has(tool) ? "manual" : "off",
+    elapsedSeconds: running.has(tool) ? 600 : null,
+  });
+  return { activity: status("activity"), caffeinate: status("caffeinate"), proxy: status("proxy") };
+}
+
 export const desktop = {
+  /** The device that this window controls, or `null` in the panel. */
+  remote: remoteId === null ? null : { id: remoteId },
+  /** Calls `listener` with an error code when the link to the controlled device fails, and with nothing when it works again. */
+  onLink(listener: (error: string | undefined) => void): void {
+    linkListeners.add(listener);
+  },
+  /** The language and theme of the person at this window. They are always read on this device. */
+  async getViewer(): Promise<Viewer> {
+    if (native) return call("getViewer");
+    const { language, theme } = loadPreviewPreferences();
+    return { language, theme };
+  },
+  /** Who answers, what this device may do there, and the version. */
+  async getSession(): Promise<Session> {
+    if (native) return call("getSession");
+    previewGate("getSession");
+    const device = previewDevices().devices.find(item => item.id === remoteId);
+    return {
+      device: { id: remoteId ?? "", name: device?.name ?? "Device", kind: device?.kind ?? "desktop" },
+      permissions: previewPermissions(),
+      version: previewQuery.has("mismatch") ? "0.5.0" : previewVersion,
+      protocol: previewQuery.has("protocol") ? PROTOCOL + 1 : PROTOCOL,
+    };
+  },
+  /** The name of the device before its session answers: the address of the window in the app, and the sample name in a preview. */
+  async remoteName(): Promise<string> {
+    // The app puts the name in the address of the window, as text, and this window may not read its own title.
+    if (native) return (previewQuery.get("name") ?? "").slice(0, 80);
+    return previewDevices().devices.find(item => item.id === remoteId)?.name ?? "Device";
+  },
+  /** Opens the window that controls a paired device, or brings it forward. */
+  async openRemoteWindow(id: string): Promise<void> {
+    if (native) return call("openRemoteWindow", { id });
+    window.open(`${location.pathname}?remote=${encodeURIComponent(id)}`, "_blank");
+  },
+  /** The tools of another device, read for the Devices view. */
+  async remoteStatuses(id: string): Promise<Statuses> {
+    if (native) return call("remoteCall", { id, request: { command: "getStatuses" } });
+    if (!previewDevices().devices.some(device => device.id === id)) throw "notPaired";
+    return previewRemoteStatuses(id);
+  },
+  async remoteSession(id: string): Promise<Session> {
+    if (native) return call("remoteCall", { id, request: { command: "getSession" } });
+    return { ...(await desktop.getSession()), device: { id, name: "", kind: "desktop" } };
+  },
+  /** Turns a tool of another device on or off. Starting the proxy server is for the person at that device only. */
+  async remoteSetToolActive(id: string, tool: ToolId, active: boolean): Promise<Statuses> {
+    if (native) return call("remoteCall", { id, request: { command: "setToolActive", args: { tool, active } } });
+    if (refusal("setToolActive", { tool, active }, undefined)) throw "localOnly";
+    const running = previewRemoteStatuses(id) && previewRemoteRunning.get(id)!;
+    if (active) running.add(tool);
+    else running.delete(tool);
+    return previewRemoteStatuses(id);
+  },
   macApp,
   /** True when the Devices view shows sample data, because no native app answers. */
   sampleDevices: !native,
@@ -526,24 +644,29 @@ export const desktop = {
   },
   async saveProxyRole(role: ProxySettings["role"]): Promise<void> {
     if (native) return call("setProxyRole", { role });
+    previewGate("setProxyRole");
     savePreview(current => ({ ...current, proxy: { ...current.proxy, role } }));
   },
   async saveProxyPort(port: number): Promise<void> {
     if (native) return call("setProxyPort", { port });
+    previewGate("setProxyPort");
     savePreview(current => ({ ...current, proxy: { ...current.proxy, port } }));
   },
   async saveProxyServer(server: string): Promise<void> {
     if (native) return call("setProxyServer", { server });
+    previewGate("setProxyServer");
     savePreview(current => ({ ...current, proxy: { ...current.proxy, server } }));
   },
   /** The Access list is saved on this Mac only. */
   async saveProxyAllowed(allowed: string[]): Promise<void> {
     if (native) return call("saveProxyAllowed", { allowed });
+    previewGate("saveProxyAllowed");
     savePreview(current => ({ ...current, proxy: { ...current.proxy, allowed } }));
   },
   /** The client list holds commands to run, so it is saved on this Mac only. */
   async saveProxyApps(apps: ProxyApp[]): Promise<void> {
     if (native) return call("saveProxyApps", { apps });
+    previewGate("saveProxyApps");
     savePreview(current => ({ ...current, proxy: { ...current.proxy, apps } }));
   },
   async getLoginLaunch(): Promise<boolean> {
@@ -574,7 +697,9 @@ export const desktop = {
     ];
   },
   async getStatuses(): Promise<Statuses> {
-    return native ? call("getStatuses") : previewStatuses();
+    if (native) return call("getStatuses");
+    previewGate("getStatuses");
+    return previewStatuses();
   },
   async getProxyNetwork(): Promise<ProxyNetwork> {
     if (native) return call("getProxyNetwork");
@@ -716,6 +841,7 @@ export const desktop = {
   },
   async requestActivityAccessibility(): Promise<void> {
     if (native) return call("requestActivityAccessibility");
+    previewGate("requestActivityAccessibility");
   },
   /** True on the first launch of a new installation. A preview shows the setup with `?onboarding`. */
   async getFirstRun(): Promise<boolean> {
@@ -759,6 +885,7 @@ export const desktop = {
   },
   async setToolActive(tool: ToolId, active: boolean): Promise<Statuses> {
     if (native) return call("setToolActive", { tool, active });
+    previewGate("setToolActive", { tool, active });
     setPreviewActive(tool, active, loadPreviewPreferences());
     return previewStatuses();
   },

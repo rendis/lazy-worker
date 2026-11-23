@@ -461,9 +461,12 @@ h1:focus { outline: none; }
   --knob-glyph: url("./assets/bolt-on.svg");
 }
 .tip { position: relative; display: inline-flex; }
-.tip[data-tip]::after { content: attr(data-tip); }
+/* A control that a device will not take from this window says why. It keeps its place, so it needs no wrapper. */
+.reason { position: relative; }
+[data-blocked] { opacity: .53; cursor: default; }
+:is(.tip, .reason)[data-tip]::after { content: attr(data-tip); }
 .switch[data-quick-start-hint]::after { content: attr(data-quick-start-hint); }
-.switch[data-quick-start-hint]::after, .tip[data-tip]::after {
+.switch[data-quick-start-hint]::after, :is(.tip, .reason)[data-tip]::after {
   position: absolute;
   z-index: 6;
   top: calc(100% + 8px);
@@ -484,7 +487,7 @@ h1:focus { outline: none; }
   pointer-events: none;
   transition: opacity .14s ease, visibility 0s linear .14s;
 }
-.switch[data-quick-start-hint]:is(:hover, :focus-within)::after, .tip[data-tip]:is(:hover, :focus-visible, :has(:focus-visible))::after {
+.switch[data-quick-start-hint]:is(:hover, :focus-within)::after, :is(.tip, .reason)[data-tip]:is(:hover, :focus-visible, :has(:focus-visible))::after {
   opacity: 1;
   visibility: visible;
   transition-delay: .3s, 0s;
@@ -1882,3 +1885,31 @@ h1:focus { outline: none; }
 #caffeinate-copy .lucide:last-child { position: absolute; opacity: 0; transform: scale(.7); color: var(--online); }
 #caffeinate-copy[data-copied] .lucide:first-child { opacity: 0; transform: scale(.7); }
 #caffeinate-copy[data-copied] .lucide:last-child { opacity: 1; transform: none; }
+
+/* A window that controls another device. The banner takes the first row, and the sidebar and the panel move down. */
+.workspace[data-remote] { grid-template-rows: auto minmax(0, 1fr); }
+.remote-banner {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+  padding: 8px var(--content-inset);
+  border-bottom: 1px solid var(--line);
+  background: var(--glass);
+  font-size: 13px;
+  transition: background-color .2s ease, border-color .2s ease;
+}
+.remote-banner-line { display: flex; align-items: center; gap: 9px; min-width: 0; min-height: 22px; }
+.remote-banner-line strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.remote-banner-device .lucide { width: 17px; height: 17px; color: var(--secondary); }
+.remote-banner-link { display: inline-flex; align-items: center; gap: 7px; margin-inline-start: auto; color: var(--secondary); white-space: nowrap; }
+.remote-banner-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--online); transition: background-color .2s ease; }
+.remote-banner[data-state="lost"] { border-color: var(--pending-border); background: var(--pending-panel); }
+.remote-banner[data-state="lost"] .remote-banner-link { color: var(--pending-color); }
+.remote-banner[data-state="lost"] .remote-banner-dot { background: var(--pending-color); animation: remote-pulse 1.4s ease-in-out infinite; }
+.remote-banner-update { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--secondary); }
+.remote-banner-update .accessibility-button { flex: none; margin: 0; padding: 4px 8px; font-size: 12px; }
+@keyframes remote-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .remote-banner[data-state="lost"] .remote-banner-dot { animation: none; } }
+@media (max-width: 580px) { .workspace[data-remote] { grid-template-rows: auto auto 1fr; } }
+/* The address list belongs to the person at the device, so a window that controls it only shows the list. */
+#proxy-server[data-locked] [data-remove] { pointer-events: none; opacity: .5; }

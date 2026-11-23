@@ -28,11 +28,16 @@ pub const EXIT_APP_NOT_RUNNING: i32 = 1;
 pub const EXIT_REFUSED: i32 = 2;
 pub const EXIT_TOO_LONG: i32 = 3;
 
-/// Where the app socket is, from the home directory. It is the app config directory on macOS.
+/// Where the app socket is, from the home directory. The app config directory is its usual
+/// place on macOS, and a path that is too long moves it to `/tmp/lw-<uid>`. See `super::socket_path`.
 pub fn socket_path(home: &Path) -> PathBuf {
-    home.join("Library/Application Support")
-        .join(IDENTIFIER)
-        .join("remote/app.sock")
+    super::socket_path(
+        &home
+            .join("Library/Application Support")
+            .join(IDENTIFIER)
+            .join("remote"),
+        our_uid(),
+    )
 }
 
 /// Runs the helper when the process was started as `remote ...`. Returns its exit code, or

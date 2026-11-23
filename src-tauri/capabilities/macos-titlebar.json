@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "macos-titlebar",
-  "description": "Allow the main title bar to drag and zoom the macOS window",
-  "windows": ["main"],
+  "description": "Allow the title bar of the panel and of a window that controls a device to drag and zoom the macOS window",
+  "windows": ["main", "remote-*"],
   "platforms": ["macOS"],
   "permissions": [
     "core:window:allow-start-dragging",

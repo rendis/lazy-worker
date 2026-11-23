@@ -26,7 +26,14 @@ pub enum Access {
     Actions,
     /// Settings that store a command, an address list, or a permission, and system prompts.
     LocalOnly,
+    /// Needs only that the caller is a paired device. It reads nothing that a device did not already
+    /// agree to share, and it changes nothing.
+    Paired,
 }
+
+/// The version of the request set that two devices speak. A window that controls a device
+/// whose number differs offers to update it.
+pub const PROTOCOL: u32 = 1;
 
 /// What a remote device may do. All off by default.
 #[derive(Clone, Copy, Debug, Default)]
@@ -59,6 +66,8 @@ impl Origin {
             return Ok(());
         };
         match access {
+            // The server looked the peer up before it came here, so any remote origin is paired.
+            Access::Paired => Ok(()),
             Access::Control if permissions.control => Ok(()),
             Access::Actions if permissions.actions => Ok(()),
             Access::LocalOnly => Err("localOnly"),
@@ -93,6 +102,10 @@ pub enum Request {
     GetPreferences,
     GetFirstRun,
     GetSystemLanguage,
+    /// What this app shows its viewer in: the language and the theme.
+    GetViewer,
+    /// Who answers, what the caller may do here, and the version.
+    GetSession,
     GetStatuses,
     GetLidStatus,
     GetLoginLaunch,
@@ -143,6 +156,10 @@ pub enum Request {
     AllowPasswordLogin,
     EnableRemoteAccess,
     OpenSharingSettings,
+    /// Opens the window that controls a paired device.
+    OpenRemoteWindow { id: String },
+    /// Sends one of a few requests to a paired device, for the Devices view.
+    RemoteCall { id: String, request: Value },
 }
 
 impl Request {
@@ -174,6 +191,7 @@ impl Request {
             | Self::SetLoginLaunch { .. }
             | Self::SetLidMode { .. }
             | Self::CheckProxyServer { .. } => Access::Control,
+            Self::GetSession => Access::Paired,
             // Starting the proxy server opens a port on this Mac, so only the person here may do it.
             // Stopping it, and every other tool, stays remote control.
             Self::SetToolActive { tool, active } => match (tool, active) {
@@ -214,6 +232,9 @@ impl Request {
             | Self::SetProxyServer { .. }
             | Self::GetProxyPeers
             | Self::GetProxyLog
+            | Self::GetViewer
+            | Self::OpenRemoteWindow { .. }
+            | Self::RemoteCall { .. }
             | Self::RequestActivityAccessibility => Access::LocalOnly,
         }
     }
@@ -227,6 +248,8 @@ impl Request {
             Self::GetPreferences
             | Self::GetFirstRun
             | Self::GetSystemLanguage
+            | Self::GetViewer
+            | Self::GetSession
             | Self::GetStatuses
             | Self::GetLidStatus
             | Self::GetLoginLaunch
@@ -271,18 +294,174 @@ impl Request {
             | Self::CutAllAccess
             | Self::AllowPasswordLogin
             | Self::EnableRemoteAccess
-            | Self::OpenSharingSettings => false,
+            | Self::OpenSharingSettings
+            | Self::OpenRemoteWindow { .. }
+            | Self::RemoteCall { .. } => false,
+        }
+    }
+
+    /// True for a request that is about the person at this window, not about a device. It always
+    /// runs on this device, also from a window that controls another one. There is no default
+    /// arm: a new request must say where it runs.
+    pub fn runs_on_viewer(&self) -> bool {
+        match self {
+            Self::GetSystemLanguage | Self::GetViewer => true,
+            Self::GetPreferences
+            | Self::GetFirstRun
+            | Self::GetSession
+            | Self::GetStatuses
+            | Self::GetLidStatus
+            | Self::GetLoginLaunch
+            | Self::GetUpdateStatus
+            | Self::GetActivityAccessibility
+            | Self::GetProxyNetwork
+            | Self::GetProxyPeers
+            | Self::GetProxyLog
+            | Self::GetDevices
+            | Self::GetRemoteLog
+            | Self::DiscoverDevices
+            | Self::DetectProxyApps
+            | Self::ListCaffeinateProcesses
+            | Self::CheckForUpdate
+            | Self::RestartToUpdate
+            | Self::SetLanguage { .. }
+            | Self::SetTheme { .. }
+            | Self::SetDuration { .. }
+            | Self::SetSchedule { .. }
+            | Self::SetQuickStart { .. }
+            | Self::SetStartToolsOnLaunch { .. }
+            | Self::SetHideWhileSharing { .. }
+            | Self::SetSeenVersion { .. }
+            | Self::SaveCaffeinateSettings { .. }
+            | Self::SetProxyRole { .. }
+            | Self::SetProxyPort { .. }
+            | Self::SetProxyServer { .. }
+            | Self::SetToolActive { .. }
+            | Self::SetLoginLaunch { .. }
+            | Self::SetLidMode { .. }
+            | Self::CheckProxyServer { .. }
+            | Self::LaunchProxyApp { .. }
+            | Self::SaveProxyApps { .. }
+            | Self::SaveProxyAllowed { .. }
+            | Self::RequestActivityAccessibility
+            | Self::SetPeerPermissions { .. }
+            | Self::RemovePeer { .. }
+            | Self::OpenPairing { .. }
+            | Self::ClosePairing
+            | Self::PairDevice { .. }
+            | Self::ForgetDevice { .. }
+            | Self::CutAllAccess
+            | Self::AllowPasswordLogin
+            | Self::EnableRemoteAccess
+            | Self::OpenSharingSettings
+            | Self::OpenRemoteWindow { .. }
+            | Self::RemoteCall { .. } => false,
+        }
+    }
+
+    /// True for a request that exists only between the main window and a device that it controls.
+    /// A window that controls a device never sends one.
+    fn is_controller_side(&self) -> bool {
+        matches!(self, Self::OpenRemoteWindow { .. } | Self::RemoteCall { .. })
+    }
+
+    /// The requests that the Devices view may send to a device through `RemoteCall`.
+    fn may_be_called_remotely(&self) -> bool {
+        matches!(
+            self,
+            Self::GetStatuses | Self::SetToolActive { .. } | Self::GetSession
+        )
+    }
+}
+
+/// Where the window that sent a request is: this device's own panel, or a window that controls a device.
+#[derive(Debug, PartialEq)]
+enum Route {
+    Local,
+    Device(String),
+}
+
+impl Route {
+    /// Decides by the label of the window, and by nothing that the request holds. A device label
+    /// is `remote-` and a device id, and the id must be one that this device controls.
+    fn of_window(label: &str, controls: impl Fn(&str) -> bool) -> Result<Self, &'static str> {
+        if Origin::of_window(label).is_ok() {
+            return Ok(Self::Local);
+        }
+        match label.strip_prefix("remote-") {
+            Some(id) if is_device_id(id) && controls(id) => Ok(Self::Device(id.to_owned())),
+            _ => Err("notPermitted"),
         }
     }
 }
 
+/// 32 lowercase hexadecimal characters.
+fn is_device_id(text: &str) -> bool {
+    text.len() == 32 && text.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// What happens to a request from a window.
+#[derive(Debug, PartialEq)]
+enum Plan {
+    /// It runs on this device, with the rights of the person here.
+    Here,
+    /// It goes to the device with this id, which checks it as for any paired device.
+    Forward(String),
+    Refuse,
+}
+
+fn plan(route: &Route, request: &Request) -> Plan {
+    match route {
+        Route::Local => Plan::Here,
+        Route::Device(_) if request.is_controller_side() => Plan::Refuse,
+        Route::Device(_) if request.runs_on_viewer() => Plan::Here,
+        Route::Device(id) => Plan::Forward(id.clone()),
+    }
+}
+
 #[tauri::command]
-pub async fn dispatch(
-    window: WebviewWindow,
-    request: Request,
-) -> Result<Value, &'static str> {
-    let origin = Origin::of_window(window.label())?;
-    handle(window.app_handle(), origin, request).await
+pub async fn dispatch(window: WebviewWindow, request: Value) -> Result<Value, &'static str> {
+    let app = window.app_handle();
+    let route = Route::of_window(window.label(), |id| controls(app, id))?;
+    let parsed: Request =
+        serde_json::from_value(request.clone()).map_err(|_| "badRequest")?;
+    match plan(&route, &parsed) {
+        Plan::Here => handle(app, Origin::Local, parsed).await,
+        Plan::Forward(id) => forward(app, &id, request).await,
+        Plan::Refuse => Err("notPermitted"),
+    }
+}
+
+/// True when this device controls the device with this id.
+fn controls(app: &AppHandle, id: &str) -> bool {
+    #[cfg(unix)]
+    return app
+        .try_state::<crate::remote::service::Service>()
+        .is_some_and(|service| service.device(id).is_some());
+    #[cfg(not(unix))]
+    {
+        let _ = (app, id);
+        false
+    }
+}
+
+/// Sends a request to a device that this one controls and returns its answer as it came.
+async fn forward(app: &AppHandle, id: &str, request: Value) -> Result<Value, &'static str> {
+    #[cfg(unix)]
+    {
+        let (app, id) = (app.clone(), id.to_owned());
+        return tauri::async_runtime::spawn_blocking(move || {
+            app.state::<crate::remote::service::Service>()
+                .forward(&id, &request)
+        })
+        .await
+        .map_err(|_| "workerUnavailable")?;
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (app, id, request);
+        Err("unsupported")
+    }
 }
 
 /// Checks that the origin may send the request.
@@ -378,6 +557,36 @@ async fn run(
             return json(Some(crate::preferences::system_language()));
             #[cfg(not(target_os = "macos"))]
             json(None::<Language>)
+        }
+        Request::GetViewer => {
+            let preferences = locked("workerUnavailable")?.activity.preferences();
+            json(serde_json::json!({
+                "language": preferences.language,
+                "theme": preferences.theme,
+            }))
+        }
+        Request::GetSession => {
+            #[cfg(unix)]
+            return session(app, origin).await;
+            #[cfg(not(unix))]
+            Err("unsupported")
+        }
+        Request::OpenRemoteWindow { id } => {
+            #[cfg(unix)]
+            return crate::remote::window::open(app, &id).map(|()| Value::Null);
+            #[cfg(not(unix))]
+            {
+                let _ = id;
+                Err("unsupported")
+            }
+        }
+        Request::RemoteCall { id, request } => {
+            let parsed: Request =
+                serde_json::from_value(request.clone()).map_err(|_| "badRequest")?;
+            if !parsed.may_be_called_remotely() {
+                return Err("notPermitted");
+            }
+            forward(app, &id, request).await
         }
         Request::GetStatuses => json(locked("workerUnavailable")?.statuses()),
         Request::GetLidStatus => json(locked("workerUnavailable")?.lid.status()),
@@ -562,7 +771,14 @@ async fn run(
             return json(
                 tauri::async_runtime::spawn_blocking({
                     let app = app.clone();
-                    move || app.state::<crate::remote::service::Service>().forget_device(&id)
+                    move || {
+                        let forgotten = app
+                            .state::<crate::remote::service::Service>()
+                            .forget_device(&id);
+                        // The window of a device that is forgotten has nothing left to talk to.
+                        crate::remote::window::close(&app, &id);
+                        forgotten
+                    }
                 })
                 .await
                 .map_err(|_| "workerUnavailable")??,
@@ -679,6 +895,32 @@ async fn run(
                 .map_err(|_| "accessibilityRequestFailed")??,
         ),
     }
+}
+
+/// Who answers, what the caller may do here, and the version. It runs commands that name this
+/// device, so it stays off the main thread.
+#[cfg(unix)]
+async fn session(app: &AppHandle, origin: Origin) -> Result<Value, &'static str> {
+    let permissions = match origin {
+        Origin::Local => Permissions {
+            control: true,
+            actions: true,
+        },
+        Origin::Remote(permissions) => permissions,
+    };
+    let (own, version) = (
+        app.state::<crate::remote::service::Service>().own_device(),
+        app.package_info().version.to_string(),
+    );
+    let own = tauri::async_runtime::spawn_blocking(move || own())
+        .await
+        .map_err(|_| "workerUnavailable")??;
+    json(serde_json::json!({
+        "device": { "id": own.id.as_str(), "name": own.name, "kind": own.kind },
+        "permissions": { "control": permissions.control, "actions": permissions.actions },
+        "version": version,
+        "protocol": PROTOCOL,
+    }))
 }
 
 /// Saves the closed-lid choice. A choice that changes the system asks for the one-time permission first.
@@ -940,5 +1182,149 @@ mod tests {
             json!({"command": "savePreferences", "args": {}})
         )
         .is_err());
+    }
+
+    const DEVICE: &str = "0123456789abcdef0123456789abcdef";
+    const OTHER: &str = "fedcba9876543210fedcba9876543210";
+
+    fn route(label: &str) -> Result<Route, &'static str> {
+        Route::of_window(label, |id| id == DEVICE)
+    }
+
+    #[test]
+    fn a_window_is_routed_by_its_label_and_by_the_devices_this_one_controls() {
+        assert_eq!(route("main"), Ok(Route::Local));
+        assert_eq!(route(&format!("remote-{DEVICE}")), Ok(Route::Device(DEVICE.into())));
+        // A device this one does not control, and every label that is not exactly ours.
+        for label in [
+            format!("remote-{OTHER}"),
+            "remote-".to_owned(),
+            "remote-short".to_owned(),
+            format!("remote-{}", DEVICE.to_uppercase()),
+            format!("remote-{DEVICE}0"),
+            format!("remote-{DEVICE} "),
+            format!("Remote-{DEVICE}"),
+            format!("remote-../{}", &DEVICE[..29]),
+            format!("main-{DEVICE}"),
+            String::new(),
+            "main2".to_owned(),
+            "other".to_owned(),
+        ] {
+            assert_eq!(route(&label), Err("notPermitted"), "{label}");
+        }
+    }
+
+    #[test]
+    fn a_remote_window_forwards_everything_but_what_is_about_the_viewer() {
+        let device = Route::Device(DEVICE.into());
+        let forwarded = [
+            json!({"command": "getStatuses"}),
+            json!({"command": "getPreferences"}),
+            json!({"command": "setToolActive", "args": {"tool": "proxy", "active": true}}),
+            json!({"command": "getDevices"}),
+            json!({"command": "forgetDevice", "args": {"id": OTHER}}),
+            json!({"command": "getSession"}),
+            json!({"command": "saveProxyApps", "args": {"apps": []}}),
+        ];
+        for value in forwarded {
+            assert_eq!(plan(&device, &request(value)), Plan::Forward(DEVICE.into()));
+        }
+        for value in [json!({"command": "getSystemLanguage"}), json!({"command": "getViewer"})] {
+            assert_eq!(plan(&device, &request(value)), Plan::Here);
+        }
+    }
+
+    #[test]
+    fn the_main_window_runs_everything_here() {
+        for value in [
+            json!({"command": "getStatuses"}),
+            json!({"command": "getViewer"}),
+            json!({"command": "openRemoteWindow", "args": {"id": DEVICE}}),
+        ] {
+            assert_eq!(plan(&Route::Local, &request(value)), Plan::Here);
+        }
+    }
+
+    #[test]
+    fn a_remote_window_cannot_open_windows_or_call_other_devices() {
+        let device = Route::Device(DEVICE.into());
+        for value in [
+            json!({"command": "openRemoteWindow", "args": {"id": DEVICE}}),
+            json!({"command": "remoteCall", "args": {"id": OTHER, "request": {"command": "getStatuses"}}}),
+        ] {
+            assert_eq!(plan(&device, &request(value)), Plan::Refuse);
+        }
+    }
+
+    #[test]
+    fn only_the_language_questions_run_on_the_viewer() {
+        // A new request that runs on the viewer must be added here on purpose.
+        let viewer = [
+            json!({"command": "getSystemLanguage"}),
+            json!({"command": "getViewer"}),
+        ];
+        for value in viewer {
+            assert!(request(value).runs_on_viewer());
+        }
+        for value in [
+            json!({"command": "getPreferences"}),
+            json!({"command": "setLanguage", "args": {"language": "es"}}),
+            json!({"command": "setTheme", "args": {"theme": "dark"}}),
+            json!({"command": "getSession"}),
+            json!({"command": "getUpdateStatus"}),
+            json!({"command": "checkForUpdate"}),
+        ] {
+            assert!(!request(value).runs_on_viewer());
+        }
+    }
+
+    #[test]
+    fn the_viewer_and_the_windows_are_not_something_a_remote_device_may_ask() {
+        let preferences = Preferences::default();
+        let both = Origin::Remote(Permissions { control: true, actions: true });
+        for value in [
+            json!({"command": "getViewer"}),
+            json!({"command": "openRemoteWindow", "args": {"id": DEVICE}}),
+            json!({"command": "remoteCall", "args": {"id": DEVICE, "request": {"command": "getStatuses"}}}),
+        ] {
+            let parsed = request(value);
+            assert_eq!(allowed(both, &parsed, &preferences), Err("localOnly"));
+            assert_eq!(allowed(Origin::Local, &parsed, &preferences), Ok(()));
+        }
+        assert!(request(json!({"command": "getViewer"})).is_read());
+    }
+
+    #[test]
+    fn a_paired_device_with_no_permission_may_ask_who_answers() {
+        let preferences = Preferences::default();
+        let session = request(json!({"command": "getSession"}));
+        assert_eq!(session.access(&preferences), Access::Paired);
+        assert_eq!(allowed(NONE, &session, &preferences), Ok(()));
+        assert_eq!(allowed(CONTROL, &session, &preferences), Ok(()));
+        assert_eq!(allowed(Origin::Local, &session, &preferences), Ok(()));
+        assert!(session.is_read());
+        // Paired is not control: the next request of the same device is still refused.
+        let status = request(json!({"command": "getStatuses"}));
+        assert_eq!(allowed(NONE, &status, &preferences), Err("notPermitted"));
+    }
+
+    #[test]
+    fn the_devices_view_may_call_only_three_requests_on_a_device() {
+        for value in [
+            json!({"command": "getStatuses"}),
+            json!({"command": "setToolActive", "args": {"tool": "caffeinate", "active": false}}),
+            json!({"command": "getSession"}),
+        ] {
+            assert!(request(value).may_be_called_remotely());
+        }
+        for value in [
+            json!({"command": "getPreferences"}),
+            json!({"command": "saveProxyApps", "args": {"apps": []}}),
+            json!({"command": "forgetDevice", "args": {"id": DEVICE}}),
+            json!({"command": "remoteCall", "args": {"id": DEVICE, "request": {"command": "getStatuses"}}}),
+            json!({"command": "restartToUpdate"}),
+        ] {
+            assert!(!request(value).may_be_called_remotely());
+        }
     }
 }

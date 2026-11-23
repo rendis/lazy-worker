@@ -14,6 +14,20 @@
       <span>Lazy Worker</span>
     </header>
     <div class="workspace" data-booting>
+      <!-- Only a window that controls another device shows this banner. -->
+      <div class="remote-banner" id="remote-banner" data-state="connected" hidden>
+        <div class="remote-banner-line">
+          <span class="remote-banner-device" aria-hidden="true">
+            <i data-lucide="monitor" data-kind="desktop"></i><i data-lucide="laptop" data-kind="laptop" hidden></i>
+          </span>
+          <strong id="remote-banner-text"></strong>
+          <span class="remote-banner-link" role="status"><span class="remote-banner-dot" aria-hidden="true"></span><span id="remote-banner-link"></span></span>
+        </div>
+        <div class="remote-banner-update" id="remote-banner-update" hidden>
+          <span id="remote-banner-update-text"></span>
+          <button class="accessibility-button" id="remote-update" type="button"></button>
+        </div>
+      </div>
       <aside class="sidebar">
         <nav id="tool-navigation" aria-label="Tools">
           <button class="nav-button" type="button" data-view="tools">
@@ -22,7 +36,7 @@
         </nav>
         <span id="tool-running-description" data-text="toolRunning" hidden>Running</span>
 
-        <button class="nav-button devices-button" type="button" data-view="devices">
+        <button class="nav-button devices-button" type="button" data-view="devices" data-local-only>
           <i data-lucide="monitor-smartphone"></i><span data-text="devices">Devices</span>
         </button>
 
@@ -409,7 +423,7 @@
         <div data-module-view="settings" hidden>
           <h1 data-text="settings" tabindex="-1">Settings</h1>
           <div class="settings-preferences" id="settings-preferences">
-            <div class="settings-group">
+            <div class="settings-group" data-local-only>
               <p class="control-label" id="language-label"><i data-lucide="globe"></i><span data-text="language">Language</span></p>
               <div class="segments" role="group" aria-labelledby="language-label">
                 <button type="button" data-language="en" lang="en" aria-pressed="false">English</button>
@@ -418,7 +432,7 @@
                 <span class="segment-indicator" aria-hidden="true"></span>
               </div>
             </div>
-            <div class="settings-group">
+            <div class="settings-group" data-local-only>
               <p class="control-label" id="appearance-label"><i data-lucide="contrast"></i><span data-text="appearance">Appearance</span></p>
               <div class="segments" role="group" aria-labelledby="appearance-label">
                 <button type="button" data-theme-choice="light" aria-pressed="false"><i data-lucide="sun"></i><span data-text="light">Light</span></button>
@@ -527,7 +541,7 @@
               <p>
                 <span data-text="appVersion">Version</span> <span id="app-version"></span><span id="update-check-status" role="status"></span>
               </p>
-              <span class="settings-version-actions">
+              <span class="settings-version-actions" data-local-only>
                 <button class="text-link" id="changelog-open" type="button" data-text="whatsNew">What’s new</button>
                 <button class="text-link" id="update-check" type="button" data-text="checkForUpdates" hidden>Check for updates</button>
               </span>
