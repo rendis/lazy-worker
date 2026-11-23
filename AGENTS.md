@@ -31,6 +31,7 @@
 - Style every scroll bar through the shared `::-webkit-scrollbar` rules, thin and in the line color. Keep the space of the main scroll bar reserved, so content does not shift when it appears.
 - Keep every image a file under `src/assets`. The content policy allows no `data:` images, so Vite must not inline assets.
 - Show the brand mark of a built-in proxy tool from `src/assets/brands`. The marks come from Simple Icons. To offer a new brand in the icon picker, add its file there and its name to `brandNames` in `src/proxy.ts`.
+- Save a setting without a notice. Show the progress notice only while the app does work the user can wait for, such as starting, stopping, or changing a running session.
 - Discard unsaved input in a module view when the user leaves that view.
 - Explain an option whose name is technical with an info icon beside its name. Give the icon `data-tip-text` with a message key, and write the tip in plain words for a user who is not technical.
 - Name every icon-only choice with a tip and an accessible label. Tie a tip to hover or keyboard focus, so a mouse click does not leave it open.

@@ -843,10 +843,14 @@ function flushCaffeinateAutosave(): void {
     delete dismissedFeedback.caffeinate;
     try {
       const settings = caffeinate.settingsForSave(savedPreferences.caffeinate);
-      await progress.run([{
-        label: () => translate("applyingChanges"),
-        run: () => applyCaffeinateSettings(settings),
-      }]);
+      // A saved setting is silent. The notice shows only while a running session takes the change.
+      if (statuses.caffeinate.mode === "off") await applyCaffeinateSettings(settings);
+      else {
+        await progress.run([{
+          label: () => translate("applyingChanges"),
+          run: () => applyCaffeinateSettings(settings),
+        }]);
+      }
     } catch (error) {
       const incomplete = error === "caffeinateInvalidPid" || error === "caffeinateInvalidDuration";
       if (edit === caffeinateEditRevision && !incomplete) {
