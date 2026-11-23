@@ -49,7 +49,7 @@ Step 1 touches these places. The TypeScript and Rust compilers report most of th
 
 | File | What to add |
 | --- | --- |
-| `src/modules.ts` | The tool's ID in `ToolId` and its entry in `tools`: title, description, icon, and help. Add `section` when it sits under a broader sidebar entry, and `row` when its Tools row belongs to a group. |
+| `src/modules.ts` | The tool's ID in `ToolId` and its entry in `tools`: title, description, icon, and help. Add `section` when it sits under a broader sidebar entry, and `row` when its card in Tools needs its own name. |
 | `index.html` | A `data-module-view="<id>"` block that holds a `.module-body`. The shared header mounts before that body. |
 | `src/desktop.ts` | The tool in `defaults.quickStart`, in `previewStatuses`, and in the list `startPreviewTools` walks. Give each new native call a browser-preview result. |
 | `src/main.ts` | The tool in the initial `statuses`, in `startFailures`, and in `unsupportedTools`. Import each new icon and add it to `renderIcons`. |

@@ -25,7 +25,10 @@ function element<T extends HTMLElement = HTMLElement>(id: string): T {
 
 element("window-titlebar").hidden = !desktop.showWindowTitlebar;
 document.documentElement.style.setProperty("--session-width", `${SESSION_WIDTH}ch`);
-const updateToolOrder = mountTools();
+const updateToolOrder = mountTools(pinned => updatePreference("tools", {
+  key: "pinned",
+  apply: current => ({ ...current, pinned }),
+}));
 function renderIcons(): void {
   createIcons({
     icons: {
@@ -102,7 +105,7 @@ type FeedbackTarget = ToolId | "tools" | "settings";
 type FeedbackLine = { message: Message; tool?: ToolId };
 type PreferenceChoice = "duration" | "language" | "theme" | "hideWhileSharing" | "startToolsOnLaunch" | "seenVersion";
 type PreferenceChange = {
-  key: PreferenceChoice | ToolId | "proxySettings";
+  key: PreferenceChoice | ToolId | "proxySettings" | "pinned";
   apply: (current: Preferences) => Preferences;
 };
 const accessibilityLabels: Record<ActivityAccessibility, Message> = {
@@ -524,7 +527,7 @@ function renderControls(): void {
   }
   for (const hint of quickStartHints) setAttribute(hint, "data-quick-start-hint", quickStartHint());
   proxy.render(preferences.proxy, preferences.quickStart.proxy, statuses.proxy.mode !== "off", loaded);
-  updateToolOrder(translate);
+  updateToolOrder(translate, preferences.pinned);
   if (!workerAction?.keepQuickStartLayout) {
     const canStartSelected = !unavailable &&
       (tools.some(({ id }) => preferences.quickStart[id] && canChangeTool(id, true)) || proxy.hasQuickStart());

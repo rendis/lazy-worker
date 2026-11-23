@@ -128,6 +128,8 @@ pub struct Preferences {
     pub proxy: ProxySettings,
     /// What the Mac does with its lid closed while Caffeinate is on.
     pub lid_awake: crate::lid::LidMode,
+    /// The tools pinned to the front of Tools, in the order they were pinned.
+    pub pinned: Vec<String>,
     /// The version whose changes the user has seen.
     pub seen_version: Option<String>,
 }
@@ -145,6 +147,7 @@ impl Default for Preferences {
             hide_while_sharing: true,
             proxy: ProxySettings::default(),
             lid_awake: crate::lid::LidMode::default(),
+            pinned: Vec::new(),
             seen_version: None,
         }
     }

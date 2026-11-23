@@ -60,6 +60,8 @@ export type Preferences = {
   proxy: ProxySettings;
   /** What the Mac does with its lid closed while Caffeinate is on. */
   lidAwake: LidMode;
+  /** The tools pinned to the front of Tools, in the order they were pinned. */
+  pinned: ToolId[];
   /** The version whose changes the user has seen. `null` until the setup or What’s new closes. */
   seenVersion: string | null;
 };
@@ -82,6 +84,7 @@ export const defaults: Preferences = {
   startToolsOnLaunch: false,
   hideWhileSharing: true,
   lidAwake: "sleep",
+  pinned: [],
   seenVersion: null,
   caffeinate: {
     mode: "untilStopped",

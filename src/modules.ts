@@ -206,25 +206,14 @@ export function updateQuickStartMode(mode: "start" | "stop" | "mixed"): void {
   }
 }
 
-const pinsKey = "lazy-worker-pinned-tools";
-
-/** The tools the user pinned, in the order they were pinned. */
-function readPins(): ToolId[] {
-  try {
-    const saved = JSON.parse(localStorage.getItem(pinsKey) ?? "[]");
-    return Array.isArray(saved) ? saved.filter((id): id is ToolId => tools.some(tool => tool.id === id)) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function mountTools(): (translate: (message: Message) => string) => void {
+/** Mounts every tool. `onPin` saves the pins; the returned function applies saved pins and the language. */
+export function mountTools(onPin: (pinned: ToolId[]) => void): (translate: (message: Message) => string, pinned: readonly ToolId[]) => void {
   const navigation = document.getElementById("tool-navigation")!;
   const catalog = document.getElementById("tool-catalog")!;
   const rows = tools.map(tool => ({ tool, id: tool.id, row: mountTool(tool, navigation, catalog) }))
     .filter(({ tool }) => !tool.row?.group);
   let currentOrder = rows;
-  let pins = readPins();
+  let pins: ToolId[] = [];
   let translate: ((message: Message) => string) | undefined;
 
   function renderPins(): void {
@@ -243,14 +232,11 @@ export function mountTools(): (translate: (message: Message) => string) => void 
 
   for (const { id, row } of rows) {
     row.querySelector(".tool-pin")!.addEventListener("click", () => {
+      // The card moves at once. The preference follows.
       pins = pins.includes(id) ? pins.filter(pinned => pinned !== id) : [...pins, id];
-      try {
-        localStorage.setItem(pinsKey, JSON.stringify(pins));
-      } catch {
-        // Without storage, the pin lasts until the panel reloads.
-      }
       renderPins();
       reorder();
+      onPin(pins);
     });
   }
 
@@ -291,8 +277,9 @@ export function mountTools(): (translate: (message: Message) => string) => void 
     }
   }
 
-  function updateToolOrder(next: (message: Message) => string): void {
+  function updateToolOrder(next: (message: Message) => string, pinned: readonly ToolId[]): void {
     translate = next;
+    pins = pinned.filter(id => rows.some(row => row.id === id));
     renderPins();
     reorder();
   }

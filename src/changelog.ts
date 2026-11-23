@@ -13,8 +13,12 @@ export const releases: readonly Release[] = [
     version: "0.6.8",
     date: "2026-11-23",
     changes: [
-      { en: "The rows in Tools have more room at their edges.",
-        es: "Las filas de Herramientas tienen más espacio en sus bordes." },
+      { en: "Tools shows each tool as a compact card, three to a row.",
+        es: "Herramientas muestra cada herramienta como una tarjeta compacta, tres por fila." },
+      { en: "Pin a card to keep it at the front. Unpin it and it returns to its place.",
+        es: "Fija una tarjeta para tenerla al principio. Al desfijarla, vuelve a su lugar." },
+      { en: "The proxy card is now called AI Proxy Server and opens its module.",
+        es: "La tarjeta del proxy se llama ahora Servidor proxy de IA y abre su módulo." },
     ],
   },
   {
