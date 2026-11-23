@@ -3,6 +3,7 @@ import {
   type ProxySettings,
 } from "./desktop";
 import type { Message } from "./messages";
+import { age, formatMoment, type AgeUnit } from "./time";
 
 // Brand marks from Simple Icons 16.38.1 (CC0). The marks belong to their owners.
 const brandFiles = import.meta.glob<string>("./assets/brands/*.svg", { eager: true, import: "default", query: "?url" });
@@ -45,6 +46,9 @@ const maxAllowed = 64;
 type WindowMode = "log" | "access" | "peers";
 const windowTitles: Record<WindowMode, Message> = { log: "proxyLog", access: "proxyAccess", peers: "proxyPeers" };
 const serverAddressPattern = /^[A-Za-z0-9.\-[\]:]+:\d{1,5}$/;
+const ageMessages: Record<AgeUnit, Message> = {
+  seconds: "secondsAgo", minutes: "minutesAgo", hours: "hoursAgo", days: "daysAgo",
+};
 const ipv4 = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/;
 
 type Host = {
@@ -213,10 +217,9 @@ export function mountProxy(host: Host) {
     renderLists();
   }
 
-  function age(seconds: number): string {
-    return seconds < 60
-      ? host.translate("secondsAgo").replace("{n}", String(seconds))
-      : host.translate("minutesAgo").replace("{n}", String(Math.floor(seconds / 60)));
+  function elapsed(seconds: number): string {
+    const { value, unit } = age(seconds);
+    return host.translate(ageMessages[unit]).replace("{n}", String(value));
   }
 
   type Row = { root: HTMLElement; update(app: ProxyApp): void };
@@ -314,7 +317,7 @@ export function mountProxy(host: Host) {
       peer.name ? h("span", { class: "setting-note" }, peer.address) : false,
       h("span", { class: "setting-note proxy-peer-activity" }, active
         ? host.translate("proxyPeerActive").replace("{count}", String(peer.connections))
-        : age(peer.idleSeconds)),
+        : elapsed(peer.idleSeconds)),
       allowable && h("span", { class: "tip", "data-tip": label },
         h("button", {
           type: "button", class: "icon-button", "data-allow": peer.address, "aria-label": `${label} ${peer.address}`,
@@ -349,7 +352,7 @@ export function mountProxy(host: Host) {
 
   function logItem(entry: ProxyLogEntry): HTMLElement {
     return h("li", { class: "proxy-log-entry", "data-outcome": entry.outcome },
-      h("time", {}, new Date(entry.time * 1000).toLocaleTimeString([], { hour12: false })),
+      h("time", {}, formatMoment(entry.time, document.documentElement.lang)),
       h("span", {}, entry.peer),
       h("span", { class: "proxy-log-target" }, entry.target || "—"),
       h("span", { class: "proxy-log-outcome" }, host.translate(logOutcomes[entry.outcome])));

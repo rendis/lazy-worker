@@ -192,8 +192,8 @@ h1:focus { outline: none; }
   opacity: 1;
 }
 .session-timer {
-  /* Wide enough for a session of weeks, such as "28d 04:12". */
-  inline-size: 9ch;
+  /* `src/time.ts` sets the width its longest session text needs. */
+  inline-size: var(--session-width, 9ch);
   color: var(--secondary);
   font-size: 13px;
   font-weight: 650;
@@ -1417,7 +1417,8 @@ h1:focus { outline: none; }
 .proxy-log .setting-note { padding: 10px 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 .proxy-log-entry {
   display: grid;
-  grid-template-columns: 5.5em 9em minmax(0, 1fr) auto;
+  /* The first column holds a date with a time for a request from another day. */
+  grid-template-columns: 8em 9em minmax(0, 1fr) auto;
   align-items: center;
   gap: 14px;
   padding: 5px 6px 5px 0;

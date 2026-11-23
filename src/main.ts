@@ -14,6 +14,7 @@ import { messages, type Language, type Message } from "./messages";
 import { mountTools, tools, updateQuickStartMode, updateToolStatus, type ToolId } from "./modules";
 import { mountOperationProgress } from "./operation-progress";
 import { mountProxy } from "./proxy";
+import { formatSession, SESSION_WIDTH } from "./time";
 import { mountUpdateNotice } from "./update-notice";
 
 function element<T extends HTMLElement = HTMLElement>(id: string): T {
@@ -21,6 +22,7 @@ function element<T extends HTMLElement = HTMLElement>(id: string): T {
 }
 
 element("window-titlebar").hidden = !desktop.showWindowTitlebar;
+document.documentElement.style.setProperty("--session-width", `${SESSION_WIDTH}ch`);
 const updateToolOrder = mountTools();
 function renderIcons(): void {
   createIcons({
@@ -152,15 +154,6 @@ function translate(key: Message): string {
 function errorMessage(error: unknown, fallback: Message): Message {
   return typeof error === "string" && Object.prototype.hasOwnProperty.call(messages.en, error)
     ? error as Message : fallback;
-}
-
-/** Shows seconds under a day. From one day on, shows days with hours and minutes, so the width stays fixed. */
-function formatTime(seconds: number): string {
-  const pad = (part: number) => String(part).padStart(2, "0");
-  const days = Math.floor(seconds / 86_400);
-  const hours = Math.floor(seconds / 3600) % 24;
-  const minutes = Math.floor(seconds / 60) % 60;
-  return days > 0 ? `${days}d ${pad(hours)}:${pad(minutes)}` : `${pad(hours)}:${pad(minutes)}:${pad(seconds % 60)}`;
 }
 
 function setText(node: HTMLElement, text: string): void {
@@ -383,7 +376,7 @@ function renderStatus(): void {
     const remaining = tool === "activity" ? status.secondsLeft : null;
     const seconds = remaining ?? status.elapsedSeconds;
     if (seconds !== null) {
-      const display = formatTime(seconds);
+      const display = formatSession(seconds);
       const label = translate(remaining === null ? "elapsedTime" : "remainingTime");
       setText(timer, display);
       setAttribute(timer, "aria-label", label + " " + display);
