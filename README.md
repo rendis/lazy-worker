@@ -38,38 +38,44 @@ Each tool does one job. Miga, the wind-up helper, shows the desk without the too
 
 <br>
 
-<!-- Tool block. Copy it for each new tool and alternate align="left" and align="right". -->
-<img align="left" width="480" src="docs/images/activity.gif" alt="Without Activity, nobody touches the Mac and the chat status turns amber. With Activity, Miga pushes the pointer and the status turns green again.">
+<!-- Tool block. Copy one table for each new tool and put its clip on the other side: swap the two cells. -->
+<table>
+  <tr>
+    <td width="56%"><img src="docs/images/activity.gif" width="100%" alt="Without Activity, nobody touches the Mac and the chat status turns amber. With Activity, Miga pushes the pointer and the status turns green again."></td>
+    <td valign="middle">
+      <h3>Activity</h3>
+      <p>Moves the pointer briefly when your Mac is idle. Run it on a timer or a daily schedule.</p>
+      <p><a href="docs/user-guide.md#activity">Activity in the user guide →</a></p>
+    </td>
+  </tr>
+</table>
 
-### Activity
-
-Moves the pointer briefly when your Mac is idle. Run it on a timer or a daily schedule.
-
-[Activity in the user guide →](docs/user-guide.md#activity)
-
-<br clear="all">
 <br>
 
-<img align="right" width="480" src="docs/images/caffeinate.gif" alt="Without Caffeinate, the Mac falls asleep in the middle of a download. With Caffeinate, Miga offers it an espresso, it wakes up, and the download finishes.">
+<table>
+  <tr>
+    <td valign="middle">
+      <h3>Caffeinate</h3>
+      <p>Keeps your Mac awake for a set time, while a process runs, or until you stop it.</p>
+      <p><a href="docs/user-guide.md#caffeinate">Caffeinate in the user guide →</a></p>
+    </td>
+    <td width="56%"><img src="docs/images/caffeinate.gif" width="100%" alt="Without Caffeinate, the Mac falls asleep in the middle of a download. With Caffeinate, Miga offers it an espresso, it wakes up, and the download finishes."></td>
+  </tr>
+</table>
 
-### Caffeinate
-
-Keeps your Mac awake for a set time, while a process runs, or until you stop it.
-
-[Caffeinate in the user guide →](docs/user-guide.md#caffeinate)
-
-<br clear="all">
 <br>
 
-<img align="left" width="480" src="docs/images/proxy.gif" alt="Without Proxy, the Inspector blocks every request this Mac sends to its AI services. With Proxy, Miga throws a network cable to the other Mac, the requests reach the AI services through it, and the answers come back.">
+<table>
+  <tr>
+    <td width="56%"><img src="docs/images/proxy.gif" width="100%" alt="Without Proxy, the Inspector blocks every request this Mac sends to its AI services. With Proxy, Miga throws a network cable to the other Mac, the requests reach the AI services through it, and the answers come back."></td>
+    <td valign="middle">
+      <h3>AI Proxy</h3>
+      <p>Sends your AI tools' traffic through another computer on your network, when this one can't reach the service.</p>
+      <p><a href="docs/user-guide.md#proxy">Proxy in the user guide →</a></p>
+    </td>
+  </tr>
+</table>
 
-### AI Proxy
-
-Sends your AI tools' traffic through another computer on your network, when this one can't reach the service.
-
-[Proxy in the user guide →](docs/user-guide.md#proxy)
-
-<br clear="all">
 <br>
 
 ## What each tool can do
