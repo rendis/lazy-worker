@@ -36,5 +36,10 @@ fn main() {
         );
     }
 
-    tauri_build::build();
+    // App commands are allowed per window through capabilities, not for every window.
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .app_manifest(tauri_build::AppManifest::new().commands(&["dispatch"])),
+    )
+    .expect("Could not run the Tauri build");
 }

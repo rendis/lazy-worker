@@ -69,6 +69,11 @@ impl Lid {
         }
     }
 
+    /// True when the one-time permission is in place.
+    pub fn is_authorized() -> bool {
+        platform::authorized()
+    }
+
     /// Asks macOS for the one-time permission when it is missing.
     pub fn authorize() -> Result<(), &'static str> {
         if platform::authorized() {

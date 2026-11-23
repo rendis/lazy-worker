@@ -51,10 +51,10 @@ Step 1 touches these places. The TypeScript and Rust compilers report most of th
 | --- | --- |
 | `src/modules.ts` | The tool's ID in `ToolId` and its entry in `tools`: title, description, icon, and help. Add `section` when it sits under a broader sidebar entry, and `row` when its Tools row belongs to a group. |
 | `index.html` | A `data-module-view="<id>"` block that holds a `.module-body`. The shared header mounts before that body. |
-| `src/desktop.ts` | The tool in `defaults.quickStart`, in `previewStatuses`, and in the list `startPreviewTools` walks. Give each new native call a browser-preview result. |
+| `src/desktop.ts` | The tool in `defaults.quickStart`, in `previewStatuses`, and in the list `startPreviewTools` walks. Send each new native call through `call`, which uses the one `dispatch` command, and give it a browser-preview result. |
 | `src/main.ts` | The tool in the initial `statuses`, in `startFailures`, and in `unsupportedTools`. Import each new icon and add it to `renderIcons`. |
 | `src-tauri/src/<tool>.rs` | The tool itself: its settings, its status, and its worker behind a platform adapter. |
-| `src-tauri/src/main.rs` | The tool in `ToolId`, `Statuses`, and `Tools`, in `set_active` and `start_selected`, in the one-second clock, and in the stop on exit. Register each new command in `generate_handler!`. |
+| `src-tauri/src/main.rs` | The tool in `ToolId`, `Statuses`, and `Tools`, in `set_active` and `start_selected`, in the one-second clock, and in the stop on exit. Add each new native operation to `Request` in `src-tauri/src/dispatch.rs` and declare its access in `access`; `generate_handler!` registers only `dispatch`. |
 | `src-tauri/src/preferences.rs` | The tool's flag in `QuickStart`, and its settings in `Preferences` when it has any. |
 | `src-tauri/src/tray.rs` | The tool's state, its start and stop labels in both languages, its menu item, and its action. |
 

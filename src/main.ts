@@ -8,7 +8,7 @@ import {
 import { mountCaffeinateForm } from "./caffeinate-form";
 import {
   defaults, desktop, offStatus, type ActivityAccessibility, type LidMode, type LidStatus, type CaffeinateSettings, type Duration, type Preferences,
-  type Statuses, type Theme,
+  type ProxySettings, type Statuses, type Theme,
 } from "./desktop";
 import { messages, type Language, type Message } from "./messages";
 import { mountTools, tools, updateQuickStartMode, updateToolStatus, type ToolId } from "./modules";
@@ -717,9 +717,51 @@ async function updateLoginLaunch(enabled?: boolean): Promise<void> {
   }
 }
 
+type SaveStep = { changed: boolean; send: () => Promise<void>; done: (saved: Preferences) => Preferences };
+
+/** Sends each changed setting as its own request, in a fixed order, and keeps what was saved if a later one fails. */
 async function save(next: Preferences): Promise<void> {
-  await desktop.savePreferences(next);
-  savedPreferences = next;
+  const before = savedPreferences;
+  const differs = (pick: (preferences: Preferences) => unknown) =>
+    JSON.stringify(pick(next)) !== JSON.stringify(pick(before));
+  const choice = <Key extends PreferenceChoice | "schedule">(
+    key: Key, send: (value: Preferences[Key]) => Promise<void>,
+  ): SaveStep => ({
+    changed: differs(preferences => preferences[key]),
+    send: () => send(next[key]),
+    done: saved => ({ ...saved, [key]: next[key] }),
+  });
+  const proxyPart = <Key extends keyof ProxySettings>(
+    key: Key, send: (value: ProxySettings[Key]) => Promise<void>,
+  ): SaveStep => ({
+    changed: differs(preferences => preferences.proxy[key]),
+    send: () => send(next.proxy[key]),
+    done: saved => ({ ...saved, proxy: { ...saved.proxy, [key]: next.proxy[key] } }),
+  });
+  const steps: SaveStep[] = [
+    choice("language", desktop.saveLanguage),
+    choice("theme", desktop.saveTheme),
+    choice("duration", desktop.saveDuration),
+    choice("schedule", desktop.saveSchedule),
+    ...tools.map(({ id }): SaveStep => ({
+      changed: next.quickStart[id] !== before.quickStart[id],
+      send: () => desktop.saveQuickStart(id, next.quickStart[id]),
+      done: saved => ({ ...saved, quickStart: { ...saved.quickStart, [id]: next.quickStart[id] } }),
+    })),
+    choice("startToolsOnLaunch", desktop.saveStartToolsOnLaunch),
+    choice("hideWhileSharing", desktop.saveHideWhileSharing),
+    choice("seenVersion", desktop.saveSeenVersion),
+    proxyPart("role", desktop.saveProxyRole),
+    proxyPart("port", desktop.saveProxyPort),
+    proxyPart("server", desktop.saveProxyServer),
+    proxyPart("allowed", desktop.saveProxyAllowed),
+    proxyPart("apps", desktop.saveProxyApps),
+  ];
+  for (const { changed, send, done } of steps) {
+    if (!changed) continue;
+    await send();
+    savedPreferences = done(savedPreferences);
+  }
 }
 
 function updatePreference(target: FeedbackTarget, change: PreferenceChange): void {

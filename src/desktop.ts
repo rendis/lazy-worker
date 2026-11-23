@@ -159,6 +159,16 @@ function savePreviewPreferences(preferences: Preferences): void {
   localStorage.setItem(previewKey, JSON.stringify(preferences));
 }
 
+/** Every native call goes through the one `dispatch` command, which decides the access in Rust. */
+function call<T>(command: string, args?: object): Promise<T> {
+  return invoke<T>("dispatch", { request: { command, args } });
+}
+
+/** A preview keeps a saved setting in local storage. Caffeinate and the lid choice have their own calls. */
+function savePreview(change: (current: Preferences) => Preferences): void {
+  savePreviewPreferences(change(loadPreviewPreferences()));
+}
+
 function previewStatus(id: ToolId): Status {
   const session = previewSessions.get(id);
   const error = previewErrors.get(id) ?? null;
@@ -241,13 +251,13 @@ export const desktop = {
     return native ? getVersion() : previewVersion;
   },
   async getPreferences(): Promise<Preferences> {
-    if (native) return invoke("get_preferences");
+    if (native) return call("getPreferences");
     // A preview shows What’s new with `?whatsnew`.
     return { ...loadPreviewPreferences(), seenVersion: previewQuery.has("whatsnew") ? null : previewVersion };
   },
   async getSystemLanguage(): Promise<Language> {
     // WebKit can expose only the primary preferred language to the webview.
-    const local = native ? await invoke<Language | null>("get_system_language").catch(() => null) : null;
+    const local = native ? await call<Language | null>("getSystemLanguage").catch(() => null) : null;
     if (local) return local;
     for (const tag of navigator.languages) {
       const code = tag.toLowerCase().split(/[-_]/, 1)[0];
@@ -255,15 +265,65 @@ export const desktop = {
     }
     return "en";
   },
-  async savePreferences(preferences: Preferences): Promise<void> {
-    if (native) return invoke("save_preferences", { preferences });
-    savePreviewPreferences({ ...preferences, caffeinate: loadPreviewPreferences().caffeinate });
+  async saveLanguage(language: Preferences["language"]): Promise<void> {
+    if (native) return call("setLanguage", { language });
+    savePreview(current => ({ ...current, language }));
+  },
+  async saveTheme(theme: Theme): Promise<void> {
+    if (native) return call("setTheme", { theme });
+    savePreview(current => ({ ...current, theme }));
+  },
+  async saveDuration(duration: Duration): Promise<void> {
+    if (native) return call("setDuration", { duration });
+    savePreview(current => ({ ...current, duration }));
+  },
+  async saveSchedule(schedule: Preferences["schedule"]): Promise<void> {
+    if (native) return call("setSchedule", { schedule });
+    savePreview(current => ({ ...current, schedule }));
+  },
+  async saveQuickStart(tool: ToolId, include: boolean): Promise<void> {
+    if (native) return call("setQuickStart", { tool, include });
+    savePreview(current => ({ ...current, quickStart: { ...current.quickStart, [tool]: include } }));
+  },
+  async saveStartToolsOnLaunch(enabled: boolean): Promise<void> {
+    if (native) return call("setStartToolsOnLaunch", { enabled });
+    savePreview(current => ({ ...current, startToolsOnLaunch: enabled }));
+  },
+  async saveHideWhileSharing(enabled: boolean): Promise<void> {
+    if (native) return call("setHideWhileSharing", { enabled });
+    savePreview(current => ({ ...current, hideWhileSharing: enabled }));
+  },
+  async saveSeenVersion(version: string | null): Promise<void> {
+    if (native) return call("setSeenVersion", { version });
+    savePreview(current => ({ ...current, seenVersion: version }));
+  },
+  async saveProxyRole(role: ProxySettings["role"]): Promise<void> {
+    if (native) return call("setProxyRole", { role });
+    savePreview(current => ({ ...current, proxy: { ...current.proxy, role } }));
+  },
+  async saveProxyPort(port: number): Promise<void> {
+    if (native) return call("setProxyPort", { port });
+    savePreview(current => ({ ...current, proxy: { ...current.proxy, port } }));
+  },
+  async saveProxyServer(server: string): Promise<void> {
+    if (native) return call("setProxyServer", { server });
+    savePreview(current => ({ ...current, proxy: { ...current.proxy, server } }));
+  },
+  /** The Access list is saved on this Mac only. */
+  async saveProxyAllowed(allowed: string[]): Promise<void> {
+    if (native) return call("saveProxyAllowed", { allowed });
+    savePreview(current => ({ ...current, proxy: { ...current.proxy, allowed } }));
+  },
+  /** The client list holds commands to run, so it is saved on this Mac only. */
+  async saveProxyApps(apps: ProxyApp[]): Promise<void> {
+    if (native) return call("saveProxyApps", { apps });
+    savePreview(current => ({ ...current, proxy: { ...current.proxy, apps } }));
   },
   async getLoginLaunch(): Promise<boolean> {
-    return invoke("get_login_launch");
+    return call("getLoginLaunch");
   },
   async setLoginLaunch(enabled: boolean): Promise<void> {
-    return invoke("set_login_launch", { enabled });
+    return call("setLoginLaunch", { enabled });
   },
   startPreviewTools(preferences: Preferences): void {
     if (native || !preferences.startToolsOnLaunch) return;
@@ -272,7 +332,7 @@ export const desktop = {
     }
   },
   async saveCaffeinateSettings(settings: CaffeinateSettings): Promise<Statuses> {
-    if (native) return invoke("save_caffeinate_settings", { settings });
+    if (native) return call("saveCaffeinateSettings", { settings });
     const error = previewCaffeinateError(settings);
     if (error) throw error;
     savePreviewPreferences({ ...loadPreviewPreferences(), caffeinate: settings });
@@ -280,21 +340,21 @@ export const desktop = {
     return previewStatuses();
   },
   async listProcesses(): Promise<RunningProcess[]> {
-    return native ? invoke("list_caffeinate_processes") : [
+    return native ? call("listCaffeinateProcesses") : [
       { pid: 410, name: "Finder" },
       { pid: 625, name: "Safari" },
       { pid: 867, name: "Terminal" },
     ];
   },
   async getStatuses(): Promise<Statuses> {
-    return native ? invoke("get_statuses") : previewStatuses();
+    return native ? call("getStatuses") : previewStatuses();
   },
   async getProxyNetwork(): Promise<ProxyNetwork> {
-    if (native) return invoke("get_proxy_network");
+    if (native) return call("getProxyNetwork");
     return { hostname: "studio.local", addresses: ["192.168.1.20"] };
   },
   async getProxyPeers(): Promise<ProxyPeer[]> {
-    if (native) return invoke("get_proxy_peers");
+    if (native) return call("getProxyPeers");
     const session = previewSessions.get("proxy");
     if (!session) return [];
     const seconds = Math.floor((performance.now() - session.started) / 1000);
@@ -304,7 +364,7 @@ export const desktop = {
     ];
   },
   async getProxyLog(): Promise<ProxyLogEntry[]> {
-    if (native) return invoke("get_proxy_log");
+    if (native) return call("getProxyLog");
     const session = previewSessions.get("proxy");
     if (!session) return [];
     const targets = ["api.anthropic.com:443", "statsig.anthropic.com:443", "api.openai.com:443", "localhost:8080"];
@@ -323,40 +383,40 @@ export const desktop = {
     });
   },
   async detectProxyApps(): Promise<ProxyInstalls> {
-    return native ? invoke("detect_proxy_apps") : { claudeCode: true, claudeApp: true, codexCode: false, codexApp: true };
+    return native ? call("detectProxyApps") : { claudeCode: true, claudeApp: true, codexCode: false, codexApp: true };
   },
   async checkProxyServer(address: string): Promise<boolean> {
-    return native ? invoke("check_proxy_server", { address }) : !address.startsWith("offline");
+    return native ? call("checkProxyServer", { address }) : !address.startsWith("offline");
   },
   async launchProxyApp(id: string): Promise<void> {
-    if (native) return invoke("launch_proxy_app", { id });
+    if (native) return call("launchProxyApp", { id });
   },
   async getActivityAccessibility(): Promise<ActivityAccessibility> {
     // A preview shows a missing permission with `?accessibility=required`.
-    return native ? invoke("get_activity_accessibility") : (previewQuery.get("accessibility") as ActivityAccessibility | null) ?? "unsupported";
+    return native ? call("getActivityAccessibility") : (previewQuery.get("accessibility") as ActivityAccessibility | null) ?? "unsupported";
   },
   async requestActivityAccessibility(): Promise<void> {
-    if (native) return invoke("request_activity_accessibility");
+    if (native) return call("requestActivityAccessibility");
   },
   /** True on the first launch of a new installation. A preview shows the setup with `?onboarding`. */
   async getFirstRun(): Promise<boolean> {
-    return native ? invoke("get_first_run") : previewQuery.has("onboarding");
+    return native ? call("getFirstRun") : previewQuery.has("onboarding");
   },
   async getLidStatus(): Promise<LidStatus> {
     // A preview shows a Mac that already stays awake with `?lid-external`.
-    return native ? invoke("get_lid_status") : { supported: true, external: previewQuery.has("lid-external") };
+    return native ? call("getLidStatus") : { supported: true, external: previewQuery.has("lid-external") };
   },
   /** Saves the choice. macOS can ask for an administrator password before it answers. */
   async setLidMode(mode: LidMode): Promise<LidStatus> {
-    if (native) return invoke("set_lid_mode", { mode });
+    if (native) return call("setLidMode", { mode });
     await new Promise(resolve => setTimeout(resolve, 500));
     return { supported: true, external: false };
   },
   async getUpdateStatus(): Promise<UpdateStatus> {
-    return macApp ? invoke("get_update_status") : previewUpdate;
+    return macApp ? call("getUpdateStatus") : previewUpdate;
   },
   async checkForUpdate(): Promise<UpdateStatus> {
-    if (macApp) return invoke("check_for_update");
+    if (macApp) return call("checkForUpdate");
     await new Promise(resolve => setTimeout(resolve, 700));
     // A preview finds an update with `?update=<version>`.
     previewUpdate = { version: previewQuery.get("update"), checked: Math.floor(Date.now() / 1000) };
@@ -367,7 +427,7 @@ export const desktop = {
   },
   /** Installs the latest release, which can be newer than the one the notice named, and restarts. */
   async restartToUpdate(): Promise<void> {
-    if (macApp) await invoke("restart_to_update");
+    if (macApp) await call("restartToUpdate");
   },
   onFocus(refresh: () => void): void {
     if (native) {
@@ -379,7 +439,7 @@ export const desktop = {
     }
   },
   async setToolActive(tool: ToolId, active: boolean): Promise<Statuses> {
-    if (native) return invoke("set_tool_active", { tool, active });
+    if (native) return call("setToolActive", { tool, active });
     setPreviewActive(tool, active, loadPreviewPreferences());
     return previewStatuses();
   },
