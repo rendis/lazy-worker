@@ -1307,6 +1307,7 @@ h1:focus { outline: none; }
   font-weight: 640;
   text-decoration: underline;
   text-underline-offset: 3px;
+  white-space: nowrap;
 }
 .text-link:hover:enabled { color: var(--text); }
 .text-link:enabled:active, .icon-button:enabled:active, .tool-group-toggle:enabled:active, .proxy-add-button:enabled:active { box-shadow: none; }
@@ -1383,8 +1384,30 @@ h1:focus { outline: none; }
   font-size: 12px;
 }
 .proxy-log:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.proxy-log:not([data-mode="log"]) { font-family: inherit; font-size: 13px; }
+.proxy-log[data-mode="access"] li:not(.setting-note), .proxy-log[data-mode="peers"] .proxy-peer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  min-height: 38px;
+  padding: 3px 4px 3px 0;
+  border-bottom: 1px solid var(--hairline);
+  font-variant-numeric: tabular-nums;
+}
+.proxy-log[data-mode="access"] li > span { flex: 1; }
+.proxy-log[data-mode="access"] button {
+  display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 8px;
+  background: transparent; color: var(--secondary);
+}
+.proxy-log[data-mode="access"] button:hover { background: var(--glass); color: var(--text); }
+.proxy-log[data-mode="access"] .lucide { width: 14px; height: 14px; }
+.proxy-log[data-mode="peers"] .proxy-peer-activity { margin-inline-start: auto; }
+.list-more { border: 0 !important; padding: 0 !important; }
+.field[aria-invalid="true"] { border-bottom-color: var(--pending-color); box-shadow: 0 1px 0 var(--pending-color); }
+.proxy-peer .icon-button { width: 26px; height: 26px; }
 .proxy-log .setting-note { padding: 10px 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-.proxy-log li:not(.setting-note) {
+.proxy-log-entry {
   display: grid;
   grid-template-columns: 5.5em 9em minmax(0, 1fr) auto;
   align-items: center;
@@ -1403,8 +1426,8 @@ h1:focus { outline: none; }
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 .proxy-log-outcome::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--online); }
-.proxy-log li:not([data-outcome="ok"]) .proxy-log-outcome { color: var(--pending-color); }
-.proxy-log li:not([data-outcome="ok"]) .proxy-log-outcome::before { background: var(--control-accent); }
+.proxy-log-entry:not([data-outcome="ok"]) .proxy-log-outcome { color: var(--pending-color); }
+.proxy-log-entry:not([data-outcome="ok"]) .proxy-log-outcome::before { background: var(--control-accent); }
 .proxy-server-entry { display: flex; align-items: center; gap: 14px; }
 #proxy-server-address { width: 230px; }
 .proxy-state { display: inline-flex; align-items: center; gap: 7px; color: var(--secondary); font-size: 13px; font-weight: 640; white-space: nowrap; }

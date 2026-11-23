@@ -31,6 +31,8 @@
 - Give each built-in proxy tool an `app` and a `code` command. List App first and use it as the default. Find a desktop app by its bundle identifier.
 - Keep the proxy request log in memory with a fixed size. Drop the oldest entry first and clear the log when the server stops.
 - Show a live list, such as the proxy requests, in a `.log-overlay` window over the view, so the layout under it does not move.
+- Show at most three entries of a list inside a row. Put the rest behind a count that opens the full list in that window.
+- Filter a field as the user types when its value has a fixed alphabet, and show its error in the row's own note.
 - Center the macOS window buttons in the 42 px title bar through `trafficLightPosition`. Its `y` plus the 16 px button height gives the height of the band that centers them.
 - Find command-line clients through the login shell `PATH`. Open a command-line client through a `.command` script in Terminal, and run an `open` command directly.
 - Derive Tools bulk actions from the runtime state of modules included in Quick start. Keep the action layout stable until a bulk operation finishes. Share one surface across single actions so only their icon and label crossfade. Keep row power available independently of the selection.

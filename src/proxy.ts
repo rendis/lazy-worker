@@ -38,6 +38,10 @@ const customIcons = [
 const logOutcomes: Record<ProxyLogEntry["outcome"], Message> = {
   ok: "logOk", denied: "logDenied", blocked: "logBlocked", unreachable: "logUnreachable", invalid: "logInvalid",
 };
+const listPreview = 3;
+const maxAllowed = 64;
+type WindowMode = "log" | "access" | "peers";
+const windowTitles: Record<WindowMode, Message> = { log: "proxyLog", access: "proxyAccess", peers: "proxyPeers" };
 const serverAddressPattern = /^[A-Za-z0-9.\-[\]:]+:\d{1,5}$/;
 const ipv4 = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/;
 
@@ -101,6 +105,8 @@ export function mountProxy(host: Host) {
   const logTip = element("proxy-log-tip");
   const logWindowCount = element("proxy-log-window-count");
   const logClose = element<HTMLButtonElement>("proxy-log-close");
+  const windowTitle = element("proxy-log-title");
+  const windowNote = element("proxy-window-note");
   const logList = element("proxy-log");
   const serverAddress = element<HTMLInputElement>("proxy-server-address");
   const serverState = element("proxy-server-state");
@@ -122,6 +128,9 @@ export function mountProxy(host: Host) {
   let network: ProxyNetwork = { hostname: null, addresses: [] };
   let peers: ProxyPeer[] = [];
   let log: ProxyLogEntry[] = [];
+  let windowMode: WindowMode | undefined;
+  let windowTrigger: HTMLElement | undefined;
+  let allowInvalid = false;
   let peersRequested = 0;
   let installs: ProxyInstalls | undefined;
   let reachable: boolean | undefined;
@@ -278,58 +287,95 @@ export function mountProxy(host: Host) {
     });
   }
 
+  function moreButton(mode: WindowMode, hidden: number): HTMLElement {
+    return h("button", { type: "button", class: "text-link", "data-window": mode },
+      host.translate("moreCount").replace("{count}", String(hidden)));
+  }
+
+  function allowedItem(address: string): HTMLElement {
+    return h("li", {},
+      h("span", {}, address),
+      h("button", {
+        type: "button", "data-remove": address,
+        "aria-label": host.translate("removeAddress").replace("{address}", address),
+      }, icon("x")));
+  }
+
+  function peerItem(peer: ProxyPeer): HTMLElement {
+    const active = peer.connections > 0;
+    const allowed = settings!.allowed.includes(peer.address);
+    // The server always admits its own computer, so that one needs no entry.
+    const allowable = ipv4.test(peer.address) && !peer.address.startsWith("127.");
+    const label = host.translate(allowed ? "proxyAllowed" : "proxyAllowPeer");
+    return h("li", { class: "proxy-peer", "data-active": active },
+      h("span", { class: "proxy-peer-name" }, peer.name ?? peer.address),
+      peer.name ? h("span", { class: "setting-note" }, peer.address) : false,
+      h("span", { class: "setting-note proxy-peer-activity" }, active
+        ? host.translate("proxyPeerActive").replace("{count}", String(peer.connections))
+        : age(peer.idleSeconds)),
+      allowable && h("span", { class: "tip", "data-tip": label },
+        h("button", {
+          type: "button", class: "icon-button", "data-allow": peer.address, "aria-label": `${label} ${peer.address}`,
+          disabled: allowed || settings!.allowed.length >= maxAllowed,
+        }, icon(allowed ? "check" : "plus"))));
+  }
+
   function renderAccess(): void {
     const list = settings!.allowed;
-    accessNote.textContent = host.translate(list.length ? "proxyAccessLimited" : "proxyAccessOpen");
-    accessNote.toggleAttribute("data-warning", list.length === 0);
-    sync("allowed", [list, host.translate("removeAddress")], () => {
-      allowed.replaceChildren(...list.map(address => h("li", {},
-        h("span", {}, address),
-        h("button", {
-          type: "button", "data-remove": address,
-          "aria-label": host.translate("removeAddress").replace("{address}", address),
-        }, icon("x")),
-      )));
+    accessNote.textContent = host.translate(
+      allowInvalid ? "proxyInvalidAddress" : list.length ? "proxyAccessLimited" : "proxyAccessOpen");
+    accessNote.toggleAttribute("data-warning", allowInvalid || list.length === 0);
+    if (allowInvalid) allow.setAttribute("aria-invalid", "true");
+    else allow.removeAttribute("aria-invalid");
+    sync("allowed", [list, host.translate("moreCount")], () => {
+      allowed.replaceChildren(...list.slice(0, listPreview).map(allowedItem),
+        list.length > listPreview && h("li", { class: "list-more" }, moreButton("access", list.length - listPreview)) || "");
     });
   }
 
   function renderPeers(): void {
-    sync("peers", [running, peers, host.translate("proxyPeerIdle")], () => {
+    sync("peers", [running, peers, settings!.allowed, host.translate("proxyPeerIdle")], () => {
       if (!running || peers.length === 0) {
         peerList.replaceChildren(h("li", { class: "setting-note" },
           host.translate(running ? "proxyPeersNone" : "proxyPeersOff")));
         return;
       }
-      peerList.replaceChildren(...peers.map(peer => {
-        const active = peer.connections > 0;
-        return h("li", { class: "proxy-peer", "data-active": active },
-          h("span", { class: "proxy-peer-name" }, peer.name ?? peer.address),
-          peer.name ? h("span", { class: "setting-note" }, peer.address) : false,
-          h("span", { class: "setting-note proxy-peer-activity" }, active
-            ? host.translate("proxyPeerActive").replace("{count}", String(peer.connections))
-            : age(peer.idleSeconds)));
-      }));
+      peerList.replaceChildren(...peers.slice(0, listPreview).map(peerItem),
+        peers.length > listPreview && h("li", { class: "list-more" }, moreButton("peers", peers.length - listPreview)) || "");
     });
   }
 
-  function renderLog(): void {
-    const open = logPanel.hasAttribute("data-open");
+  function logItem(entry: ProxyLogEntry): HTMLElement {
+    return h("li", { class: "proxy-log-entry", "data-outcome": entry.outcome },
+      h("time", {}, new Date(entry.time * 1000).toLocaleTimeString([], { hour12: false })),
+      h("span", {}, entry.peer),
+      h("span", { class: "proxy-log-target" }, entry.target || "—"),
+      h("span", { class: "proxy-log-outcome" }, host.translate(logOutcomes[entry.outcome])));
+  }
+
+  /** One window over the view lists what a row cannot hold: requests, allowed addresses, or computers. */
+  function renderWindow(): void {
     const count = !running ? "" : host.translate("proxyLogCount").replace("{count}", String(log.length));
     logCount.textContent = count;
-    logWindowCount.textContent = count;
     logTip.dataset.tip = host.translate("proxyLogShow");
-    sync("log", [running, open, open && log, host.translate("logOk")], () => {
-      if (!open) return;
-      if (log.length === 0) {
-        logList.replaceChildren(h("li", { class: "setting-note" },
-          host.translate(running ? "proxyLogEmpty" : "proxyLogOff")));
+    const mode = windowMode;
+    if (!mode) return;
+    const items = { log, access: settings!.allowed, peers }[mode];
+    windowTitle.textContent = host.translate(windowTitles[mode]);
+    logWindowCount.textContent = mode === "log" ? count : String(items.length);
+    windowNote.textContent = mode === "log" ? host.translate("proxyLogNote")
+      : mode === "access" ? host.translate(items.length ? "proxyAccessLimited" : "proxyAccessOpen") : "";
+    windowNote.hidden = windowNote.textContent === "";
+    sync("window", [mode, running, items, settings!.allowed, host.translate("logOk")], () => {
+      logList.dataset.mode = mode;
+      if (items.length === 0) {
+        const empty: Message = mode === "access" ? "proxyAccessOpen"
+          : mode === "peers" ? (running ? "proxyPeersNone" : "proxyPeersOff") : running ? "proxyLogEmpty" : "proxyLogOff";
+        logList.replaceChildren(h("li", { class: "setting-note" }, host.translate(empty)));
         return;
       }
-      logList.replaceChildren(...log.map(entry => h("li", { "data-outcome": entry.outcome },
-        h("time", {}, new Date(entry.time * 1000).toLocaleTimeString([], { hour12: false })),
-        h("span", {}, entry.peer),
-        h("span", { class: "proxy-log-target" }, entry.target || "—"),
-        h("span", { class: "proxy-log-outcome" }, host.translate(logOutcomes[entry.outcome])))));
+      logList.replaceChildren(...(mode === "log" ? log.map(logItem)
+        : mode === "access" ? settings!.allowed.map(allowedItem) : peers.map(peerItem)));
     });
   }
 
@@ -483,7 +529,7 @@ export function mountProxy(host: Host) {
     renderAddresses();
     renderAccess();
     renderPeers();
-    renderLog();
+    renderWindow();
     renderApps();
     renderServerState();
   }
@@ -621,19 +667,19 @@ export function mountProxy(host: Host) {
   allowForm.addEventListener("submit", event => {
     event.preventDefault();
     const address = allow.value.trim();
-    const valid = ipv4.test(address);
-    allow.setCustomValidity(valid ? "" : host.translate("proxyInvalidAddress"));
-    if (!valid) {
-      allow.reportValidity();
-      return;
+    allowInvalid = !ipv4.test(address);
+    if (!allowInvalid) {
+      allowAddress(address);
+      allow.value = "";
     }
-    host.update(current => current.allowed.includes(address) ? current : { ...current, allowed: [...current.allowed, address] });
-    allow.value = "";
+    renderLists();
   });
-  allow.addEventListener("input", () => allow.setCustomValidity(""));
-  allowed.addEventListener("click", event => {
-    const address = (event.target as Element).closest<HTMLElement>("[data-remove]")?.dataset.remove;
-    if (address) host.update(current => ({ ...current, allowed: current.allowed.filter(entry => entry !== address) }));
+  // Only digits and dots can form an IPv4 address, so nothing else reaches the field.
+  allow.addEventListener("input", () => {
+    const clean = allow.value.replace(/[^0-9.]/g, "").slice(0, 15);
+    if (clean !== allow.value) allow.value = clean;
+    allowInvalid = false;
+    renderLists();
   });
   addresses.addEventListener("click", event => {
     const target = (event.target as Element).closest<HTMLElement>("[data-copy]")?.dataset.copy;
@@ -717,16 +763,34 @@ export function mountProxy(host: Host) {
     host.update(current => ({ ...current, apps: [...current.apps, app] }));
     setAdding(false);
   });
-  /** The requests open in a window over the view, so the layout below stays in place. */
-  function setLogOpen(open: boolean): void {
-    if (logPanel.hasAttribute("data-open") === open) return;
-    logPanel.toggleAttribute("data-open", open);
-    logPanel.inert = !open;
-    logToggle.setAttribute("aria-expanded", String(open));
+  function setWindow(mode: WindowMode | undefined, trigger?: HTMLElement): void {
+    if (windowMode === mode) return;
+    const previous = windowTrigger;
+    windowMode = mode;
+    windowTrigger = mode ? trigger : undefined;
+    logPanel.toggleAttribute("data-open", mode !== undefined);
+    logPanel.inert = mode === undefined;
+    logToggle.setAttribute("aria-expanded", String(mode === "log"));
     renderLists();
-    if (open) logClose.focus();
-    else if (!view.hidden) logToggle.focus();
+    if (mode) logClose.focus();
+    else if (!view.hidden && previous?.isConnected) previous.focus();
   }
+  const setLogOpen = (open: boolean) => setWindow(open ? "log" : undefined, logToggle);
+  /** Rows and the window share these actions, so a list behaves the same in both places. */
+  function listAction(event: Event): void {
+    const control = (event.target as Element).closest<HTMLElement>("[data-remove], [data-allow], [data-window]");
+    if (!control) return;
+    const { remove, allow: address, window: mode } = control.dataset;
+    if (remove) host.update(current => ({ ...current, allowed: current.allowed.filter(entry => entry !== remove) }));
+    if (address) allowAddress(address);
+    if (mode) setWindow(mode as WindowMode, control);
+  }
+  function allowAddress(address: string): void {
+    host.update(current => current.allowed.includes(address) || current.allowed.length >= maxAllowed
+      ? current : { ...current, allowed: [...current.allowed, address] });
+  }
+  serverPanel.addEventListener("click", listAction);
+  logList.addEventListener("click", listAction);
   logToggle.addEventListener("click", () => setLogOpen(true));
   logClose.addEventListener("click", () => setLogOpen(false));
   logPanel.addEventListener("pointerdown", event => {

@@ -265,7 +265,8 @@
                   <ul class="chips" id="proxy-allowed"></ul>
                   <form id="proxy-allow-form" novalidate>
                     <input class="field" id="proxy-allow" type="text" inputmode="decimal" autocomplete="off" spellcheck="false"
-                      placeholder="192.168.1.33" data-label="proxyAllow" aria-label="Allow an IP address" disabled />
+                      placeholder="192.168.1.33" maxlength="15" data-label="proxyAllow" aria-label="Allow an IP address"
+                      aria-describedby="proxy-access-note" disabled />
                     <button type="submit" class="icon-button" data-label="proxyAllow" aria-label="Allow an IP address"><i data-lucide="plus"></i></button>
                   </form>
                 </div>
@@ -451,12 +452,12 @@
         <section class="log-window" role="dialog" aria-labelledby="proxy-log-title">
           <header>
             <i data-lucide="scroll-text"></i>
-            <h2 id="proxy-log-title" data-text="proxyLog">Requests</h2>
+            <h2 id="proxy-log-title">Requests</h2>
             <span class="setting-note" id="proxy-log-window-count"></span>
             <button type="button" class="icon-button" id="proxy-log-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
           </header>
-          <ol class="proxy-log" id="proxy-log" tabindex="0" data-label="proxyLog" aria-label="Requests"></ol>
-          <p class="setting-note" data-text="proxyLogNote">Only the last 200 are kept. They are cleared when the proxy turns off.</p>
+          <ol class="proxy-log" id="proxy-log" tabindex="0" aria-labelledby="proxy-log-title"></ol>
+          <p class="setting-note" id="proxy-window-note"></p>
         </section>
       </div>
       <div class="notification-stack">
