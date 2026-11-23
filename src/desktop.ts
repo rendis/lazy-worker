@@ -55,6 +55,8 @@ export type Preferences = {
   caffeinate: CaffeinateSettings;
   hideWhileSharing: boolean;
   proxy: ProxySettings;
+  /** The version whose changes the user has seen. `null` until the setup or What’s new closes. */
+  seenVersion: string | null;
 };
 export type Status = {
   mode: "off" | "manual" | "scheduled";
@@ -74,6 +76,7 @@ export const defaults: Preferences = {
   quickStart: { activity: false, caffeinate: false, proxy: false },
   startToolsOnLaunch: false,
   hideWhileSharing: true,
+  seenVersion: null,
   caffeinate: {
     mode: "untilStopped",
     flags: { i: true, d: false, m: false, s: false, u: false },
@@ -108,6 +111,7 @@ type PreviewSession = {
   caffeinate?: CaffeinateSettings;
 };
 const native = isTauri();
+const previewQuery = new URLSearchParams(location.search);
 let previewUpdate: UpdateStatus = { version: null, checked: null };
 const macApp = native && navigator.userAgent.includes("Macintosh");
 const previewKey = "lazy-worker-preview-preferences";
@@ -231,7 +235,9 @@ export const desktop = {
     return native ? getVersion() : previewVersion;
   },
   async getPreferences(): Promise<Preferences> {
-    return native ? invoke("get_preferences") : loadPreviewPreferences();
+    if (native) return invoke("get_preferences");
+    // A preview shows What’s new with `?whatsnew`.
+    return { ...loadPreviewPreferences(), seenVersion: previewQuery.has("whatsnew") ? null : previewVersion };
   },
   async getSystemLanguage(): Promise<Language> {
     // WebKit can expose only the primary preferred language to the webview.
@@ -327,7 +333,7 @@ export const desktop = {
   },
   /** True on the first launch of a new installation. A preview shows the setup with `?onboarding`. */
   async getFirstRun(): Promise<boolean> {
-    return !native && new URLSearchParams(location.search).has("onboarding");
+    return native ? invoke("get_first_run") : previewQuery.has("onboarding");
   },
   async getUpdateStatus(): Promise<UpdateStatus> {
     return macApp ? invoke("get_update_status") : previewUpdate;

@@ -126,6 +126,8 @@ pub struct Preferences {
     pub caffeinate: CaffeinateSettings,
     pub hide_while_sharing: bool,
     pub proxy: ProxySettings,
+    /// The version whose changes the user has seen.
+    pub seen_version: Option<String>,
 }
 
 impl Default for Preferences {
@@ -140,6 +142,7 @@ impl Default for Preferences {
             caffeinate: CaffeinateSettings::default(),
             hide_while_sharing: true,
             proxy: ProxySettings::default(),
+            seen_version: None,
         }
     }
 }

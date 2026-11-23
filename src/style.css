@@ -1624,7 +1624,7 @@ h1:focus { outline: none; }
   animation: view-enter .24s ease-out;
 }
 .onboarding[hidden] { display: none; }
-.onboarding-card { display: grid; grid-template-rows: auto 1fr auto; width: min(600px, 100%); height: min(470px, 100%); }
+.onboarding-card { display: grid; grid-template-rows: auto 1fr auto; width: min(620px, 100%); height: min(520px, 100%); }
 .onboarding-mark { margin-bottom: 18px; border-radius: 12px; }
 .onboarding-steps { min-height: 0; }
 .onboarding-step:not([hidden]) { animation: onboarding-forward .26s var(--selection-easing); }
@@ -1642,6 +1642,7 @@ h1:focus { outline: none; }
 .onboarding .setting-row { min-height: 58px; }
 .onboarding label.setting-row { cursor: pointer; }
 .onboarding .setting-row .segments { --segment-count: 3; width: 300px; }
+.onboarding .setting-row .duration-segments { --segment-count: 4; width: 400px; }
 .onboarding .setting-row .segments button { gap: 5px; }
 .onboarding .setting-row .segments .lucide { width: 15px; height: 15px; }
 .onboarding-option { display: grid; gap: 2px; min-width: 0; }
@@ -1676,3 +1677,35 @@ h1:focus { outline: none; }
 @media (prefers-reduced-motion: reduce) {
   .onboarding, .onboarding-step:not([hidden]) { animation: none; }
 }
+
+.onboarding .setting-row > .onboarding-button { height: 32px; padding: 0 12px; font-size: 13px; }
+#onboarding-permission-state[data-granted] { color: var(--online); }
+.onboarding-later { margin-top: 12px; }
+.onboarding-tools { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 6px; }
+.onboarding-tool { min-width: 0; }
+.onboarding-tool video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--track);
+  object-fit: cover;
+}
+.onboarding-tool-head { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.onboarding-tool-head .lucide { width: 17px; height: 17px; color: var(--secondary); }
+.onboarding-tool-head h2 { font-size: 15px; font-weight: 720; }
+.onboarding-tool-head .switch { margin-inline-start: auto; }
+.onboarding-tool .setting-note { margin-top: 2px; }
+.onboarding[data-step="tools"] .onboarding-mark { display: none; }
+
+.settings-version-actions { display: flex; flex: none; gap: 14px; }
+.changelog-window { grid-template-rows: auto minmax(0, 1fr); width: min(560px, 100%); }
+.changelog { min-height: 0; padding: 4px 6px 4px 2px; overflow-y: auto; border-top: 1px solid var(--hairline); }
+.changelog section { padding: 12px 0; border-bottom: 1px solid var(--hairline); }
+.changelog section:last-child { border-bottom: 0; }
+.changelog h3 { display: flex; align-items: baseline; gap: 10px; font-size: 15px; font-weight: 720; }
+.changelog time { color: var(--secondary); font-size: 12px; font-weight: 600; }
+.changelog ul { margin: 6px 0 0; padding-inline-start: 18px; }
+.changelog li { margin-top: 4px; font-size: 13.5px; line-height: 1.45; }
+.changelog li::marker { color: var(--choice); }

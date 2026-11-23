@@ -39,6 +39,12 @@ export function age(seconds: number): { value: number; unit: AgeUnit } {
   return { value: Math.floor(total / DAY), unit: "days" };
 }
 
+/** A calendar day from an ISO date, such as `23 Nov 2026`. Its longest text has 12 characters. */
+export function formatDay(isoDate: string, locale: string): string {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString(locale, { day: "numeric", month: "short", year: "numeric" });
+}
+
 /**
  * The moment of an event: the time alone when it happened today, and the date with the time otherwise.
  * `now` exists for tests.

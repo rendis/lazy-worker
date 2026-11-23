@@ -128,6 +128,14 @@ impl Tools {
 
 type Controller = Arc<Mutex<Tools>>;
 
+/// True when this launch found no saved preferences, so it is a new installation.
+struct FirstRun(bool);
+
+#[tauri::command]
+fn get_first_run(first_run: State<'_, FirstRun>) -> bool {
+    first_run.0
+}
+
 /// Records the running tools, so the launch after an update starts them again.
 #[cfg(target_os = "macos")]
 fn remember_running(app: &tauri::AppHandle) {
@@ -299,6 +307,7 @@ fn main() {
             let directory = app.path().app_config_dir()?;
             fs::create_dir_all(&directory)?;
             let path = directory.join("preferences.json");
+            app.manage(FirstRun(!path.exists()));
             let preferences = preferences::load(&path)?;
             let start_tools_on_launch = preferences.start_tools_on_launch;
             let mut tools = Tools {
@@ -356,6 +365,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_preferences,
+            get_first_run,
             get_system_language,
             save_preferences,
             save_caffeinate_settings,

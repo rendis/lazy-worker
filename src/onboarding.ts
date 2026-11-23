@@ -1,9 +1,16 @@
+import type { ActivityAccessibility } from "./desktop";
 import type { Message } from "./messages";
+import { tools } from "./modules";
 
 // The first-run setup. Each control drives the control of the same setting in Settings,
 // so a choice made here is saved through the same path.
 
-export function mountOnboarding({ translate }: { translate: (message: Message) => string }) {
+export function mountOnboarding({ translate, accessibility, openAccessibility, onClose }: {
+  translate: (message: Message) => string;
+  accessibility: () => ActivityAccessibility | undefined;
+  openAccessibility: () => void;
+  onClose: () => void;
+}) {
   const root = document.getElementById("onboarding")!;
   const workspace = root.closest<HTMLElement>(".workspace")!;
   const steps = [...root.querySelectorAll<HTMLElement>("[data-step]")];
@@ -14,7 +21,33 @@ export function mountOnboarding({ translate }: { translate: (message: Message) =
   const progress = root.querySelector<HTMLElement>("#onboarding-progress")!;
   const mirrors = [...root.querySelectorAll<HTMLInputElement>("[data-mirror]")];
   const covered = () => [...workspace.children].filter(child => child !== root && !child.classList.contains("notification-stack"));
+  const permission = root.querySelector<HTMLButtonElement>("#onboarding-permission")!;
+  const permissionState = root.querySelector<HTMLElement>("#onboarding-permission-state")!;
+  const clips = [...root.querySelectorAll<HTMLVideoElement>("[data-tool-clip]")];
   let index = 0;
+  let watch: number | undefined;
+
+  for (const clip of clips) {
+    const media = tools.find(tool => tool.id === clip.dataset.toolClip)?.help.clip;
+    if (!media) continue;
+    clip.src = media.video;
+    clip.poster = media.poster;
+  }
+
+  /** Follows what the app learns while the setup is open, such as a granted permission. */
+  function sync(): void {
+    const state = accessibility();
+    permissionState.textContent = translate(state === "granted" ? "accessibilityGranted"
+      : state === "unsupported" ? "onboardingPermissionPreview" : "onboardingPermissionMissing");
+    permissionState.toggleAttribute("data-granted", state === "granted");
+    permission.disabled = state === "granted" || state === "unsupported" || state === undefined;
+    for (const mirror of mirrors) {
+      if (mirror.dataset.mirrorWhen === "leave") continue;
+      const setting = target(mirror);
+      mirror.disabled = setting.disabled;
+      if (mirror.checked !== setting.checked) mirror.checked = setting.checked;
+    }
+  }
 
   progress.replaceChildren(...steps.map(() => document.createElement("span")));
 
@@ -44,13 +77,23 @@ export function mountOnboarding({ translate }: { translate: (message: Message) =
     progress.setAttribute("aria-label",
       translate("onboardingProgress").replace("{n}", String(index + 1)).replace("{total}", String(steps.length)));
     [...progress.children].forEach((dot, position) => dot.toggleAttribute("data-current", position === index));
+    for (const clip of clips) {
+      const label = tools.find(tool => tool.id === clip.dataset.toolClip)?.help.clip?.label;
+      if (label) clip.setAttribute("aria-label", translate(label));
+    }
+    sync();
   }
 
   function show(position: number): void {
     root.dataset.direction = position < index ? "back" : "forward";
     index = position;
+    root.dataset.step = steps[index].dataset.step;
     steps.forEach((step, at) => { step.hidden = at !== index; });
     render();
+    for (const clip of clips) {
+      if (steps[index].contains(clip)) void clip.play().catch(() => {});
+      else clip.pause();
+    }
     steps[index].querySelector<HTMLElement>("h1")?.focus({ preventScroll: true });
   }
 
@@ -59,6 +102,9 @@ export function mountOnboarding({ translate }: { translate: (message: Message) =
     root.hidden = true;
     delete workspace.dataset.onboarding;
     covered().forEach(element => { (element as HTMLElement).inert = false; });
+    window.clearInterval(watch);
+    clips.forEach(clip => clip.pause());
+    onClose();
   }
 
   for (const mirror of mirrors) {
@@ -71,12 +117,14 @@ export function mountOnboarding({ translate }: { translate: (message: Message) =
     else show(index + 1);
   });
   skip.addEventListener("click", close);
+  permission.addEventListener("click", openAccessibility);
 
   return {
     render,
     open(): void {
       // A deferred control starts on. The others show the saved setting.
       for (const mirror of mirrors) mirror.checked = mirror.dataset.mirrorWhen === "leave" || target(mirror).checked;
+      watch = window.setInterval(sync, 500);
       workspace.dataset.onboarding = "";
       covered().forEach(element => { (element as HTMLElement).inert = true; });
       root.hidden = false;

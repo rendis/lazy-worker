@@ -13,6 +13,7 @@ import {
 import { messages, type Language, type Message } from "./messages";
 import { mountTools, tools, updateQuickStartMode, updateToolStatus, type ToolId } from "./modules";
 import { mountOperationProgress } from "./operation-progress";
+import { mountChangelog, releasesSince } from "./changelog";
 import { mountOnboarding } from "./onboarding";
 import { mountProxy } from "./proxy";
 import { formatSession, SESSION_WIDTH } from "./time";
@@ -97,7 +98,7 @@ element("login-launch-setting").hidden = !desktop.macApp;
 type ActivityMode = "duration" | "schedule";
 type FeedbackTarget = ToolId | "tools" | "settings";
 type FeedbackLine = { message: Message; tool?: ToolId };
-type PreferenceChoice = "duration" | "language" | "theme" | "hideWhileSharing" | "startToolsOnLaunch";
+type PreferenceChoice = "duration" | "language" | "theme" | "hideWhileSharing" | "startToolsOnLaunch" | "seenVersion";
 type PreferenceChange = {
   key: PreferenceChoice | ToolId | "proxySettings";
   apply: (current: Preferences) => Preferences;
@@ -194,7 +195,19 @@ function setNoticeOpen(region: HTMLElement, open: boolean): void {
   setAttribute(region, "aria-hidden", String(!open));
 }
 
-const onboarding = mountOnboarding({ translate });
+const onboarding = mountOnboarding({
+  translate,
+  accessibility: () => accessibility,
+  openAccessibility: () => { void openAccessibility("settings"); },
+  onClose: markVersionSeen,
+});
+const changelog = mountChangelog({ translate, language: preferredLanguage, onClose: markVersionSeen });
+element("changelog-open").addEventListener("click", event => changelog.open(undefined, event.currentTarget as HTMLElement));
+let runningVersion: string | undefined;
+/** Records that the user saw the setup or the changes of the running version. */
+function markVersionSeen(): void {
+  if (runningVersion) updateChoice("settings", "seenVersion", runningVersion);
+}
 const updates = mountUpdateNotice({
   translate,
   setNoticeOpen,
@@ -515,6 +528,7 @@ function renderPreferences(previous?: Preferences): void {
     progress.renderLabel();
     updates.render();
     onboarding.render();
+    changelog.render();
     renderStatus();
   } else {
     renderControls();
@@ -1021,7 +1035,13 @@ async function initialize(): Promise<void> {
     feedback.tools = "saveFailed";
   }
   renderPreferences();
-  if (await desktop.getFirstRun()) onboarding.open();
+  runningVersion = await desktop.getVersion().catch(() => undefined);
+  if (await desktop.getFirstRun().catch(() => false)) onboarding.open();
+  else if (loaded && runningVersion && preferences.seenVersion !== runningVersion) {
+    const news = releasesSince(preferences.seenVersion, runningVersion);
+    if (news.length) changelog.open(news);
+    else markVersionSeen();
+  }
   void updates.start();
   await refreshStatus();
   refreshPermissions();

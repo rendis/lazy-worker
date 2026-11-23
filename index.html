@@ -446,7 +446,10 @@
               <p>
                 <span data-text="appVersion">Version</span> <span id="app-version"></span><span id="update-check-status" role="status"></span>
               </p>
-              <button class="text-link" id="update-check" type="button" data-text="checkForUpdates" hidden>Check for updates</button>
+              <span class="settings-version-actions">
+                <button class="text-link" id="changelog-open" type="button" data-text="whatsNew">What’s new</button>
+                <button class="text-link" id="update-check" type="button" data-text="checkForUpdates" hidden>Check for updates</button>
+              </span>
             </div>
           </div>
         </div>
@@ -497,6 +500,79 @@
                 <span class="switch"><input type="checkbox" role="switch" data-mirror="start-tools-on-launch" /><span aria-hidden="true"></span></span>
               </label>
             </div>
+            <div class="onboarding-step" data-step="privacy" hidden>
+              <h1 tabindex="-1" data-text="onboardingPrivacy">Hidden while you share</h1>
+              <p class="onboarding-lead" data-text="onboardingPrivacyLead">Lazy Worker can hide its icon and its panel when you share your screen. It needs the Accessibility permission. Activity needs it too.</p>
+              <div class="setting-row">
+                <i data-lucide="lock-keyhole"></i>
+                <span class="onboarding-option">
+                  <span class="setting-label" data-text="accessibility">Accessibility</span>
+                  <span class="setting-note" id="onboarding-permission-state" role="status"></span>
+                </span>
+                <button class="onboarding-button" id="onboarding-permission" type="button">
+                  <i data-lucide="external-link" aria-hidden="true"></i><span data-text="openAccessibility">Open Accessibility</span>
+                </button>
+              </div>
+              <label class="setting-row">
+                <i data-lucide="eye-off"></i>
+                <span class="onboarding-option">
+                  <span class="setting-label" data-text="hideWhileSharing">Hide Lazy Worker while sharing</span>
+                  <span class="setting-note" data-text="onboardingSharingNote">It turns on when the permission is granted.</span>
+                </span>
+                <span class="switch"><input type="checkbox" role="switch" data-mirror="hide-while-sharing" /><span aria-hidden="true"></span></span>
+              </label>
+              <p class="setting-note onboarding-later" data-text="onboardingLater">You can skip this step and grant the permission later in Settings.</p>
+            </div>
+            <div class="onboarding-step" data-step="tools" hidden>
+              <h1 tabindex="-1" data-text="onboardingTools">Pick your tools</h1>
+              <p class="onboarding-lead" data-text="onboardingToolsLead">Mark the tools you use most. Quick start runs them together. AI Proxy waits under AI in the sidebar.</p>
+              <div class="onboarding-tools">
+                <article class="onboarding-tool">
+                  <video muted loop playsinline preload="none" data-tool-clip="activity"></video>
+                  <div class="onboarding-tool-head">
+                    <i data-lucide="activity"></i><h2 data-text="activity">Activity</h2>
+                    <label class="switch" data-quick-start-hint>
+                      <input type="checkbox" role="switch" data-tool-include="activity" data-label="quickStart" aria-label="Quick start" disabled /><span aria-hidden="true"></span>
+                    </label>
+                  </div>
+                  <p class="setting-note" data-text="activityDescription">Keep your session active when you’re away from your computer.</p>
+                </article>
+                <article class="onboarding-tool">
+                  <video muted loop playsinline preload="none" data-tool-clip="caffeinate"></video>
+                  <div class="onboarding-tool-head">
+                    <i data-lucide="coffee"></i><h2 data-text="caffeinate">Caffeinate</h2>
+                    <label class="switch" data-quick-start-hint>
+                      <input type="checkbox" role="switch" data-tool-include="caffeinate" data-label="quickStart" aria-label="Quick start" disabled /><span aria-hidden="true"></span>
+                    </label>
+                  </div>
+                  <p class="setting-note" data-text="caffeinateDescription">Control when your Mac can go to sleep.</p>
+                </article>
+              </div>
+              <div class="setting-row">
+                <i data-lucide="hourglass"></i>
+                <span class="setting-label" id="onboarding-duration" data-text="onboardingDuration">Activity runs for</span>
+                <div class="segments plain-segments duration-segments" role="group" aria-labelledby="onboarding-duration">
+                  <button type="button" data-duration="minutes15" data-text="minutes15" aria-pressed="true">15 min</button>
+                  <button type="button" data-duration="minutes30" data-text="minutes30" aria-pressed="false">30 min</button>
+                  <button type="button" data-duration="hour" data-text="hour" aria-pressed="false">1 hour</button>
+                  <button type="button" data-duration="untilStopped" data-text="untilStopped" aria-pressed="false">Until stopped</button>
+                  <span class="segment-indicator" aria-hidden="true"></span>
+                </div>
+              </div>
+            </div>
+            <div class="onboarding-step" data-step="ready" hidden>
+              <h1 tabindex="-1" data-text="onboardingReady">You are set</h1>
+              <p class="onboarding-lead" data-text="onboardingReadyLead">Lazy Worker stays in your menu bar. Select the wind-up key there to open this panel.</p>
+              <div class="setting-row">
+                <i data-lucide="layout-grid"></i><span class="setting-label" data-text="onboardingReadyTools">Tools lists every tool. Start one with its power button.</span>
+              </div>
+              <div class="setting-row">
+                <i data-lucide="circle-help"></i><span class="setting-label" data-text="onboardingReadyHelp">The ? beside a tool's name shows what it does, with a short clip.</span>
+              </div>
+              <div class="setting-row">
+                <i data-lucide="settings"></i><span class="setting-label" data-text="onboardingReadySettings">Settings keeps every choice you made here.</span>
+              </div>
+            </div>
           </div>
           <footer class="onboarding-footer">
             <div class="onboarding-progress" id="onboarding-progress" role="img"></div>
@@ -516,6 +592,16 @@
           </header>
           <ol class="proxy-log" id="proxy-log" tabindex="0" aria-labelledby="proxy-log-title"></ol>
           <p class="setting-note" id="proxy-window-note"></p>
+        </section>
+      </div>
+      <div class="log-overlay" id="changelog-window" inert>
+        <section class="log-window changelog-window" role="dialog" aria-labelledby="changelog-title">
+          <header>
+            <i data-lucide="sparkles"></i>
+            <h2 id="changelog-title" data-text="whatsNew">What’s new</h2>
+            <button type="button" class="icon-button" id="changelog-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
+          </header>
+          <div class="changelog" id="changelog-list" tabindex="0" aria-labelledby="changelog-title"></div>
         </section>
       </div>
       <div class="notification-stack">
