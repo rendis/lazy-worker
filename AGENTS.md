@@ -27,7 +27,7 @@
 - Keep the built-in client commands equal in `src/proxy.ts` and `src-tauri/src/proxy/apps.rs`. Launch a client from its saved id, and check the server address before it enters a command.
 - Keep the element of a rendered list row and update it in place, so its switch, selector, and disclosure can animate. Rebuild a row only when its name, icon, or language changes. Open a new row and close a removed one over a short time, so the rows under it move instead of jumping.
 - Open and close content through `.collapse` with `data-open` and `inert`. Keep `hidden` for content that swaps with other content.
-- Style every scroll bar through the shared `::-webkit-scrollbar` rules, thin and in the line color.
+- Style every scroll bar through the shared `::-webkit-scrollbar` rules, thin and in the line color. Keep the space of the main scroll bar reserved, so content does not shift when it appears.
 - Keep every image a file under `src/assets`. The content policy allows no `data:` images, so Vite must not inline assets.
 - Show the brand mark of a built-in proxy tool from `src/assets/brands`. The marks come from Simple Icons. To offer a new brand in the icon picker, add its file there and its name to `brandNames` in `src/proxy.ts`.
 - Discard unsaved input in a module view when the user leaves that view.

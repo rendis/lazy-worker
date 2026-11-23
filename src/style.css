@@ -5,6 +5,7 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color-scheme: light;
   --content-inset: 28px;
+  --scrollbar: 9px;
   --selection-duration: .24s;
   --selection-easing: cubic-bezier(.22, .7, .36, 1);
 }
@@ -53,7 +54,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 p, h1, h2 { margin: 0; }
 /* A thin scroll bar that stays visible without drawing attention. */
-::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar { width: var(--scrollbar); height: var(--scrollbar); }
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
@@ -1535,7 +1536,8 @@ h1:focus { outline: none; }
 @media (min-width: 581px) {
   body { height: 100vh; }
   .workspace { grid-template-rows: minmax(0, 1fr); }
-  main { min-height: 0; overflow-y: auto; }
+  /* The scroll bar always keeps its space, so content does not shift when it appears. */
+  main { min-height: 0; overflow-y: scroll; padding-inline-end: calc(var(--content-inset) - var(--scrollbar)); }
 }
 @media (max-width: 770px) {
   :root { --content-inset: 15px; }
@@ -1587,6 +1589,9 @@ h1:focus { outline: none; }
 @media (max-width: 360px) {
   .sidebar nav .nav-button { gap: 3px; padding-inline: 4px; }
   .settings-permission-dot, .tool-nav-button::after { width: 6px; height: 6px; margin-inline-end: 0; }
+}
+@media (min-width: 581px) and (max-width: 770px) {
+  main { padding-inline-end: calc(var(--content-inset) - var(--scrollbar)); }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; }
