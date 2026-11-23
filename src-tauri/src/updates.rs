@@ -129,6 +129,7 @@ pub async fn restart_to_update(app: AppHandle, version: String) -> Result<(), &'
         return Err("updateFailed");
     }
 
+    crate::remember_running(&app);
     app.request_restart();
     Ok(())
 }

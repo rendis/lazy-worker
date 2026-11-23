@@ -61,6 +61,7 @@
 - For signing, Accessibility after an update, or release automation, follow [issue #1](https://github.com/rendis/lazy-worker/issues/1). Describe test platforms by architecture and macOS version.
 - Set `APPLE_SIGNING_IDENTITY` to the Developer ID Application identity for release builds. Verify the app and its Activity helper against that certificate in both architecture bundles.
 - Run every update check through `check` in `src-tauri/src/updates.rs`, so the time of the last check in Settings stays true. A release needs a few minutes to reach the update address, so keep the automatic checks frequent.
+- Record the running tools through `resume::remember` before an update restarts the app, and start them from `resume::take` at launch in place of startup Quick start. Leave proxy clients alone there, because they are still open.
 - Require the Tauri updater to verify the signed version. Call `request_restart` after installing so `RunEvent::Exit` releases active tools.
 - Local builds default to ad-hoc signing. If Accessibility fails after reinstall, compare the installed app's CDHash with the requirement in the macOS TCC log. Keep the app and Activity helper signing identities stable across releases. Keep private signing keys outside the repository.
 - Archive the stapled app for the Tauri updater and bind its signature to the release version before publishing `latest.json`.

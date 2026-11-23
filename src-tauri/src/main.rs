@@ -4,6 +4,7 @@ mod activity;
 mod caffeinate;
 mod preferences;
 mod proxy;
+mod resume;
 
 #[cfg(target_os = "macos")]
 mod login_launch;
@@ -31,7 +32,7 @@ use std::{
 };
 use tauri::{Manager, RunEvent, State};
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum ToolId {
     Activity,
@@ -59,6 +60,20 @@ impl Tools {
             caffeinate: self.caffeinate.status(),
             proxy: self.proxy.status(),
         }
+    }
+
+    /// The tools an update must start again after its restart.
+    /// A scheduled Activity session is left out, because its schedule starts it.
+    fn running(&mut self) -> Vec<ToolId> {
+        let current = self.statuses();
+        [
+            (ToolId::Activity, current.activity.mode == "manual"),
+            (ToolId::Caffeinate, current.caffeinate.mode != "off"),
+            (ToolId::Proxy, current.proxy.mode != "off"),
+        ]
+        .into_iter()
+        .filter_map(|(tool, on)| on.then_some(tool))
+        .collect()
     }
 
     fn set_active(&mut self, tool: ToolId, active: bool) {
@@ -112,6 +127,17 @@ impl Tools {
 }
 
 type Controller = Arc<Mutex<Tools>>;
+
+/// Records the running tools, so the launch after an update starts them again.
+#[cfg(target_os = "macos")]
+fn remember_running(app: &tauri::AppHandle) {
+    let Ok(directory) = app.path().app_config_dir() else {
+        return;
+    };
+    if let Ok(mut tools) = app.state::<Controller>().lock() {
+        resume::remember(&directory, &tools.running());
+    };
+}
 
 #[tauri::command]
 fn get_preferences(controller: State<'_, Controller>) -> Result<Preferences, &'static str> {
@@ -280,7 +306,12 @@ fn main() {
                 caffeinate: Caffeinate::new(),
                 proxy: Proxy::new(),
             };
-            if start_tools_on_launch {
+            // After an update, the tools that were on return. Their clients are still open.
+            if let Some(resumed) = resume::take(&directory) {
+                for tool in resumed {
+                    tools.set_active(tool, true);
+                }
+            } else if start_tools_on_launch {
                 tools.start_selected();
                 // Opening an app can wait for a shell, so it stays off the startup path.
                 let settings = tools.activity.preferences().proxy;
