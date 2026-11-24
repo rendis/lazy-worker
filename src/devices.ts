@@ -33,10 +33,11 @@ const settleDelay = 260;
 const ageMessages: Record<Exclude<AgeUnit, "seconds">, Message> = {
   minutes: "minutesAgo", hours: "hoursAgo", days: "daysAgo",
 };
-const permissions: { id: ControllerPermission; icon: string; label: Message }[] = [
-  { id: "control", icon: "layout-grid", label: "permControl" },
-  { id: "applications", icon: "app-window", label: "permApplications" },
-  { id: "actions", icon: "play", label: "permActions" },
+/** `hint` says in one sentence what the permission allows. It shows in the pairing window and as the tip of the chip. */
+const permissions: { id: ControllerPermission; icon: string; label: Message; hint?: Message }[] = [
+  { id: "control", icon: "layout-grid", label: "permControl", hint: "permControlHint" },
+  { id: "applications", icon: "app-window", label: "permApplications", hint: "permApplicationsHint" },
+  { id: "actions", icon: "play", label: "permActions", hint: "permActionsHint" },
   { id: "shell", icon: "terminal", label: "permShell" },
 ];
 /** The outcomes that the log shows in words. Any other one shows as it is. */
@@ -143,6 +144,8 @@ export function mountDevices(host: Host) {
   let requested = 0;
   /** What waits for a second click: a device id, or `cut` for all access. Only one thing waits at a time. */
   let confirming: string | undefined;
+  /** Set after Cut all access, until a device is paired again. Remote Login may still be on. */
+  let afterCut = false;
   let logEntries: RemoteLogEntry[] = [];
   let logTrigger: HTMLElement | undefined;
   let opened = readOpen();
@@ -573,7 +576,9 @@ export function mountDevices(host: Host) {
       });
       return { permission, chip, label };
     });
-    const chipBox = h("div", { class: "permission-chips" }, ...chips.map(({ chip }) => chip));
+    // Each chip says what it allows. The shell has its own window, which says it.
+    const chipBox = h("div", { class: "permission-chips" }, ...chips.map(({ permission, chip }) =>
+      permission.hint ? h("span", { class: "tip", "data-tip": t(permission.hint) }, chip) : chip));
     const remove = iconButton(fill(t("removeController"), { device: controller.name }), "user-minus");
     const { accept, cancel } = confirmButtons(t("removeAccess"), () => { void removeController(current); }, () => {
       confirming = undefined;
@@ -647,6 +652,8 @@ export function mountDevices(host: Host) {
     const okIcon = h("span", { class: "access-icon", "data-kind": "ok" }, icon("check"));
     const accessMessage = h("span", {});
     const accessNote = h("p", { class: "setting-note access-note" }, warnIcon, okIcon, accessMessage);
+    // After Cut all access, Remote Login may stay on. The note says so, and the button opens Sharing settings.
+    const cutNote = h("p", { class: "setting-note access-note", role: "status", hidden: true }, bind(h("span"), "cutAllRemoteLoginOn"));
     const enableLabel = h("span", {}, t("remoteAccessEnable"));
     const enable = h("button", { type: "button", class: "access-action", "data-attention": "" }, icon("power"), enableLabel);
     const sharing = iconButton(t("openSharingSettings"), "square-arrow-out-up-right", "outlined");
@@ -661,7 +668,7 @@ export function mountDevices(host: Host) {
     const access = {
       root: h("div", { class: "setting-row device-access" },
         icon("shield-check"),
-        h("div", { class: "access-text" }, accessLabel, accessNote),
+        h("div", { class: "access-text" }, accessLabel, accessNote, cutNote),
         h("div", { class: "device-end" }, enable, sharing.root, passwords.root, passwordConfirm)),
     };
     enable.addEventListener("click", () => { void enableAccess(enable); });
@@ -747,7 +754,9 @@ export function mountDevices(host: Host) {
         if (enable.disabled !== enabling) enable.disabled = enabling;
         enable.toggleAttribute("data-attention", !enabling);
         enable.setAttribute("aria-busy", String(enabling));
-        sharing.root.hidden = !(off || noUser);
+        if (afterCut && (off || data.controllers.length > 0)) afterCut = false;
+        cutNote.hidden = !afterCut;
+        sharing.root.hidden = !(off || noUser || afterCut);
         const canAllow = !needsTurnOn && remote.managedFile;
         if (confirming === "passwords" && !canAllow) confirming = undefined;
         passwords.root.hidden = !canAllow || confirming === "passwords";
@@ -795,6 +804,7 @@ export function mountDevices(host: Host) {
     confirming = undefined;
     try {
       await desktop.cutAllAccess();
+      afterCut = true;
     } catch (error) {
       host.fail(error);
     }
@@ -824,7 +834,10 @@ export function mountDevices(host: Host) {
     return h("li", { class: "proxy-log-entry", "data-outcome": entry.outcome === "ok" ? "ok" : "refused" },
       h("time", {}, formatMoment(entry.time, host.language())),
       h("span", { class: "proxy-log-target" }, entry.name ?? "—"),
-      h("span", { class: "proxy-log-target" }, event),
+      h("span", { class: "proxy-log-target" }, event,
+        entry.count && entry.count > 1
+          ? h("span", { class: "log-count", "aria-label": fill(t("remoteLogRepeated"), { count: entry.count }) }, `×${entry.count}`)
+          : ""),
       h("span", { class: "proxy-log-outcome" }, outcomeText(entry.outcome)));
   }
 
@@ -1280,17 +1293,21 @@ export function mountDevices(host: Host) {
   let reach: ProxyNetwork | undefined;
   const grant = { control: true, applications: false, actions: false };
 
-  function permissionSwitch(id: keyof typeof grant, iconName: string, label: Message) {
+  function permissionSwitch(id: keyof typeof grant, iconName: string, label: Message, hint: Message) {
     const input = h("input", { type: "checkbox", switch: true, role: "switch" });
     input.checked = grant[id];
     input.addEventListener("change", () => { grant[id] = input.checked; });
     const row = overlayRow(iconName, label, "label", h("span", { class: "switch" }, input, h("span", { "aria-hidden": "true" })));
-    return { root: row.root, input };
+    // The sentence sits under the switch, so the choice is made with it in view.
+    const sentence = bind(h("p", { class: "setting-note pair-permission-hint" }), hint);
+    input.setAttribute("aria-describedby", `pair-permission-${id}`);
+    sentence.id = `pair-permission-${id}`;
+    return { root: h("div", { class: "pair-permission" }, row.root, sentence), input };
   }
   const switches = [
-    permissionSwitch("control", "layout-grid", "permControl"),
-    permissionSwitch("applications", "app-window", "permApplications"),
-    permissionSwitch("actions", "play", "permActions"),
+    permissionSwitch("control", "layout-grid", "permControl", "permControlHint"),
+    permissionSwitch("applications", "app-window", "permApplications", "permApplicationsHint"),
+    permissionSwitch("actions", "play", "permActions", "permActionsHint"),
   ];
   const openLabel = h("span");
   const openButton = h("button", { type: "button", class: "access-action" }, icon("lock-keyhole-open"), openLabel);

@@ -63,6 +63,9 @@ impl Owner {
     }
 }
 
+/// Tells whether a device is still paired and may run actions here. It is asked before a schedule of that device runs.
+pub type PeerCheck = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
 /// The record of a run goes to the log of remote access. It never holds the command or its output.
 pub type Sink = Arc<dyn Fn(Entry) + Send + Sync>;
 
@@ -70,6 +73,8 @@ struct RunRecord {
     id: String,
     action: String,
     owner: Owner,
+    /// The device that started the run, or whose schedule did.
+    by: Option<String>,
     handle: Handle,
     /// The order in which finished runs ended. Running ones have none.
     ended: Option<u64>,
@@ -87,6 +92,7 @@ struct Inner {
     runner: Runner,
     zone: Box<dyn Zone>,
     sink: Sink,
+    allowed: PeerCheck,
     /// The last time the scheduler looked, in unix seconds.
     checked: Mutex<i64>,
     /// The last time that was written to the file.
@@ -148,11 +154,17 @@ fn json<T: Serialize>(value: T) -> Result<Value, &'static str> {
 }
 
 impl Actions {
-    pub fn open(path: PathBuf, sink: Sink) -> Result<Self, &'static str> {
-        Self::open_with(path, sink, Runner::system(), Box::new(System))
+    pub fn open(path: PathBuf, sink: Sink, allowed: PeerCheck) -> Result<Self, &'static str> {
+        Self::open_with(path, sink, Runner::system(), Box::new(System), allowed)
     }
 
-    fn open_with(path: PathBuf, sink: Sink, runner: Runner, zone: Box<dyn Zone>) -> Result<Self, &'static str> {
+    fn open_with(
+        path: PathBuf,
+        sink: Sink,
+        runner: Runner,
+        zone: Box<dyn Zone>,
+        allowed: PeerCheck,
+    ) -> Result<Self, &'static str> {
         let store = Store::open(path)?;
         // The first look covers the time since the last one, so the runs that a stop missed are found.
         let checked = store
@@ -166,6 +178,7 @@ impl Actions {
             runner,
             zone,
             sink,
+            allowed,
             checked: Mutex::new(checked),
             saved: Mutex::new(checked),
         })))
@@ -300,6 +313,7 @@ impl Actions {
             id: run_id.clone(),
             action: id.to_owned(),
             owner,
+            by: peer.clone(),
             handle,
             ended: None,
         });
@@ -359,12 +373,16 @@ impl Actions {
     }
 
     /// Sets when an action runs, and who set it. A single run must still be ahead.
+    /// A device may set a schedule on an action that has none, or replace one that it set. The person here may always.
     pub fn schedule(&self, id: &str, schedule: Schedule, notify: bool, by: &str) -> Result<(), &'static str> {
         let now = unix_now();
         schedule.validate_new(u64::try_from(now).unwrap_or(0))?;
         self.0.store.change(|data| {
             let others = data.actions.iter().any(|action| action.id != id && action.schedule.is_some());
             let action = data.actions.iter_mut().find(|action| action.id == id).ok_or("actionNotFound")?;
+            if Self::owned_elsewhere(action, by) {
+                return Err("scheduleOwnedElsewhere");
+            }
             action.schedule = Some(schedule);
             action.notify_on_failure = notify;
             action.scheduled_by = Some(by.to_owned());
@@ -372,6 +390,24 @@ impl Actions {
             if !others {
                 data.checked_at = Some(u64::try_from(now).unwrap_or(0));
             }
+            Ok(())
+        })
+    }
+
+    /// Whether a schedule that someone else set stands on the action, as seen by `by`.
+    fn owned_elsewhere(action: &Action, by: &str) -> bool {
+        by != LOCAL && action.schedule.is_some() && action.scheduled_by.as_deref() != Some(by)
+    }
+
+    /// Clears a schedule for a device. Only one that the same device set, or none at all, can go.
+    pub fn clear_schedule_by(&self, id: &str, by: &str) -> Result<(), &'static str> {
+        self.0.store.change(|data| {
+            let action = data.actions.iter_mut().find(|action| action.id == id).ok_or("actionNotFound")?;
+            if Self::owned_elsewhere(action, by) {
+                return Err("scheduleOwnedElsewhere");
+            }
+            action.schedule = None;
+            action.scheduled_by = None;
             Ok(())
         })
     }
@@ -405,6 +441,29 @@ impl Actions {
         })
     }
 
+    /// What happens when a device loses access: its schedules go, and its runs end.
+    pub fn forget(&self, peer: Option<&str>) {
+        let _ = self.clear_schedules_of(peer);
+        self.stop_runs_of(peer);
+    }
+
+    /// Stops the runs that a device started, or that its schedules did. With no id it stops those of every device.
+    pub fn stop_runs_of(&self, peer: Option<&str>) {
+        let handles: Vec<Handle> = lock(&self.0.runs)
+            .records
+            .iter()
+            .filter(|record| match (&record.by, peer) {
+                (Some(by), Some(peer)) => by == peer,
+                (Some(_), None) => true,
+                (None, _) => false,
+            })
+            .map(|record| record.handle.clone())
+            .collect();
+        for handle in handles {
+            handle.stop();
+        }
+    }
+
     /// One look of the scheduler. A run that is due starts when it is at most `GRACE` seconds late. A later one is
     /// logged as skipped, once, because the app was closed or the device slept.
     pub fn tick(&self, now: i64) {
@@ -420,6 +479,14 @@ impl Actions {
         let data = self.0.store.snapshot();
         for action in &data.actions {
             let Some(schedule) = &action.schedule else { continue };
+            // A device that is gone, or has lost Actions, runs nothing, even if its schedule outlived that.
+            if let Some(peer) = action.scheduled_by.as_deref().filter(|by| *by != LOCAL) {
+                if !(self.0.allowed)(peer) {
+                    let _ = self.clear_schedule(&action.id);
+                    self.record(Some(peer), "actionScheduleCleared", "notPermitted");
+                    continue;
+                }
+            }
             let Some(next) = next_after(schedule, last, self.0.zone.as_ref()).filter(|next| *next <= now) else {
                 continue;
             };
@@ -526,7 +593,12 @@ impl Actions {
                 };
                 self.schedule(&id, schedule, notify_on_failure, &by).map(|()| Value::Null)
             }
-            Request::ClearSchedule { id } => self.clear_schedule(&id).map(|()| Value::Null),
+            Request::ClearSchedule { id } => match &owner {
+                Owner::Local => self.clear_schedule(&id),
+                Owner::Peer(peer) if !peer.is_empty() => self.clear_schedule_by(&id, peer),
+                Owner::Peer(_) | Owner::Scheduled => Err("notPermitted"),
+            }
+            .map(|()| Value::Null),
             _ => Err("badRequest"),
         }
     }
@@ -565,10 +637,10 @@ pub fn handle(app: &AppHandle, origin: Origin, request: Request) -> Result<Value
     actions.serve(origin, request, &names)
 }
 
-/// Removes the schedules of a device that was removed, or of every device when none is named.
+/// Removes the schedules of a device that lost its access, and stops its runs. With no id it does this for every device.
 pub fn forget_peer(app: &AppHandle, peer: Option<&str>) {
     if let Some(actions) = app.try_state::<Actions>() {
-        let _ = actions.clear_schedules_of(peer);
+        actions.forget(peer);
     }
 }
 
@@ -587,14 +659,22 @@ mod tests {
     type Log = Arc<Mutex<Vec<Entry>>>;
 
     fn open(label: &str, zone: Box<dyn Zone>) -> (Actions, Log, PathBuf) {
+        open_allowing(label, zone, allow_all())
+    }
+
+    fn open_allowing(label: &str, zone: Box<dyn Zone>, allowed: PeerCheck) -> (Actions, Log, PathBuf) {
         let dir = scratch(label);
         let log: Log = Arc::default();
         let sink: Sink = {
             let log = log.clone();
             Arc::new(move |entry| log.lock().unwrap().push(entry))
         };
-        let actions = Actions::open_with(dir.join("actions.json"), sink, runner(dir.clone()), zone).unwrap();
+        let actions = Actions::open_with(dir.join("actions.json"), sink, runner(dir.clone()), zone, allowed).unwrap();
         (actions, log, dir)
+    }
+
+    fn allow_all() -> PeerCheck {
+        Arc::new(|_| true)
     }
 
     fn request(value: Value) -> Request {
@@ -778,7 +858,11 @@ mod tests {
         set(Origin::Local);
         assert_eq!(call(&actions, peer(ID_A), json!({"command": "listActions"})).unwrap()[0]["scheduledBy"], "local");
         assert_eq!(actions.list()[0].scheduled_by.as_deref(), Some(LOCAL));
-        call(&actions, peer(ID_B), json!({"command": "clearSchedule", "args": {"id": id}})).unwrap();
+        assert_eq!(
+            call(&actions, peer(ID_B), json!({"command": "clearSchedule", "args": {"id": id}})),
+            Err("scheduleOwnedElsewhere")
+        );
+        call(&actions, Origin::Local, json!({"command": "clearSchedule", "args": {"id": id}})).unwrap();
         assert!(actions.list()[0].schedule.is_none() && actions.list()[0].scheduled_by.is_none());
         // A schedule that is not valid is refused.
         for schedule in [
@@ -847,10 +931,10 @@ mod tests {
         let id = create(&actions, "Keep", "echo keep");
         drop(actions);
         let sink: Sink = Arc::new(|_| {});
-        let again = Actions::open_with(dir.join("actions.json"), sink.clone(), runner(dir.clone()), Box::new(Plain)).unwrap();
+        let again = Actions::open_with(dir.join("actions.json"), sink.clone(), runner(dir.clone()), Box::new(Plain), allow_all()).unwrap();
         assert_eq!(again.list()[0].id, id);
         fs::write(dir.join("actions.json"), "garbage").unwrap();
-        assert_eq!(Actions::open_with(dir.join("actions.json"), sink, runner(dir.clone()), Box::new(Plain)).err(), Some("actionsFileInvalid"));
+        assert_eq!(Actions::open_with(dir.join("actions.json"), sink, runner(dir.clone()), Box::new(Plain), allow_all()).err(), Some("actionsFileInvalid"));
         assert_eq!(fs::read_to_string(dir.join("actions.json")).unwrap(), "garbage");
         fs::remove_dir_all(dir).unwrap();
     }
@@ -968,7 +1052,7 @@ mod tests {
         assert!(stopped >= 1_700_000_000);
         drop(actions);
         let sink: Sink = Arc::new(|_| {});
-        let again = Actions::open_with(dir.join("actions.json"), sink, runner(dir.clone()), Box::new(Plain)).unwrap();
+        let again = Actions::open_with(dir.join("actions.json"), sink, runner(dir.clone()), Box::new(Plain), allow_all()).unwrap();
         assert_eq!(*lock(&again.0.checked), i64::try_from(stopped).unwrap());
         fs::remove_dir_all(dir).unwrap();
     }
@@ -1009,6 +1093,75 @@ mod tests {
         actions.stop_run(&run, &Owner::Local).unwrap();
         assert_eq!(finished(&actions, &run).state, State::Stopped);
         wait_for("child ended", || !alive(child));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_device_may_only_change_a_schedule_that_it_set_or_that_nobody_set() {
+        let (actions, _, dir) = open("actions-owned", Box::new(Plain));
+        let id = create(&actions, "Backup", "echo hi");
+        let at = u64::try_from(unix_now()).unwrap() + 3600;
+        let set = |origin: Origin| {
+            call(&actions, origin, json!({"command": "scheduleAction", "args": {
+                "id": id, "schedule": {"kind": "once", "at": at}, "notifyOnFailure": false}}))
+        };
+        let clear = |origin: Origin| call(&actions, origin, json!({"command": "clearSchedule", "args": {"id": id}}));
+        assert!(set(peer(ID_A)).is_ok(), "no schedule yet");
+        assert!(set(peer(ID_A)).is_ok(), "its own schedule");
+        assert_eq!(set(peer(ID_B)), Err("scheduleOwnedElsewhere"));
+        assert_eq!(clear(peer(ID_B)), Err("scheduleOwnedElsewhere"));
+        assert_eq!(actions.list()[0].scheduled_by.as_deref(), Some(ID_A));
+        assert!(clear(peer(ID_A)).is_ok());
+        assert!(clear(peer(ID_B)).is_ok(), "nothing to protect");
+        assert!(set(Origin::Local).is_ok());
+        assert_eq!(set(peer(ID_A)), Err("scheduleOwnedElsewhere"));
+        assert_eq!(clear(peer(ID_A)), Err("scheduleOwnedElsewhere"));
+        assert_eq!(actions.list()[0].scheduled_by.as_deref(), Some(LOCAL));
+        assert!(set(Origin::Local).is_ok() && clear(Origin::Local).is_ok());
+        assert!(set(peer(ID_A)).is_ok());
+        assert!(set(Origin::Local).is_ok(), "the person here can replace any schedule");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_schedule_of_a_device_that_lost_actions_is_cleared_and_logged_instead_of_run() {
+        let still: Arc<Mutex<bool>> = Arc::new(Mutex::new(true));
+        let check: PeerCheck = {
+            let still = still.clone();
+            Arc::new(move |id| id == ID_A && *still.lock().unwrap())
+        };
+        let (actions, log, dir) = open_allowing("actions-tick-peer", Box::new(Plain), check);
+        let (a, b, c) = (create(&actions, "A", "echo a"), create(&actions, "B", "echo b"), create(&actions, "C", "echo c"));
+        *lock(&actions.0.checked) = 1_000;
+        schedule_at(&actions, &a, Schedule::Once { at: 1_010 }, ID_A);
+        schedule_at(&actions, &b, Schedule::Once { at: 1_010 }, ID_B);
+        schedule_at(&actions, &c, Schedule::Once { at: 1_010 }, LOCAL);
+        *still.lock().unwrap() = false;
+        actions.tick(1_012);
+        thread::sleep(Duration::from_millis(200));
+        let entries = log.lock().unwrap().clone();
+        let cleared: Vec<_> = entries.iter().filter(|e| e.request == "actionScheduleCleared").filter_map(|e| e.peer.clone()).collect();
+        assert_eq!(cleared.len(), 2);
+        assert!(cleared.contains(&ID_A.to_owned()) && cleared.contains(&ID_B.to_owned()));
+        let starts: Vec<_> = entries.iter().filter(|e| e.request == "actionStart").collect();
+        assert_eq!(starts.len(), 1, "only the person's own schedule ran");
+        assert!(starts[0].peer.is_none());
+        assert!(actions.list().iter().all(|view| view.schedule.is_none()));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn forgetting_a_device_stops_its_runs_and_clears_its_schedules_and_leaves_the_rest() {
+        let (actions, _, dir) = open("actions-forget", Box::new(Plain));
+        let (a, b, c) = (create(&actions, "A", "sleep 30"), create(&actions, "B", "sleep 30"), create(&actions, "C", "echo c"));
+        let run_a = actions.run(&a, Owner::Peer(ID_A.to_owned())).unwrap();
+        let run_b = actions.run(&b, Owner::Local).unwrap();
+        actions.schedule(&c, Schedule::Daily { time: "02:00".into() }, false, ID_A).unwrap();
+        actions.forget(Some(ID_A));
+        wait_for("the run of the device ended", || actions.get_run(&run_a, &Owner::Local).unwrap().state != State::Running);
+        assert_eq!(actions.get_run(&run_b, &Owner::Local).unwrap().state, State::Running, "the person's run goes on");
+        assert!(actions.list().iter().find(|view| view.id == c).unwrap().schedule.is_none());
+        actions.stop_run(&run_b, &Owner::Local).unwrap();
         fs::remove_dir_all(dir).unwrap();
     }
 }

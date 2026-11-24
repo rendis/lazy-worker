@@ -211,7 +211,15 @@ fn main() {
                     }
                 });
                 // A file that cannot be read leaves the actions off, and the panel says so. It is never replaced.
-                match actions::Actions::open(directory.join("actions.json"), sink) {
+                let allowed: actions::PeerCheck = {
+                    let handle = app.handle().clone();
+                    std::sync::Arc::new(move |id| {
+                        handle
+                            .try_state::<remote::service::Service>()
+                            .is_some_and(|service| service.peer_may_run_actions(id))
+                    })
+                };
+                match actions::Actions::open(directory.join("actions.json"), sink, allowed) {
                     Ok(actions) => {
                         actions.start_scheduler();
                         app.manage(actions);

@@ -959,10 +959,16 @@ async fn run(
         }
         Request::SetPeerPermissions { id, control, applications, actions } => {
             #[cfg(unix)]
-            return app
-                .state::<crate::remote::service::Service>()
-                .set_permissions(&id, control, applications, actions)
-                .map(|()| Value::Null);
+            {
+                let lost = app
+                    .state::<crate::remote::service::Service>()
+                    .set_permissions(&id, control, applications, actions)?;
+                // A device that lost Actions keeps no schedule and no run.
+                if lost {
+                    crate::actions::forget_peer(app, Some(&id));
+                }
+                return Ok(Value::Null);
+            }
             #[cfg(not(unix))]
             {
                 let _ = (id, control, applications, actions);

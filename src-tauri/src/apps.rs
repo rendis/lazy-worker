@@ -102,18 +102,22 @@ pub fn list() -> Result<Vec<Listed>, &'static str> {
         .collect())
 }
 
-/// The command that opens an application: the system `open` with the identifier and nothing else.
-fn open_command(bundle_id: &str) -> Command {
+/// The command that opens an application: the system `open` with the canonical path that the scan found, so the
+/// copy that was listed is the copy that opens. The path is absolute, so `open` never reads it as an option.
+fn open_command(path: &std::path::Path) -> Result<Command, &'static str> {
+    if !path.is_absolute() {
+        return Err("appOpenFailed");
+    }
     let mut command = Command::new("/usr/bin/open");
-    command.args(["-b", bundle_id]);
-    command
+    command.arg(path);
+    Ok(command)
 }
 
 /// Opens an application of the scanned list. It brings an open one forward.
 pub fn open(bundle_id: &str) -> Result<(), &'static str> {
     platform::supported()?;
     let app = find(bundle_id)?;
-    let status = open_command(&app.bundle_id)
+    let status = open_command(&app.path)?
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -209,11 +213,14 @@ mod tests {
     }
 
     #[test]
-    fn opening_runs_the_system_open_with_the_bundle_id_and_nothing_else() {
-        let command = open_command("com.apple.Safari");
+    fn opening_runs_the_system_open_with_the_scanned_absolute_path_and_nothing_else() {
+        let command = open_command(std::path::Path::new("/Applications/Safari.app")).unwrap();
         assert_eq!(command.get_program(), "/usr/bin/open");
         let arguments: Vec<_> = command.get_args().collect();
-        assert_eq!(arguments, ["-b", "com.apple.Safari"]);
+        assert_eq!(arguments, ["/Applications/Safari.app"]);
+        // A path that is not absolute could be read as an option, so it is refused.
+        assert_eq!(open_command(std::path::Path::new("-a")).err(), Some("appOpenFailed"));
+        assert_eq!(open_command(std::path::Path::new("Safari.app")).err(), Some("appOpenFailed"));
     }
 
     #[test]

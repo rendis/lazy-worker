@@ -524,7 +524,7 @@ fn connection(stream: UnixStream, mut slot: Slot) {
         let Some(peer) = shared.peers.get(&id) else {
             let _ = shared
                 .log
-                .append(&Entry::new(Some(&id), None, &name, "notPaired"));
+                .append_request(&Entry::new(Some(&id), None, &name, "notPaired"));
             return reply(&mut writer, "notPaired");
         };
         let mut read = false;
@@ -547,7 +547,7 @@ fn connection(stream: UnixStream, mut slot: Slot) {
         if !(read && result.is_ok()) {
             let _ = shared
                 .log
-                .append(&Entry::new(Some(&id), Some(&peer.name), &name, outcome));
+                .append_request(&Entry::new(Some(&id), Some(&peer.name), &name, outcome));
         }
         let response = match result {
             Ok(value) => serde_json::to_string(&serde_json::json!({ "ok": value }))
@@ -784,7 +784,9 @@ mod tests {
         assert_eq!(ask(&mut stream, &mut reader, list), serde_json::json!({"error": "notPermitted"}));
         // A refused read is logged. A read that worked is not, and opening an application always is.
         let outcomes: Vec<_> = setup.log.read().iter().map(|e| (e.request.clone(), e.outcome.clone())).collect();
-        assert_eq!(outcomes.len(), 4);
+        // The two refused lists share one line with a count.
+        assert_eq!(setup.log.read().iter().map(|entry| entry.count).sum::<u32>(), 4);
+        assert_eq!(outcomes.len(), 3);
         assert!(outcomes.contains(&("openApplication".to_owned(), "ok".to_owned())));
     }
 
@@ -899,6 +901,7 @@ mod tests {
         let secret =
             serde_json::json!({"command": "setProxyServer", "args": {"server": "secret-host:1"}});
         ask(&mut stream, &mut reader, secret);
+        setup.log.flush();
         let raw = fs::read_to_string(setup.dir.join("log.jsonl")).unwrap();
         assert!(raw.contains("setProxyServer") && !raw.contains("secret-host"));
     }
@@ -1424,7 +1427,7 @@ mod tests {
         assert!(!shell_open(&setup));
         let log = setup.log.read();
         assert!(log.iter().all(|entry| entry.request == "shellStart" && entry.outcome == "notPermitted"));
-        assert_eq!(log.len(), 2);
+        assert_eq!((log.len(), log[0].count), (1, 2), "two refusals, one line");
         // A device that is not paired gets nothing either.
         let stranger = DeviceId::parse(ID_B).unwrap();
         let sink = Sink::default();

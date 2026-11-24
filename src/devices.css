@@ -219,6 +219,8 @@
 .pair-form .setting-row > .field:not(.pair-field) { grid-column: 2; width: 100%; }
 .pair-window .collapse .setting-note, .pair-hint { padding: 8px 2px; }
 .pair-hint { margin: 0; }
+.pair-permission-hint { margin: -4px 0 6px; padding: 0 2px 0 32px; }
+.log-count { margin-inline-start: .4em; color: var(--muted); font-variant-numeric: tabular-nums; }
 .found-row { width: 100%; border-inline: 0; border-top: 0; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; }
 .found-row:hover { background: var(--glass); }
 .found-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }

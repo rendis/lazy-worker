@@ -129,9 +129,11 @@ The code is not sent over the network. Three wrong codes close the window, and a
 
 Each device that can control this one has four switches under **Who can control it**. Change them at any time.
 
-- **Control** lets it start and stop tools and change their settings.
-- **Applications** lets it list your applications and open them.
-- **Actions** lets it run, stop, and schedule your saved actions. It never sees their commands.
+The pairing window and the tip of each switch say the same in one sentence:
+
+- **Control**: turn tools on and off and change their settings here. It can also see the names of open programs, and update and restart Lazy Worker.
+- **Applications**: open any application installed here, including Terminal. It cannot type into it.
+- **Actions**: run the commands you saved here and see what they print. It cannot see or change the commands.
 - **Shell** lets it open a full terminal on this device. You turn it on only at this device. Pairing never turns it on, and a remote window cannot turn it on.
 
 Some settings stay with the person at the device, even with **Control**. Examples are starting the proxy server, its address lists, and turning on Quick start at launch. The remote window shows these controls as off and says to do them on that device.
@@ -161,7 +163,8 @@ An action is a named shell command that you save on a device. Each device keeps 
 - Select **Schedule** next to an action to schedule it: once, daily, or weekly. The action runs on the device that owns it, while Lazy Worker is open there. If that time passes while the app is closed, Lazy Worker skips it and does not run late.
 - Turn on **Flag it if it fails** to see a failed run in the row until a run works.
 - Two actions run at the same time at most.
-- When you remove a device, its schedules go with it.
+- A schedule belongs to the one who set it. A device can add a schedule to an action that has none, and it can change or clear its own. It cannot change one that you or another device set. You can change any schedule here.
+- When you remove a device, turn off its **Actions**, or cut all access, its schedules go and the runs it started stop. A schedule of a device that lost **Actions** never runs, and the log says it was removed.
 
 ### Full shell
 
@@ -179,12 +182,14 @@ The shell turns off by itself when the time ends. Select **Turn off shell** to e
 
 ### The log
 
-Select **Open the log** to see what other devices asked of this one. Each line shows the time, the device, the request in words, and the result. The log keeps the last 1000 lines. It shows requests, changes, and refusals. It does not show what was inside a request. It does not list a read that worked.
+Select **Open the log** to see what other devices asked of this one. Each line shows the time, the device, the request in words, and the result. It shows requests, changes, and refusals. It does not show what was inside a request. It does not list a read that worked.
+
+The log keeps security events apart from the rest: pairing, removing a device, shell turned on or off, shell sessions, changes to the keys file, and runs of actions. Each group keeps its last 1000 lines, so a device that sends many refused requests cannot push a security event out. A refusal that repeats within one minute is one line with a count, for example **×7**.
 
 ### Remove a device
 
 - To stop a device from controlling this one, select **Remove access** next to it. The next request from that device is refused, also on a connection that is open.
-- **Cut all access** removes every device at once and closes any open pairing window. Lazy Worker asks you to confirm first.
+- **Cut all access** removes every device at once and closes any open pairing window. Lazy Worker asks you to confirm first. It does not turn off Remote Login. The **Remote access** row then says that Remote Login is still on, with keys only. If you do not need it, turn it off in Sharing settings.
 - To stop controlling a device, select **Forget this device** on the controller. This removes it only from that device. Your key stays on the other device until you remove the access there too. Lazy Worker reminds you.
 
 ### Troubleshooting

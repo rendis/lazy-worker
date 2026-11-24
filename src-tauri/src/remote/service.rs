@@ -27,10 +27,11 @@ use crate::{
 use serde::Serialize;
 use serde_json::Value;
 use std::{
+    collections::HashSet,
     path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     time::Duration,
 };
@@ -80,6 +81,8 @@ struct Running {
     watch: Watch,
     /// The time of the last comparison of that file during a session.
     last_keys_check: AtomicU64,
+    /// The devices whose line could not be written when their access shrank or ended. Each tick tries again.
+    line_needs_rewrite: Mutex<HashSet<String>>,
 }
 
 /// What forgetting a device leaves undone: our key stays in its `authorized_keys`, and only that
@@ -212,6 +215,7 @@ impl Service {
             server,
             watch: Watch::default(),
             last_keys_check: AtomicU64::new(now()),
+            line_needs_rewrite: Mutex::default(),
         })
     }
 
@@ -337,17 +341,62 @@ impl Service {
             .collect()
     }
 
+    /// Returns whether the device had Actions and has lost them, so the caller can end what it started.
     pub fn set_permissions(
         &self,
         id: &str,
         control: bool,
         applications: bool,
         actions: bool,
-    ) -> Result<(), &'static str> {
+    ) -> Result<bool, &'static str> {
         DeviceId::parse(id)?;
-        self.running()?
-            .peers
-            .set_permissions(id, control, applications, actions)
+        let running = self.running()?;
+        let before = running.peers.get(id).ok_or("notPaired")?;
+        running.peers.set_permissions(id, control, applications, actions)?;
+        let _ = running.log.append(&Entry::new(Some(id), Some(&before.name), "peerPermissions", "ok"));
+        Ok(before.permissions.actions && !actions)
+    }
+
+    /// Whether a device is paired and may run actions here.
+    pub fn peer_may_run_actions(&self, id: &str) -> bool {
+        self.running()
+            .ok()
+            .and_then(|running| running.peers.get(id))
+            .is_some_and(|peer| peer.permissions.actions)
+    }
+
+    /// Notes a line that must be written again, and tries on each tick until it works.
+    fn line_failed(running: &Running, id: &str) {
+        running
+            .line_needs_rewrite
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .insert(id.to_owned());
+    }
+
+    fn retry_lines(&self, running: &Running) {
+        let ids: Vec<String> = running
+            .line_needs_rewrite
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .iter()
+            .cloned()
+            .collect();
+        for id in ids {
+            // A device that is gone has its line removed. One that is still paired has it written as its grant says.
+            let outcome = if running.peers.get(&id).is_some() {
+                self.rewrite_line(running, &id)
+            } else {
+                running.keys.as_ref().map_err(|code| *code).and_then(|keys| keys.remove(&id))
+            };
+            if outcome.is_ok() {
+                running
+                    .line_needs_rewrite
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .remove(&id);
+            }
+        }
     }
 
     /// The device loses access first, in memory and on its open connections, and then its line goes.
@@ -364,6 +413,9 @@ impl Service {
             .as_ref()
             .map_err(|code| *code)
             .and_then(|keys| keys.remove(id));
+        if outcome.is_err() {
+            Self::line_failed(running, id);
+        }
         let _ = running.log.append(&Entry::new(
             Some(id),
             Some(&peer.name),
@@ -432,6 +484,9 @@ impl Service {
             server.close_shell(id);
         }
         let outcome = self.rewrite_line(running, id);
+        if outcome.is_err() {
+            Self::line_failed(running, id);
+        }
         let _ = running.log.append(&Entry::new(
             Some(id),
             Some(&name),
@@ -448,6 +503,7 @@ impl Service {
         for id in running.peers.shell_expired(at) {
             let _ = self.end_shell(running, &id, "shellExpired");
         }
+        self.retry_lines(running);
         let last = running.last_keys_check.load(Ordering::Relaxed);
         if running.watch.active() && at.saturating_sub(last) >= shell::CHECK_EVERY.as_secs() {
             running.last_keys_check.store(at, Ordering::Relaxed);
@@ -604,7 +660,7 @@ impl Service {
         let running = self.running()?;
         // Nobody can pair while access is being cut.
         let _ = running.pairing.close();
-        running.peers.clear()?;
+        let gone = running.peers.clear()?;
         if let Ok(server) = &running.server {
             server.close_all();
         }
@@ -613,6 +669,11 @@ impl Service {
             .as_ref()
             .map_err(|code| *code)
             .and_then(AuthorizedKeys::remove_all);
+        if outcome.is_err() {
+            for peer in &gone {
+                Self::line_failed(running, &peer.id);
+            }
+        }
         let _ = running.log.append(&Entry::new(
             None,
             None,
@@ -629,6 +690,7 @@ impl Service {
     /// Ends the connections and removes the socket, when the app quits.
     pub fn stop(&self) {
         if let Ok(running) = &self.0 {
+            running.log.flush();
             // The window and its line must not outlive the app.
             let _ = running.pairing.close();
             running.clients.close_all();
@@ -915,6 +977,50 @@ mod tests {
     }
 
     #[test]
+    fn a_line_that_could_not_be_rewritten_when_a_grant_ended_is_tried_again_on_every_tick() {
+        let fixture = fixture("svc-shell-retry");
+        let service = &fixture.service;
+        service.grant_shell(ID_A, Some(60)).unwrap();
+        let file = fixture.home.join(".ssh/authorized_keys");
+        let moved = fixture.home.join("elsewhere");
+        fs::rename(&file, &moved).unwrap();
+        std::os::unix::fs::symlink(&moved, &file).unwrap();
+        // The access ends at once, and the failure is logged once.
+        assert_eq!(service.revoke_shell(ID_A), Err("authorizedKeysUnsafe"));
+        assert!(service.shell_of(ID_A).is_none());
+        let failures = || requests(&fixture).iter().filter(|(name, outcome)| name == "shellRevoked" && outcome == "authorizedKeysUnsafe").count();
+        assert_eq!(failures(), 1);
+        service.tick(now());
+        service.tick(now());
+        assert_eq!(failures(), 1, "a retry that fails logs nothing more");
+        assert!(fs::read_to_string(&moved).unwrap().contains("pty,"), "the line still has pty");
+        // The file is fine again, and the next tick writes the line without pty.
+        fs::remove_file(&file).unwrap();
+        fs::rename(&moved, &file).unwrap();
+        service.tick(now());
+        assert!(!line_of(&fixture, ID_A).contains("pty"));
+        assert!(service.running().unwrap().line_needs_rewrite.lock().unwrap().is_empty());
+        // Nothing is written on the ticks after that.
+        let written = fs::read_to_string(&file).unwrap();
+        service.tick(now());
+        assert_eq!(fs::read_to_string(&file).unwrap(), written);
+    }
+
+    #[test]
+    fn losing_actions_is_reported_once_and_logged() {
+        let fixture = fixture("svc-perm-actions");
+        let service = &fixture.service;
+        assert_eq!(service.set_permissions(ID_A, true, false, true), Ok(false));
+        assert!(service.peer_may_run_actions(ID_A));
+        assert_eq!(service.set_permissions(ID_A, true, false, false), Ok(true));
+        assert!(!service.peer_may_run_actions(ID_A));
+        assert_eq!(service.set_permissions(ID_A, true, false, false), Ok(false));
+        assert!(!service.peer_may_run_actions(ID_B), "a device that is not paired may run nothing");
+        assert_eq!(service.set_permissions(ID_B, true, false, false), Err("notPaired"));
+        assert_eq!(requests(&fixture).iter().filter(|(name, _)| name == "peerPermissions").count(), 3);
+    }
+
+    #[test]
     fn the_server_answers_a_shell_only_while_granted_and_ends_it_on_revoke_expiry_cut_and_remove() {
         let fixture = fixture("svc-shell-ends");
         let service = &fixture.service;
@@ -962,7 +1068,8 @@ mod tests {
         for expected in ["shellGranted", "shellRevoked", "shellExpired", "shellStart"] {
             assert!(names.iter().any(|name| name == expected), "{expected} in {names:?}");
         }
-        assert_eq!(names.iter().filter(|name| *name == "shellStart").count(), 6);
+        let starts: u32 = service.log().unwrap().iter().filter(|entry| entry.request == "shellStart").map(|entry| entry.count).sum();
+        assert_eq!(starts, 6);
     }
 
     #[test]

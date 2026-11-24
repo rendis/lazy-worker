@@ -109,6 +109,8 @@ export type RemoteLogEntry = {
   request: string;
   /** `ok` or an error code. */
   outcome: string;
+  /** How many times the same request was refused in the minute that began at `time`. Missing for one. */
+  count?: number;
 };
 /** `day` counts from 0 on Sunday. `time` is a time of day as `HH:MM` on the clock of the device that runs the action. `at` is in seconds since the Unix epoch. */
 export type ActionSchedule =
@@ -433,6 +435,7 @@ function previewEntries(now: number): RemoteLogEntry[] {
     { time: now - 20, ...studio, request: "getStatuses", outcome: "ok" },
     { time: now - 95, ...studio, request: "setToolActive", outcome: "ok" },
     { time: now - 240, ...office, request: "getDevices", outcome: "localOnly" },
+    { time: now - 400, ...office, request: "setToolActive", outcome: "notPermitted", count: 7 },
     { time: now - 3 * 3600, ...office, request: "launchProxyApp", outcome: "notPermitted" },
     { time: now - 26 * 3600, ...office, request: "getPreferences", outcome: "ok" },
     { time: now - 2 * 86400, ...studio, request: "getStatuses", outcome: "ok" },
