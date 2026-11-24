@@ -237,7 +237,7 @@ const onboarding = mountOnboarding({
 const caffeinateCopy = element<HTMLButtonElement>("caffeinate-copy");
 let caffeinateCopied: number | undefined;
 caffeinateCopy.addEventListener("click", () => {
-  void navigator.clipboard.writeText(element("caffeinate-preview").textContent ?? "").then(() => {
+  void desktop.copyText(element("caffeinate-preview").textContent ?? "").then(() => {
     // The check mark confirms the copy for a moment.
     caffeinateCopy.setAttribute("data-copied", "");
     window.clearTimeout(caffeinateCopied);

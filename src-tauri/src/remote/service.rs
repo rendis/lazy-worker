@@ -259,6 +259,21 @@ impl Service {
         }
     }
 
+    /// Checks now whether a device that this one controls answers. A working session counts as
+    /// an answer. It can wait a few seconds, so call it off the main thread.
+    pub fn check_device(&self, id: &str) -> Result<bool, &'static str> {
+        let Ok(Running {
+            controlled: Ok(store),
+            ..
+        }) = &self.0
+        else {
+            return Err("unsupported");
+        };
+        let device = store.get(id).ok_or("notPaired")?;
+        let reachable = store.check_now(&device);
+        Ok(reachable || self.running()?.clients.connected(id))
+    }
+
     /// Sends a request to a device that this one controls, and returns its answer as it came.
     /// It waits for the device, so call it off the main thread.
     pub fn forward(&self, id: &str, request: &Value) -> Result<Value, &'static str> {

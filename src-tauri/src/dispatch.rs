@@ -227,12 +227,18 @@ pub enum Request {
     /// Opens a shell on a device that this one controls, in Terminal. It exists only between the main window and this device.
     OpenShell { id: String },
     /// The single-line ssh command of that shell, to copy and paste in any terminal. Same rule as `OpenShell`.
-    ShellCommand { id: String },
+    /// With `copy`, the app writes the line to the pasteboard itself and answers nothing.
+    ShellCommand { id: String, #[serde(default)] copy: bool },
     /// Runs the command text of an action form in Terminal, the way an action runs, before it is saved.
     /// Only the person at this device sends it, from the main window.
     TestActionCommand { command: String },
     /// The line that runs that command in any terminal, to copy. Same rule as `TestActionCommand`.
-    ActionCommandLine { command: String },
+    /// With `copy`, the app writes the line to the pasteboard itself and answers nothing.
+    ActionCommandLine { command: String, #[serde(default)] copy: bool },
+    /// Puts text on the pasteboard of the person at this window. The webview cannot after an awaited call.
+    CopyText { text: String },
+    /// Checks now whether a device that this one controls answers, and answers whether it does.
+    CheckDevice { id: String },
     /// Sends one of a few requests to a paired device, for the Devices view.
     RemoteCall { id: String, request: Value },
 }
@@ -341,6 +347,8 @@ impl Request {
             | Self::ShellCommand { .. }
             | Self::TestActionCommand { .. }
             | Self::ActionCommandLine { .. }
+            | Self::CopyText { .. }
+            | Self::CheckDevice { .. }
             | Self::RequestActivityAccessibility => Access::LocalOnly,
         }
     }
@@ -424,6 +432,8 @@ impl Request {
             | Self::ShellCommand { .. }
             | Self::TestActionCommand { .. }
             | Self::ActionCommandLine { .. }
+            | Self::CopyText { .. }
+            | Self::CheckDevice { .. }
             | Self::RemoteCall { .. } => false,
         }
     }
@@ -433,7 +443,7 @@ impl Request {
     /// arm: a new request must say where it runs.
     pub fn runs_on_viewer(&self) -> bool {
         match self {
-            Self::GetSystemLanguage | Self::GetViewer => true,
+            Self::GetSystemLanguage | Self::GetViewer | Self::CopyText { .. } => true,
             Self::GetPreferences
             | Self::GetFirstRun
             | Self::GetSession
@@ -505,6 +515,7 @@ impl Request {
             | Self::ShellCommand { .. }
             | Self::TestActionCommand { .. }
             | Self::ActionCommandLine { .. }
+            | Self::CheckDevice { .. }
             | Self::RemoteCall { .. } => false,
         }
     }
@@ -522,6 +533,7 @@ impl Request {
                 | Self::ShellCommand { .. }
                 | Self::TestActionCommand { .. }
                 | Self::ActionCommandLine { .. }
+                | Self::CheckDevice { .. }
         )
     }
 
@@ -613,6 +625,17 @@ fn controls(app: &AppHandle, id: &str) -> bool {
     {
         let _ = (app, id);
         false
+    }
+}
+
+/// The answer for a line that the webview shows or copies. With `copy` the app puts it on the
+/// pasteboard and the webview gets nothing back.
+#[cfg(unix)]
+fn answer_line(line: String, copy: bool) -> Result<Value, &'static str> {
+    if copy {
+        crate::clipboard::write(&line).map(|()| Value::Null)
+    } else {
+        Ok(Value::String(line))
     }
 }
 
@@ -802,18 +825,20 @@ async fn run(
                 Err("unsupported")
             }
         }
-        Request::ShellCommand { id } => {
+        Request::ShellCommand { id, copy } => {
             #[cfg(unix)]
-            return tauri::async_runtime::spawn_blocking({
-                let app = app.clone();
-                move || app.state::<crate::remote::service::Service>().shell_command(&id)
-            })
-            .await
-            .map_err(|_| "terminalFailed")?
-            .map(Value::String);
+            return {
+                let line = tauri::async_runtime::spawn_blocking({
+                    let app = app.clone();
+                    move || app.state::<crate::remote::service::Service>().shell_command(&id)
+                })
+                .await
+                .map_err(|_| "terminalFailed")??;
+                answer_line(line, copy)
+            };
             #[cfg(not(unix))]
             {
-                let _ = id;
+                let _ = (id, copy);
                 Err("unsupported")
             }
         }
@@ -832,12 +857,29 @@ async fn run(
                 Err("unsupported")
             }
         }
-        Request::ActionCommandLine { command } => {
+        Request::ActionCommandLine { command, copy } => {
             #[cfg(unix)]
-            return crate::remote::shell::action_line(&crate::actions::login_shell(), &command).map(Value::String);
+            return crate::remote::shell::action_line(&crate::actions::login_shell(), &command)
+                .and_then(|line| answer_line(line, copy));
             #[cfg(not(unix))]
             {
-                let _ = command;
+                let _ = (command, copy);
+                Err("unsupported")
+            }
+        }
+        Request::CopyText { text } => crate::clipboard::write(&text).map(|()| Value::Null),
+        Request::CheckDevice { id } => {
+            #[cfg(unix)]
+            return tauri::async_runtime::spawn_blocking({
+                let app = app.clone();
+                move || app.state::<crate::remote::service::Service>().check_device(&id)
+            })
+            .await
+            .map_err(|_| "workerUnavailable")?
+            .map(Value::Bool);
+            #[cfg(not(unix))]
+            {
+                let _ = id;
                 Err("unsupported")
             }
         }
@@ -1650,6 +1692,7 @@ mod tests {
         let viewer = [
             json!({"command": "getSystemLanguage"}),
             json!({"command": "getViewer"}),
+            json!({"command": "copyText", "args": {"text": "x"}}),
         ];
         for value in viewer {
             assert!(request(value).runs_on_viewer());
@@ -1664,6 +1707,45 @@ mod tests {
         ] {
             assert!(!request(value).runs_on_viewer());
         }
+    }
+
+    #[test]
+    fn copying_is_local_only_runs_on_the_viewer_and_has_a_size_cap() {
+        let preferences = Preferences::default();
+        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, peer: None });
+        let id = "0123456789abcdef0123456789abcdef";
+        for value in [
+            json!({"command": "copyText", "args": {"text": "hello"}}),
+            json!({"command": "shellCommand", "args": {"id": id, "copy": true}}),
+            json!({"command": "actionCommandLine", "args": {"command": "ls", "copy": true}}),
+        ] {
+            let parsed = request(value.clone());
+            assert!(!parsed.is_read(), "{value}");
+            for origin in [NONE, CONTROL, ACTIONS, both] {
+                assert_eq!(allowed(origin, &parsed, &preferences), Err("localOnly"), "{value}");
+            }
+            assert_eq!(allowed(Origin::Local, &parsed, &preferences), Ok(()), "{value}");
+        }
+        // A window that controls a device copies on the machine of the person who sits at it.
+        let copy = request(json!({"command": "copyText", "args": {"text": "hello"}}));
+        assert_eq!(plan(&Route::Device(DEVICE.into()), &copy), Plan::Here);
+        // `copy` is optional, so the old shape still parses.
+        assert!(matches!(
+            request(json!({"command": "shellCommand", "args": {"id": id}})),
+            Request::ShellCommand { copy: false, .. }
+        ));
+        assert!(crate::clipboard::write(&"a".repeat(crate::clipboard::MAX_TEXT + 1)).is_err());
+    }
+
+    #[test]
+    fn checking_a_device_is_local_only_and_never_sent_by_a_device_window() {
+        let preferences = Preferences::default();
+        let check = request(json!({"command": "checkDevice", "args": {"id": DEVICE}}));
+        assert!(!check.is_read() && !check.runs_on_viewer());
+        assert_eq!(allowed(CONTROL, &check, &preferences), Err("localOnly"));
+        assert_eq!(allowed(Origin::Local, &check, &preferences), Ok(()));
+        assert_eq!(plan(&Route::Device(DEVICE.into()), &check), Plan::Refuse);
+        assert_eq!(plan(&Route::Local, &check), Plan::Here);
     }
 
     #[test]

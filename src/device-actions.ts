@@ -242,7 +242,7 @@ export function mountActionWindows(host: Host) {
   copyCommandButton.button.addEventListener("click", () => {
     const command = commandToTry();
     if (command === undefined) return;
-    void desktop.actionCommandLine(command).then(text => navigator.clipboard.writeText(text)).then(() => {
+    void desktop.copyActionCommandLine(command).then(() => {
       setText(commandCopied, t("actionCommandCopied"));
       commandCopied.setAttribute("data-show", "");
       window.clearTimeout(commandCopiedTimer);
@@ -564,7 +564,7 @@ export function mountActionWindows(host: Host) {
   copyButton.addEventListener("click", () => {
     const text = run?.last?.output ?? "";
     if (text === "") return;
-    void navigator.clipboard.writeText(text).then(() => {
+    void desktop.copyText(text).then(() => {
       fadeText(copyLabel, t("runCopied"));
       window.clearTimeout(copiedTimer);
       copiedTimer = window.setTimeout(() => fadeText(copyLabel, t("runCopyOutput")), copiedFor);

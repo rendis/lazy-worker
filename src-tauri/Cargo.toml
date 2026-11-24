@@ -16,7 +16,7 @@ tauri = { version = "2", features = ["protocol-asset"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAppearance", "NSBezierPath", "NSColor", "NSRunningApplication", "NSStatusBarButton", "NSStatusItem", "NSView", "NSWindow", "NSWorkspace"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAppearance", "NSBezierPath", "NSColor", "NSPasteboard", "NSRunningApplication", "NSStatusBarButton", "NSStatusItem", "NSView", "NSWindow", "NSWorkspace"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSArray", "NSEnumerator", "NSGeometry", "NSLocale", "NSString"] }
 plist = "1"
 png = "0.18"

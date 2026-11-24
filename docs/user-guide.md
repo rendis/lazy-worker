@@ -97,7 +97,11 @@ On the computer that uses the connection:
 
 Devices lets you control one device from another. It is not a tool, so it has no power button. Use it to start a tool, open an application, or run a saved action on a device that is not in front of you. Both devices need Lazy Worker. They talk over SSH, the secure connection that macOS already has. Every device decides what the other one may do.
 
-Open **Devices** in the sidebar. **This device** comes first. The devices you control from here follow it.
+Open **Devices** in the sidebar. **This device** comes first. The devices you control from here follow it. One device is open at a time. Select a device to open it.
+
+Each open device has tabs. **This device** has **Access** (remote access, pairing, and **Cut all access**), **Who controls it**, **Actions**, and **Log**. A device that you control has **Tools**, **Applications**, **Actions**, and **Shell**, each with a short state after its name, for example **1 of 3** tools on or **Off**. Use the arrow keys, **Home**, and **End** to move between tabs. Each device remembers its last tab.
+
+Each device you control shows if it is online. Lazy Worker checks every few seconds while Devices is open, and when you come back to the window. Select **Check this device now** (the circular arrow) to check at once and read its state again.
 
 ### Turn on remote access
 
@@ -148,17 +152,17 @@ Select **Open interface** next to a device. A window of Lazy Worker opens for th
 - The language and the theme stay yours. They always come from the device in front of you.
 - A control that the device does not allow is off, with the reason. Either the device did not allow it, or only the person at that device can do it.
 
-The Devices view also lists the tools of each device with their state. You can turn a tool on or off there.
+In the **Tools** tab of a device you control, each tool shows its state. You can turn a tool on or off there.
 
 ### Applications
 
-With **Applications** allowed, a device shows its installed applications under **Applications**. Each shows whether it is open. Pin up to three that you use often. Search the rest. Select **Open** to open an application on that device. A device opens only applications from its own list.
+With **Applications** allowed, a device shows its installed applications in its **Applications** tab. Each shows whether it is open. Pin up to three that you use often. Search the rest. Select **Open** to open an application on that device. A device opens only applications from its own list.
 
 ### Actions and schedules
 
 An action is a named shell command that you save on a device. Each device keeps its own actions. You create, change, and delete an action only at that device. The command runs as your user, with your permissions. Add only commands you trust.
 
-- Under **Actions on this device**, select **Add action**. Give it a name, a command, and a time limit. The action stops by itself when the time passes.
+- In the **Actions** tab of **This device**, select **Add action**. Give it a name, a command, and a time limit. The action stops by itself when the time passes.
 - Next to the command, **Test in my terminal** runs the text you typed in your own terminal, the same way the action runs, before you save it. **Copy command** copies the line that does it, to paste in any terminal. Both work only at the device that owns the action.
 - A device with **Actions** allowed can run your actions and stop them. It can also follow the output. It cannot read the command.
 - Select **Schedule** next to an action to schedule it: once, daily, or weekly. The action runs on the device that owns it, while Lazy Worker is open there. If that time passes while the app is closed, Lazy Worker skips it and does not run late.
@@ -171,7 +175,7 @@ An action is a named shell command that you save on a device. Each device keeps 
 
 A full shell lets another device run any command on this device, as your user. Only you can allow it, only at this device.
 
-1. Under **Who can control it**, select **Shell** on the row of a device.
+1. In the **Who controls it** tab, select **Shell** on the row of a device.
 2. Read the warning. Choose **1 hour**, **2 hours**, **Custom** (1 minute to 24 hours), or **Until I turn it off**.
 3. Select **Allow shell**.
 
@@ -183,7 +187,7 @@ The shell turns off by itself when the time ends. Select **Turn off shell** to e
 
 ### The log
 
-Select **Open the log** to see what other devices asked of this one. Each line shows the time, the device, the request in words, and the result. It shows requests, changes, and refusals. It does not show what was inside a request. It does not list a read that worked.
+Open the **Log** tab of **This device** to see what other devices asked of this one. It scrolls inside the tab. Each line shows the time, the device, the request in words, and the result. It shows requests, changes, and refusals. It does not show what was inside a request. It does not list a read that worked.
 
 The log keeps security events apart from the rest: pairing, removing a device, shell turned on or off, shell sessions, changes to the keys file, and runs of actions. Each group keeps its last 1000 lines, so a device that sends many refused requests cannot push a security event out. A refusal that repeats within one minute is one line with a count, for example **×7**.
 

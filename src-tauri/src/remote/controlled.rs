@@ -267,6 +267,27 @@ impl Store {
             .collect()
     }
 
+    /// Checks the device now and keeps the answer, so the next list shows it. It waits up to
+    /// `CHECK_TIMEOUT` for each address, so call it off the main thread.
+    pub fn check_now(&self, device: &Controlled) -> bool {
+        let online = reachable(&device.host, device.port);
+        // A device that was removed meanwhile stays out of the table.
+        if self.get(&device.id).is_some() {
+            self.reach
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .insert(
+                    device.id.clone(),
+                    Reach {
+                        checked: Instant::now(),
+                        online: Some(online),
+                        running: false,
+                    },
+                );
+        }
+        online
+    }
+
     /// Starts a check in the background. `table` is the locked table of the caller.
     fn check(&self, table: &mut HashMap<String, Reach>, device: &Controlled) {
         let (id, host, port) = (device.id.clone(), device.host.clone(), device.port);
@@ -408,6 +429,24 @@ mod tests {
             }
         }
         assert_eq!(answer, Some(true));
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn a_check_now_waits_for_the_answer_and_keeps_it() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (base, path) = file("ctl-check-now");
+        let store = Store::open(path).unwrap();
+        let mut here = device(ID_A, "Here");
+        here.host = "127.0.0.1".into();
+        here.port = port;
+        store.insert(here.clone()).unwrap();
+        assert!(store.check_now(&here));
+        assert_eq!(store.online(std::slice::from_ref(&here)), [Some(true)]);
+        drop(listener);
+        assert!(!store.check_now(&here));
+        assert_eq!(store.online(std::slice::from_ref(&here)), [Some(false)]);
         fs::remove_dir_all(base).unwrap();
     }
 

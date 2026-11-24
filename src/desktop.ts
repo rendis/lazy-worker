@@ -1041,11 +1041,11 @@ export const desktop = {
     if (previewShellOf(id) === null) throw "notPermitted";
     if (previewQuery.has("terminal-fails")) throw "terminalFailed";
   },
-  /** The single-line ssh command that opens the shell of a device, to paste in a terminal. It holds paths and options only. */
-  async shellCommand(id: string): Promise<string> {
-    if (native) return call("shellCommand", { id });
+  /** Copies the single-line ssh command that opens the shell of a device. It holds paths and options only. */
+  async copyShellCommand(id: string): Promise<void> {
+    if (native) return call("shellCommand", { id, copy: true });
     if (previewShellOf(id) === null) throw "notPermitted";
-    return "'/usr/bin/ssh' '-F' '/Users/alex/Library/Application Support/lazy-worker/remote/ssh_config' '-o' 'AddressFamily=inet' '-t' '-l' 'studio' '--' 'imac-del-estudio.local' 'shell'";
+    await desktop.copyText("'/usr/bin/ssh' '-F' '/Users/alex/Library/Application Support/lazy-worker/remote/ssh_config' '-o' 'AddressFamily=inet' '-t' '-l' 'studio' '--' 'imac-del-estudio.local' 'shell'");
   },
   /** The devices on this network that announce an SSH server, other than this one. */
   async discoverDevices(): Promise<DiscoveredDevice[]> {
@@ -1066,11 +1066,31 @@ export const desktop = {
     if (previewQuery.has("terminal-fails")) throw "terminalFailed";
     if (command.trim() === "") throw "actionInvalid";
   },
-  /** The line that runs the text of an action form in any terminal. Rust writes it, so the quoting is tested once. */
-  async actionCommandLine(command: string): Promise<string> {
-    if (native) return call("actionCommandLine", { command });
+  /** Copies the line that runs the text of an action form in any terminal. Rust writes it, so the quoting is tested once. */
+  async copyActionCommandLine(command: string): Promise<void> {
+    if (native) return call("actionCommandLine", { command, copy: true });
     if (command.trim() === "") throw "actionInvalid";
-    return `'/bin/zsh' -l -c '${command.replace(/'/g, "'\\''")}'`;
+    await desktop.copyText(`'/bin/zsh' -l -c '${command.replace(/'/g, "'\\''")}'`);
+  },
+  /**
+   * Copies text on this device. The app writes the pasteboard: the webview loses the user gesture after an awaited call,
+   * so `navigator.clipboard` fails there. A remote window copies on the device of the person who sits at it.
+   */
+  async copyText(text: string): Promise<void> {
+    if (native) return call("copyText", { text });
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      throw "copyFailed";
+    }
+  },
+  /** Checks now whether a device that this one controls answers. */
+  async checkDevice(id: string): Promise<boolean> {
+    if (native) return call("checkDevice", { id });
+    await new Promise(resolve => setTimeout(resolve, 700));
+    const device = previewDevices().devices.find(item => item.id === id);
+    if (!device) throw "notPaired";
+    return device.online === true;
   },
   /** Opens a window of ten minutes and returns the code to show. The permissions are those this device grants. */
   async openPairing(permissions: PairingPermissions): Promise<OpenedPairing> {

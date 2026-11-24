@@ -659,7 +659,7 @@ export function mountProxy(host: Host) {
     }
     if (action === "open") void launch(app);
     if (action === "copy") {
-      void navigator.clipboard.writeText(resolved(app)).then(() => {
+      void desktop.copyText(resolved(app)).then(() => {
         copiedApp = app.id;
         renderLists();
         window.setTimeout(() => {
@@ -751,7 +751,7 @@ export function mountProxy(host: Host) {
   addresses.addEventListener("click", event => {
     const target = (event.target as Element).closest<HTMLElement>("[data-copy]")?.dataset.copy;
     if (!target) return;
-    void navigator.clipboard.writeText(target).then(() => {
+    void desktop.copyText(target).then(() => {
       copied = target;
       renderLists();
       window.setTimeout(() => {

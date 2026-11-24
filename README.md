@@ -109,6 +109,7 @@ See the [user guide](docs/user-guide.md#devices) for the steps.
 - Pairs two devices with a 6-digit code that works once. The code is never sent over the network.
 - Gives each device four permissions: Control, Applications, Actions, and Shell. A new device gets Control only.
 - Opens a window for another device. Every request runs there, and that device checks it.
+- Shows whether each device is online, checks again every few seconds, and has a button to check one now.
 - Lists the applications of another device, and opens them.
 - Runs saved actions on another device, and schedules them once, daily, or weekly.
 - Allows a full shell for a limited time, and only at the device that is shared. Pairing never turns it on.

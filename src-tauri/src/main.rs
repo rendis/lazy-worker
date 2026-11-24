@@ -5,6 +5,7 @@ mod actions;
 mod activity;
 mod apps;
 mod caffeinate;
+mod clipboard;
 mod devices;
 mod dispatch;
 mod lid;
