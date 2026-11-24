@@ -253,6 +253,20 @@ impl Service {
         move || own.and_then(|own| own())
     }
 
+    /// The name that a paired device has now.
+    pub fn peer_name(&self, id: &str) -> Option<String> {
+        self.running().ok()?.peers.get(id).map(|peer| peer.name)
+    }
+
+    /// Adds an entry to the log of remote access, with the name that the device has now.
+    pub fn record(&self, mut entry: Entry) {
+        let Ok(running) = self.running() else { return };
+        if entry.name.is_none() {
+            entry.name = entry.peer.as_deref().and_then(|id| running.peers.get(id)).map(|peer| peer.name);
+        }
+        let _ = running.log.append(&entry);
+    }
+
     pub fn controllers(&self) -> Vec<Controller> {
         let Ok(running) = self.running() else {
             return Vec::new();

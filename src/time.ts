@@ -71,3 +71,27 @@ export function formatClock(epochSeconds: number, locale: string, now = new Date
     ? moment.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hour12: false })
     : moment.toLocaleString(locale, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
 }
+
+/**
+ * How long a run took: `12 s` under a minute, `4 min 05 s` under an hour, and `1 h 05 min` from one hour on.
+ * Its longest text has 11 characters (`59 min 59 s`) for a run that ends within an hour, as every run does.
+ * A run of 100 hours or more shows whole hours, so the text stays short. Reserve `DURATION_WIDTH` characters.
+ */
+export function formatDuration(seconds: number): string {
+  const total = whole(seconds);
+  if (total < MINUTE) return `${total} s`;
+  if (total < HOUR) return `${Math.floor(total / MINUTE)} min ${pad(total % MINUTE)} s`;
+  const hours = Math.floor(total / HOUR);
+  return hours >= 100 ? `${hours} h` : `${hours} h ${pad(Math.floor(total / MINUTE) % 60)} min`;
+}
+
+/** Characters to reserve for `formatDuration`. */
+export const DURATION_WIDTH = 11;
+
+/** A limit of time in the largest whole unit: `30 s`, `5 min`, `1 h`. A number that does not divide stays in seconds, so no text lies. */
+export function formatLimit(seconds: number): string {
+  const total = whole(seconds);
+  if (total >= HOUR && total % HOUR === 0) return `${total / HOUR} h`;
+  if (total >= MINUTE && total % MINUTE === 0) return `${total / MINUTE} min`;
+  return `${total} s`;
+}

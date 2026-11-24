@@ -100,19 +100,32 @@ export type RemoteLogEntry = {
   /** `ok` or an error code. */
   outcome: string;
 };
-/** `weekday` counts from 0 on Sunday. `time` is a time of day as `HH:MM`. */
+/** `day` counts from 0 on Sunday. `time` is a time of day as `HH:MM` on the clock of the device that runs the action. `at` is in seconds since the Unix epoch. */
 export type ActionSchedule =
-  | { every: "manual" }
-  | { every: "daily"; time: string }
-  | { every: "weekly"; weekday: number; time: string };
+  | { kind: "once"; at: number }
+  | { kind: "daily"; time: string }
+  | { kind: "weekly"; day: number; time: string };
 /** A command saved on a device. Times are in seconds since the Unix epoch. */
 export type SavedAction = {
   id: string;
   name: string;
-  schedule: ActionSchedule;
-  lastRun: { time: number; ok: boolean } | null;
+  /** Only the device that holds the action gets its command. */
+  command?: string;
+  timeoutSeconds: number;
+  schedule: ActionSchedule | null;
+  notifyOnFailure: boolean;
+  /** On the device itself: `local` or the id of a device that set the schedule. On another device: `local`, `you` or `other`. */
+  scheduledBy: string | null;
+  /** The name of the device that set the schedule, known on the device itself. */
+  scheduledByName: string | null;
+  lastRun: { start: number; end: number; exitCode: number | null; timedOut: boolean; ok: boolean } | null;
   nextRun: number | null;
+  /** True while a run of this action is going. */
+  busy: boolean;
 };
+export type ActionRunState = "running" | "finished" | "stopped" | "timedOut" | "failed";
+export type ActionRun = { state: ActionRunState; exitCode: number | null; seconds: number; output: string; truncated: boolean };
+export type ActionDraft = { name: string; command: string; timeoutSeconds: number };
 export type RemoteTool = { id: ToolId; running: boolean };
 /** An application of another device. `bundleId` names it, and `version` is part of the name of its cached icon. */
 export type RemoteApp = { bundleId: string; name: string; version: string; open: boolean };
@@ -131,7 +144,6 @@ export type RemoteDevice = {
   tools: RemoteTool[];
   /** The bundle identifiers of the apps the user chose to see first. The view reads the list itself. */
   apps: { pinned: string[] };
-  actions: SavedAction[];
   /** The shell is on until this time, or `null` while it is off. Only that device can turn it on. */
   shell: { until: number } | null;
 };
@@ -163,7 +175,6 @@ export type DevicesOverview = {
     controllers: Controller[];
     /** Whether this device can receive requests, and an error code when it cannot. */
     socket: { listening: boolean; error: string | null };
-    actions: SavedAction[];
   };
   devices: RemoteDevice[];
 };
@@ -255,6 +266,11 @@ function savePreviewPreferences(preferences: Preferences): void {
 }
 
 /** Every native call goes through the one `dispatch` command, which decides the access in Rust. */
+/** The arguments of `call` for a request about the actions of this device (`target` is `null`) or of another one. */
+function actionRequest(target: string | null, command: string, args: object): [string, object] {
+  return target === null ? [command, args] : ["remoteCall", { id: target, request: { command, args } }];
+}
+
 function call<T>(command: string, args?: object): Promise<T> {
   return invoke<T>("dispatch", { request: { command, args } }).then(
     value => {
@@ -444,14 +460,14 @@ function previewLinkDown(): boolean {
 }
 function previewPermissions(): Session["permissions"] {
   const level = previewQuery.get("perm");
-  // `?no-apps` shows a device that has not allowed applications.
+  // `?no-apps` shows a device that has not allowed applications, and `?no-actions` one that has not allowed actions.
   return {
     control: level !== "none", applications: !previewQuery.has("no-apps"),
-    actions: level !== "none" && level !== "control",
+    actions: level !== "none" && level !== "control" && !previewQuery.has("no-actions"),
   };
 }
 /** What a window that controls a device finds out before a call, as the device would answer it. */
-function previewGate(command: string, args?: { tool?: string; active?: boolean }): void {
+function previewGate(command: string, args?: { tool?: string; active?: boolean; enabled?: boolean }): void {
   if (remoteId === null) return;
   if (previewLinkDown()) {
     reportLink("sshUnreachable");
@@ -484,22 +500,121 @@ const previewApps: { bundleId: string; name: string; version: string; icon?: str
 const previewOpen = new Set(["com.apple.Safari", "com.apple.finder", "com.anthropic.claudefordesktop"]);
 const previewPinned = ["com.apple.Safari", "com.apple.Notes", "com.anthropic.claudefordesktop"];
 
+
+/** The next time of a schedule on the clock of this browser, in seconds, as the device would say it. */
+function previewNextRun(schedule: ActionSchedule | null): number | null {
+  if (!schedule) return null;
+  if (schedule.kind === "once") return schedule.at;
+  const [hours, minutes] = schedule.time.split(":").map(Number);
+  const next = new Date();
+  next.setHours(hours, minutes, 0, 0);
+  for (let guard = 0; guard < 9; guard++) {
+    if (next.getTime() > Date.now() && (schedule.kind === "daily" || next.getDay() === schedule.day)) break;
+    next.setDate(next.getDate() + 1);
+  }
+  return Math.floor(next.getTime() / 1000);
+}
+
+/** The actions of the sample devices. A change lasts until the page reloads. `this` is the device of the panel. */
+const previewActionLists = new Map<string, SavedAction[]>();
+function previewActions(id: string): SavedAction[] {
+  let list = previewActionLists.get(id);
+  if (!list) {
+    const now = Math.floor(Date.now() / 1000);
+    const action = (fields: Partial<SavedAction> & Pick<SavedAction, "id" | "name">): SavedAction => ({
+      timeoutSeconds: 300, schedule: null, notifyOnFailure: false, scheduledBy: null, scheduledByName: null,
+      lastRun: null, nextRun: null, busy: false, ...fields,
+    });
+    const daily: ActionSchedule = { kind: "daily", time: "02:00" };
+    if (id === "this") {
+      list = [
+        action({
+          id: "xcode", name: "Clear the Xcode cache", command: "rm -rf ~/Library/Developer/Xcode/DerivedData/*",
+          schedule: { kind: "weekly", day: 1, time: "09:00" }, scheduledBy: "studio", scheduledByName: "iMac del estudio",
+          notifyOnFailure: true, nextRun: previewNextRun({ kind: "weekly", day: 1, time: "09:00" }),
+          lastRun: { start: now - 2 * 86400 - 3, end: now - 2 * 86400, exitCode: 1, timedOut: false, ok: false },
+        }),
+        action({ id: "downloads", name: "Clean downloads", command: "find ~/Downloads -mtime +30 -delete" }),
+      ];
+    } else {
+      list = [
+        action({
+          id: "backup", name: "Backup", schedule: daily, scheduledBy: "you", nextRun: previewNextRun(daily),
+          lastRun: { start: now - 8 * 3600 - 12, end: now - 8 * 3600, exitCode: 0, timedOut: false, ok: true },
+        }),
+        action({ id: "docker", name: "Restart Docker" }),
+        action({ id: "fails", name: "Check the disk" }),
+      ];
+    }
+    previewActionLists.set(id, list);
+  }
+  return list;
+}
+
+/** A sample run. `backup` prints for about three seconds, `fails` ends with an error, and any other one is quick. */
+type PreviewRun = { device: string; action: SavedAction; started: number; stopped: number | null };
+const previewRuns = new Map<string, PreviewRun>();
+const previewLines: Record<string, string[]> = {
+  backup: ["sending incremental file list", "Documentos/plan.pdf", "Documentos/fotos/", "Documentos/fotos/ana.jpg", "sent 48.2M bytes  received 1.1K bytes", "total size is 3.4G"],
+  fails: ["Checking the disk…", "error: the disk is not ready (code 2)"],
+};
+function previewRunView(run: PreviewRun): ActionRun {
+  const duration = run.action.id === "backup" ? 3000 : run.action.id === "fails" ? 1500 : 600;
+  const end = run.stopped ?? run.started + duration;
+  const elapsed = Math.min(Date.now(), end) - run.started;
+  const lines = previewLines[run.action.id] ?? ["Done."];
+  const shown = run.stopped === null && Date.now() >= end ? lines.length : Math.min(lines.length, Math.ceil(lines.length * elapsed / duration));
+  const running = run.stopped === null && Date.now() < end;
+  return {
+    state: running ? "running" : run.stopped !== null ? "stopped" : "finished",
+    exitCode: running || run.stopped !== null ? null : run.action.id === "fails" ? 2 : 0,
+    seconds: Math.floor(elapsed / 1000), output: lines.slice(0, shown).map(line => `${line}\n`).join(""), truncated: false,
+  };
+}
+/** Settles the sample runs that ended, so the action shows its last run. */
+function settlePreviewRuns(): void {
+  for (const run of previewRuns.values()) {
+    const view = previewRunView(run);
+    run.action.busy = view.state === "running";
+    if (view.state === "running" || run.action.lastRun?.start === Math.floor(run.started / 1000)) continue;
+    const start = Math.floor(run.started / 1000);
+    run.action.lastRun = {
+      start, end: start + view.seconds, exitCode: view.exitCode, timedOut: false, ok: view.state === "finished" && view.exitCode === 0,
+    };
+  }
+}
+function previewTarget(target: string | null): string {
+  if (target !== null && !previewDevices().devices.some(device => device.id === target)) throw "notPaired";
+  return target ?? "this";
+}
+/** What a device says to a request of the Actions family, with the checks that the device would make. */
+function previewActionCall(target: string | null, command: string): SavedAction[] {
+  const device = previewTarget(target);
+  if (target !== null && refusal(command, undefined, previewPermissions())) throw "notPermitted";
+  settlePreviewRuns();
+  return previewActions(device);
+}
+function previewAction(target: string | null, command: string, id: string): SavedAction {
+  const found = previewActionCall(target, command).find(action => action.id === id);
+  if (!found) throw "actionNotFound";
+  return found;
+}
+function previewActionView(action: SavedAction, remote: boolean): SavedAction {
+  const copy: SavedAction = { ...action, nextRun: previewNextRun(action.schedule) };
+  if (remote) {
+    delete copy.command;
+    copy.scheduledByName = null;
+    if (copy.scheduledBy && copy.scheduledBy !== "local") copy.scheduledBy = copy.scheduledBy === "you" ? "you" : "other";
+  }
+  return copy;
+}
+
 /** The sample list a preview shows, so the whole Devices view can be checked. Times follow the clock. */
 function previewDevices(): DevicesOverview {
   const now = Math.floor(Date.now() / 1000);
   settlePreviewPairing(now);
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  tomorrow.setHours(2, 0, 0, 0);
   const shellEnd = new Date();
   shellEnd.setHours(shellEnd.getHours() + 3, 0, 0, 0);
-  const backup: SavedAction = {
-    id: "backup", name: "Backup", schedule: { every: "daily", time: "02:00" },
-    lastRun: { time: now - 8 * 3600, ok: true }, nextRun: Math.floor(tomorrow.getTime() / 1000),
-  };
-  const docker: SavedAction = {
-    id: "docker", name: "Restart Docker", schedule: { every: "manual" }, lastRun: null, nextRun: null,
-  };
   return {
     thisDevice: {
       name: "MacBook Pro", kind: "laptop", remoteAccess: { ...previewAccess }, pairing: { ...previewPairing },
@@ -508,13 +623,6 @@ function previewDevices(): DevicesOverview {
         ...controller, permissions: { ...controller.permissions },
       })),
       socket: { listening: true, error: null },
-      actions: [
-        {
-          id: "xcode", name: "Clear the Xcode cache", schedule: { every: "weekly", weekday: 1, time: "09:00" },
-          lastRun: { time: now - 2 * 86400, ok: false }, nextRun: null,
-        },
-        { id: "downloads", name: "Clean downloads", schedule: { every: "manual" }, lastRun: null, nextRun: null },
-      ],
     },
     devices: [
       {
@@ -522,13 +630,12 @@ function previewDevices(): DevicesOverview {
         user: "studio", host: "imac-del-estudio.local", port: 22, added: now - 12 * 86400,
         tools: [{ id: "activity", running: true }, { id: "caffeinate", running: false }],
         apps: { pinned: [...previewPinned] },
-        actions: [backup, docker],
         shell: { until: Math.floor(shellEnd.getTime() / 1000) },
       },
       {
         id: "old", name: "MacBook Air de la oficina con un nombre muy largo para probar el ajuste", kind: "laptop",
         user: "oficina", host: "192.168.1.40", port: 22, added: now - 90 * 86400,
-        online: false, tools: [], apps: { pinned: [] }, actions: [], shell: null,
+        online: false, tools: [], apps: { pinned: [] }, shell: null,
       },
       ...previewDeviceAdditions.map(device => ({ ...device })),
     ],
@@ -632,6 +739,75 @@ export const desktop = {
     if (native) return call("setPinnedApps", { id, bundleIds });
     previewPinned.splice(0, previewPinned.length, ...bundleIds);
   },
+  /** The actions of this device, with their commands. */
+  async listActions(): Promise<SavedAction[]> {
+    if (native) return call("listActions");
+    return previewActionCall(null, "listActions").map(action => previewActionView(action, false));
+  },
+  /** The actions of another device, without their commands. The device decides who may ask. */
+  async remoteListActions(id: string): Promise<SavedAction[]> {
+    if (native) return call("remoteCall", { id, request: { command: "listActions" } });
+    return previewActionCall(id, "listActions").map(action => previewActionView(action, true));
+  },
+  /** Writing an action is for the person at the device that holds it. */
+  async createAction(draft: ActionDraft): Promise<void> {
+    if (native) return call("createAction", { ...draft });
+    previewGate("createAction");
+    if (previewActions("this").length >= 64) throw "tooManyActions";
+    previewActions("this").push({
+      id: Math.random().toString(16).slice(2, 10), name: draft.name, command: draft.command, timeoutSeconds: draft.timeoutSeconds,
+      schedule: null, notifyOnFailure: false, scheduledBy: null, scheduledByName: null, lastRun: null, nextRun: null, busy: false,
+    });
+  },
+  async updateAction(id: string, draft: ActionDraft): Promise<void> {
+    if (native) return call("updateAction", { id, ...draft });
+    previewGate("updateAction");
+    Object.assign(previewAction(null, "updateAction", id), draft);
+  },
+  async deleteAction(id: string): Promise<void> {
+    if (native) return call("deleteAction", { id });
+    previewGate("deleteAction");
+    const list = previewActions("this");
+    const index = list.findIndex(action => action.id === id);
+    if (index < 0) throw "actionNotFound";
+    list.splice(index, 1);
+  },
+  /** Starts an action of this device (`target` is `null`) or of another one, and returns the id of the run. */
+  async runAction(target: string | null, id: string): Promise<{ runId: string }> {
+    if (native) return call<{ runId: string }>(...actionRequest(target, "runAction", { id }));
+    const action = previewAction(target, "runAction", id);
+    if (action.busy) throw "actionBusy";
+    const runId = Math.random().toString(16).slice(2, 12);
+    previewRuns.set(runId, { device: previewTarget(target), action, started: Date.now(), stopped: null });
+    action.busy = true;
+    return { runId };
+  },
+  async getActionRun(target: string | null, runId: string): Promise<ActionRun> {
+    if (native) return call<ActionRun>(...actionRequest(target, "getActionRun", { runId }));
+    previewActionCall(target, "getActionRun");
+    const run = previewRuns.get(runId);
+    if (!run || run.device !== previewTarget(target)) throw "actionRunNotFound";
+    return previewRunView(run);
+  },
+  async stopActionRun(target: string | null, runId: string): Promise<void> {
+    if (native) return call<void>(...actionRequest(target, "stopActionRun", { runId }));
+    previewActionCall(target, "stopActionRun");
+    const run = previewRuns.get(runId);
+    if (!run || run.device !== previewTarget(target)) throw "actionRunNotFound";
+    if (previewRunView(run).state === "running") run.stopped = Date.now();
+  },
+  async scheduleAction(target: string | null, id: string, schedule: ActionSchedule, notifyOnFailure: boolean): Promise<void> {
+    if (native) return call<void>(...actionRequest(target, "scheduleAction", { id, schedule, notifyOnFailure }));
+    const action = previewAction(target, "scheduleAction", id);
+    if (schedule.kind === "once" && (schedule.at <= Date.now() / 1000 || schedule.at > Date.now() / 1000 + 366 * 86400)) {
+      throw "scheduleInvalid";
+    }
+    Object.assign(action, { schedule, notifyOnFailure, scheduledBy: target === null ? "local" : "you", scheduledByName: null });
+  },
+  async clearSchedule(target: string | null, id: string): Promise<void> {
+    if (native) return call<void>(...actionRequest(target, "clearSchedule", { id }));
+    Object.assign(previewAction(target, "clearSchedule", id), { schedule: null, scheduledBy: null, scheduledByName: null, nextRun: null });
+  },
   macApp,
   /** True when the Devices view shows sample data, because no native app answers. */
   sampleDevices: !native,
@@ -678,6 +854,7 @@ export const desktop = {
   },
   async saveStartToolsOnLaunch(enabled: boolean): Promise<void> {
     if (native) return call("setStartToolsOnLaunch", { enabled });
+    previewGate("setStartToolsOnLaunch", { enabled });
     savePreview(current => ({ ...current, startToolsOnLaunch: enabled }));
   },
   async saveHideWhileSharing(enabled: boolean): Promise<void> {
@@ -822,7 +999,7 @@ export const desktop = {
     const device: RemoteDevice = {
       id: Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join(""),
       name: host, kind: "desktop", user, host, port: port ?? 22, added: Math.floor(Date.now() / 1000), online: true,
-      tools: [], apps: { pinned: [] }, actions: [], shell: null,
+      tools: [], apps: { pinned: [] }, shell: null,
     };
     previewDeviceAdditions.push(device);
     return device;

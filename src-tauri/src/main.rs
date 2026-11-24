@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(unix)]
+mod actions;
 mod activity;
 mod apps;
 mod caffeinate;
@@ -199,7 +201,24 @@ fn main() {
             let clock = Arc::downgrade(&controller);
             app.manage(controller);
             #[cfg(unix)]
-            app.manage(remote::service::Service::start(app.handle(), &directory));
+            {
+                app.manage(remote::service::Service::start(app.handle(), &directory));
+                // The actions come after the service, because their runs are written in its log.
+                let handle = app.handle().clone();
+                let sink: actions::Sink = std::sync::Arc::new(move |entry| {
+                    if let Some(service) = handle.try_state::<remote::service::Service>() {
+                        service.record(entry);
+                    }
+                });
+                // A file that cannot be read leaves the actions off, and the panel says so. It is never replaced.
+                match actions::Actions::open(directory.join("actions.json"), sink) {
+                    Ok(actions) => {
+                        actions.start_scheduler();
+                        app.manage(actions);
+                    }
+                    Err(code) => eprintln!("Lazy Worker: the actions are off ({code})"),
+                }
+            }
             #[cfg(target_os = "macos")]
             let tray_app = {
                 panel::install(app)?;
@@ -244,6 +263,10 @@ fn main() {
         RunEvent::Exit => {
             #[cfg(target_os = "macos")]
             presentation::stop(app);
+            #[cfg(unix)]
+            if let Some(actions) = app.try_state::<actions::Actions>() {
+                actions.stop();
+            }
             #[cfg(unix)]
             if let Some(service) = app.try_state::<remote::service::Service>() {
                 service.stop();

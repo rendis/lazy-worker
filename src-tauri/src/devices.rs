@@ -96,7 +96,6 @@ pub struct Remote {
     pub online: Option<bool>,
     pub tools: Vec<()>,
     pub apps: RemoteApps,
-    pub actions: Vec<()>,
     pub shell: Option<()>,
 }
 
@@ -122,7 +121,6 @@ impl Remote {
             apps: RemoteApps {
                 pinned: device.pinned.clone(),
             },
-            actions: Vec::new(),
             shell: None,
         }
     }
@@ -189,7 +187,7 @@ impl Socket {
     }
 }
 
-/// The list the Devices view draws. Actions and other devices come in later steps.
+/// The list the Devices view draws. The shell comes in a later step.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Overview {
@@ -209,7 +207,6 @@ pub struct ThisDevice {
     pub account: Option<String>,
     pub controllers: Vec<Controller>,
     pub socket: Socket,
-    pub actions: Vec<()>,
 }
 
 #[cfg(target_os = "macos")]
@@ -258,7 +255,6 @@ pub fn overview(stores: Stores, remote_access: RemoteAccess) -> Overview {
             account: None,
             controllers: stores.controllers,
             socket: stores.socket,
-            actions: Vec::new(),
         },
         devices: stores.devices,
     }
@@ -333,7 +329,6 @@ mod tests {
                 account: Some("me".into()),
                 controllers: Vec::new(),
                 socket: Socket::unavailable("x"),
-                actions: Vec::new(),
             },
             devices: Vec::new(),
         })

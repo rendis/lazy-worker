@@ -44,6 +44,29 @@ pub struct Permissions {
     pub control: bool,
     pub applications: bool,
     pub actions: bool,
+    /// The device that sent the request. A request that belongs to one device, such as a run, uses it.
+    pub peer: Option<PeerId>,
+}
+
+/// The id of a paired device: 32 lowercase hexadecimal characters, kept by value so an origin stays `Copy`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(unix), allow(dead_code))]
+pub struct PeerId([u8; 32]);
+
+#[cfg_attr(not(unix), allow(dead_code))]
+impl PeerId {
+    pub fn parse(text: &str) -> Option<Self> {
+        let bytes: [u8; 32] = text.as_bytes().try_into().ok()?;
+        bytes
+            .iter()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+            .then_some(Self(bytes))
+    }
+
+    pub fn as_str(&self) -> &str {
+        // The bytes were checked to be ASCII hexadecimal.
+        std::str::from_utf8(&self.0).unwrap_or_default()
+    }
 }
 
 /// Where a request comes from.
@@ -55,6 +78,15 @@ pub enum Origin {
 }
 
 impl Origin {
+    /// The id of the device that sent the request, when a device did.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    pub fn peer(&self) -> Option<&str> {
+        match self {
+            Self::Local => None,
+            Self::Remote(permissions) => permissions.peer.as_ref().map(PeerId::as_str),
+        }
+    }
+
     /// Decides the origin from the label of the calling window. Only `main` is local.
     fn of_window(label: &str) -> Result<Self, &'static str> {
         match label {
@@ -166,6 +198,19 @@ pub enum Request {
     GetAppIcon { bundle_id: String },
     /// Opens an application of that list.
     OpenApplication { bundle_id: String },
+    /// The actions of this device. A remote origin gets them without their commands.
+    ListActions,
+    /// Writing an action is for the person at this device only.
+    CreateAction { name: String, command: String, timeout_seconds: Option<u32> },
+    UpdateAction { id: String, name: String, command: String, timeout_seconds: Option<u32> },
+    DeleteAction { id: String },
+    /// Starts an action and returns the id of the run.
+    RunAction { id: String },
+    GetActionRun { run_id: String },
+    StopActionRun { run_id: String },
+    /// `schedule` is `{"kind": "once", "at"}`, `{"kind": "daily", "time"}` or `{"kind": "weekly", "day", "time"}`.
+    ScheduleAction { id: String, schedule: Value, notify_on_failure: bool },
+    ClearSchedule { id: String },
     /// The path of the cached icon of an application on a device that this one controls. It fetches the icon first when it is not cached.
     GetCachedIcon { id: String, bundle_id: String, version: String },
     /// Saves the applications that the Devices view shows first for a device that this one controls.
@@ -197,15 +242,32 @@ impl Request {
             | Self::SetTheme { .. }
             | Self::SetDuration { .. }
             | Self::SetSchedule { .. }
-            | Self::SetQuickStart { .. }
-            | Self::SetStartToolsOnLaunch { .. }
             | Self::SetHideWhileSharing { .. }
             | Self::SetSeenVersion { .. }
             | Self::SaveCaffeinateSettings { .. }
             | Self::SetLoginLaunch { .. }
             | Self::SetLidMode { .. }
             | Self::CheckProxyServer { .. } => Access::Control,
+            // Turning it on arms the next launch to open the proxy clients, which run commands. Only the person here does that.
+            Self::SetStartToolsOnLaunch { enabled: true } => Access::LocalOnly,
+            Self::SetStartToolsOnLaunch { enabled: false } => Access::Control,
+            // Including the proxy arms Quick start and the next launch to open a LAN listener. Only the person here does that.
+            Self::SetQuickStart {
+                tool: ToolId::Proxy,
+                include: true,
+            } => Access::LocalOnly,
+            Self::SetQuickStart { .. } => Access::Control,
             Self::GetSession => Access::Paired,
+            Self::ListActions
+            | Self::RunAction { .. }
+            | Self::GetActionRun { .. }
+            | Self::StopActionRun { .. }
+            | Self::ScheduleAction { .. }
+            | Self::ClearSchedule { .. } => Access::Actions,
+            // An action holds a command. Only the device that holds it writes it.
+            Self::CreateAction { .. } | Self::UpdateAction { .. } | Self::DeleteAction { .. } => {
+                Access::LocalOnly
+            }
             Self::ListApplications | Self::GetAppIcon { .. } | Self::OpenApplication { .. } => {
                 Access::Applications
             }
@@ -284,7 +346,9 @@ impl Request {
             | Self::ListCaffeinateProcesses
             | Self::ListApplications
             | Self::GetAppIcon { .. }
-            | Self::GetCachedIcon { .. } => true,
+            | Self::GetCachedIcon { .. }
+            | Self::ListActions
+            | Self::GetActionRun { .. } => true,
             Self::CheckForUpdate
             | Self::RestartToUpdate
             | Self::SetLanguage { .. }
@@ -318,6 +382,13 @@ impl Request {
             | Self::EnableRemoteAccess
             | Self::OpenSharingSettings
             | Self::OpenApplication { .. }
+            | Self::CreateAction { .. }
+            | Self::UpdateAction { .. }
+            | Self::DeleteAction { .. }
+            | Self::RunAction { .. }
+            | Self::StopActionRun { .. }
+            | Self::ScheduleAction { .. }
+            | Self::ClearSchedule { .. }
             | Self::SetPinnedApps { .. }
             | Self::OpenRemoteWindow { .. }
             | Self::RemoteCall { .. } => false,
@@ -349,6 +420,8 @@ impl Request {
             | Self::ListApplications
             | Self::GetAppIcon { .. }
             | Self::GetCachedIcon { .. }
+            | Self::ListActions
+            | Self::GetActionRun { .. }
             | Self::CheckForUpdate
             | Self::RestartToUpdate
             | Self::SetLanguage { .. }
@@ -382,6 +455,13 @@ impl Request {
             | Self::EnableRemoteAccess
             | Self::OpenSharingSettings
             | Self::OpenApplication { .. }
+            | Self::CreateAction { .. }
+            | Self::UpdateAction { .. }
+            | Self::DeleteAction { .. }
+            | Self::RunAction { .. }
+            | Self::StopActionRun { .. }
+            | Self::ScheduleAction { .. }
+            | Self::ClearSchedule { .. }
             | Self::SetPinnedApps { .. }
             | Self::OpenRemoteWindow { .. }
             | Self::RemoteCall { .. } => false,
@@ -410,6 +490,12 @@ impl Request {
                 | Self::ListApplications
                 | Self::GetAppIcon { .. }
                 | Self::OpenApplication { .. }
+                | Self::ListActions
+                | Self::RunAction { .. }
+                | Self::GetActionRun { .. }
+                | Self::StopActionRun { .. }
+                | Self::ScheduleAction { .. }
+                | Self::ClearSchedule { .. }
         )
     }
 }
@@ -644,6 +730,23 @@ async fn run(
                 .map_err(|_| "appOpenFailed")?
                 .map(|()| Value::Null)
         }
+        request @ (Request::ListActions
+        | Request::CreateAction { .. }
+        | Request::UpdateAction { .. }
+        | Request::DeleteAction { .. }
+        | Request::RunAction { .. }
+        | Request::GetActionRun { .. }
+        | Request::StopActionRun { .. }
+        | Request::ScheduleAction { .. }
+        | Request::ClearSchedule { .. }) => {
+            #[cfg(unix)]
+            return crate::actions::handle(app, origin, request);
+            #[cfg(not(unix))]
+            {
+                let _ = request;
+                Err("unsupported")
+            }
+        }
         Request::GetCachedIcon { id, bundle_id, version } => {
             #[cfg(unix)]
             {
@@ -791,7 +894,12 @@ async fn run(
             #[cfg(unix)]
             return tauri::async_runtime::spawn_blocking({
                 let app = app.clone();
-                move || app.state::<crate::remote::service::Service>().remove_peer(&id)
+                move || {
+                    let removed = app.state::<crate::remote::service::Service>().remove_peer(&id);
+                    // The schedules of a device go with its access, even when its line could not be removed.
+                    crate::actions::forget_peer(&app, Some(&id));
+                    removed
+                }
             })
             .await
             .map_err(|_| "workerUnavailable")?
@@ -879,7 +987,11 @@ async fn run(
             #[cfg(unix)]
             return tauri::async_runtime::spawn_blocking({
                 let app = app.clone();
-                move || app.state::<crate::remote::service::Service>().cut_all()
+                move || {
+                    let cut = app.state::<crate::remote::service::Service>().cut_all();
+                    crate::actions::forget_peer(&app, None);
+                    cut
+                }
             })
             .await
             .map_err(|_| "workerUnavailable")?
@@ -992,6 +1104,7 @@ async fn session(app: &AppHandle, origin: Origin) -> Result<Value, &'static str>
             control: true,
             applications: true,
             actions: true,
+            peer: None,
         },
         Origin::Remote(permissions) => permissions,
     };
@@ -1051,21 +1164,25 @@ mod tests {
         control: false,
         applications: false,
         actions: false,
+        peer: None,
     });
     const CONTROL: Origin = Origin::Remote(Permissions {
         control: true,
         applications: false,
         actions: false,
+        peer: None,
     });
     const APPLICATIONS: Origin = Origin::Remote(Permissions {
         control: false,
         applications: true,
         actions: false,
+        peer: None,
     });
     const ACTIONS: Origin = Origin::Remote(Permissions {
         control: false,
         applications: false,
         actions: true,
+        peer: None,
     });
 
     fn request(value: Value) -> Request {
@@ -1189,7 +1306,7 @@ mod tests {
             json!({"command": "openSharingSettings"}),
         ] {
             let parsed = request(value);
-            for origin in [NONE, CONTROL, ACTIONS, Origin::Remote(Permissions { control: true, applications: true, actions: true })] {
+            for origin in [NONE, CONTROL, ACTIONS, Origin::Remote(Permissions { control: true, applications: true, actions: true, peer: None })] {
                 assert_eq!(allowed(origin, &parsed, &preferences), Err("localOnly"));
             }
             assert_eq!(allowed(Origin::Local, &parsed, &preferences), Ok(()));
@@ -1208,7 +1325,7 @@ mod tests {
             json!({"command": "getProxyLog"}),
         ] {
             let parsed = request(value);
-            let both = Origin::Remote(Permissions { control: true, applications: true, actions: true });
+            let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, peer: None });
             assert_eq!(allowed(CONTROL, &parsed, &preferences), Err("localOnly"));
             assert_eq!(allowed(both, &parsed, &preferences), Err("localOnly"));
             assert_eq!(allowed(Origin::Local, &parsed, &preferences), Ok(()));
@@ -1380,7 +1497,7 @@ mod tests {
     #[test]
     fn the_viewer_and_the_windows_are_not_something_a_remote_device_may_ask() {
         let preferences = Preferences::default();
-        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true });
+        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, peer: None });
         for value in [
             json!({"command": "getViewer"}),
             json!({"command": "openRemoteWindow", "args": {"id": DEVICE}}),
@@ -1418,7 +1535,7 @@ mod tests {
     #[test]
     fn applications_need_their_own_permission_and_control_alone_is_refused() {
         let preferences = Preferences::default();
-        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true });
+        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, peer: None });
         for value in application_requests() {
             let parsed = request(value);
             assert_eq!(parsed.access(&preferences), Access::Applications);
@@ -1484,6 +1601,131 @@ mod tests {
             json!({"command": "restartToUpdate"}),
         ] {
             assert!(!request(value).may_be_called_remotely());
+        }
+    }
+
+    fn read_requests() -> [Value; 2] {
+        [
+            json!({"command": "listActions"}),
+            json!({"command": "getActionRun", "args": {"runId": "0123456789abcdef"}}),
+        ]
+    }
+
+    fn actions_requests() -> Vec<Value> {
+        let id = "0123456789abcdef0123456789abcdef";
+        let mut all = read_requests().to_vec();
+        all.extend([
+            json!({"command": "runAction", "args": {"id": id}}),
+            json!({"command": "stopActionRun", "args": {"runId": "0123456789abcdef"}}),
+            json!({"command": "scheduleAction", "args": {"id": id, "schedule": {"kind": "daily", "time": "02:00"}, "notifyOnFailure": true}}),
+            json!({"command": "clearSchedule", "args": {"id": id}}),
+        ]);
+        all
+    }
+
+    fn writing_requests() -> [Value; 3] {
+        let id = "0123456789abcdef0123456789abcdef";
+        [
+            json!({"command": "createAction", "args": {"name": "x", "command": "echo hi"}}),
+            json!({"command": "updateAction", "args": {"id": id, "name": "x", "command": "echo hi", "timeoutSeconds": 10}}),
+            json!({"command": "deleteAction", "args": {"id": id}}),
+        ]
+    }
+
+    #[test]
+    fn remote_control_is_refused_for_every_action_request() {
+        let preferences = Preferences::default();
+        let all = Origin::Remote(Permissions { control: true, applications: true, actions: false, peer: None });
+        for value in actions_requests().into_iter().chain(writing_requests()) {
+            let parsed = request(value.clone());
+            for origin in [NONE, CONTROL, APPLICATIONS, all] {
+                assert!(allowed(origin, &parsed, &preferences).is_err(), "{value}");
+            }
+            assert_eq!(allowed(Origin::Local, &parsed, &preferences), Ok(()));
+        }
+    }
+
+    #[test]
+    fn remote_actions_can_run_and_schedule_but_not_write_an_action() {
+        let preferences = Preferences::default();
+        for value in actions_requests() {
+            let parsed = request(value.clone());
+            assert_eq!(parsed.access(&preferences), Access::Actions, "{value}");
+            assert_eq!(allowed(ACTIONS, &parsed, &preferences), Ok(()), "{value}");
+            assert_eq!(allowed(NONE, &parsed, &preferences), Err("notPermitted"), "{value}");
+        }
+        for value in writing_requests() {
+            let parsed = request(value.clone());
+            assert_eq!(parsed.access(&preferences), Access::LocalOnly, "{value}");
+            let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, peer: None });
+            for origin in [NONE, CONTROL, ACTIONS, both] {
+                assert_eq!(allowed(origin, &parsed, &preferences), Err("localOnly"), "{value}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_action_requests_say_what_they_read_and_where_they_run() {
+        for value in read_requests() {
+            assert!(request(value).is_read());
+        }
+        for value in actions_requests().into_iter().skip(2).chain(writing_requests()) {
+            assert!(!request(value).is_read());
+        }
+        for value in actions_requests().into_iter().chain(writing_requests()) {
+            let parsed = request(value);
+            // An action belongs to the device that is asked, also from the window of a device.
+            assert!(!parsed.runs_on_viewer() && !parsed.is_controller_side());
+            assert_eq!(plan(&Route::Device(DEVICE.into()), &parsed), Plan::Forward(DEVICE.into()));
+        }
+    }
+
+    #[test]
+    fn the_devices_view_may_run_and_schedule_actions_but_not_write_them() {
+        for value in actions_requests() {
+            assert!(request(value).may_be_called_remotely());
+        }
+        for value in writing_requests() {
+            assert!(!request(value).may_be_called_remotely());
+        }
+    }
+
+    #[test]
+    fn turning_on_the_start_of_the_tools_at_launch_is_for_the_person_here() {
+        let preferences = Preferences::default();
+        let on = request(json!({"command": "setStartToolsOnLaunch", "args": {"enabled": true}}));
+        let off = request(json!({"command": "setStartToolsOnLaunch", "args": {"enabled": false}}));
+        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, peer: None });
+        for origin in [NONE, CONTROL, ACTIONS, both] {
+            assert_eq!(allowed(origin, &on, &preferences), Err("localOnly"));
+        }
+        assert_eq!(allowed(Origin::Local, &on, &preferences), Ok(()));
+        // Turning it off stays remote control.
+        assert_eq!(allowed(CONTROL, &off, &preferences), Ok(()));
+        assert_eq!(allowed(NONE, &off, &preferences), Err("notPermitted"));
+        assert!(!on.is_read() && !off.is_read());
+    }
+
+    #[test]
+    fn only_the_person_here_adds_the_proxy_to_quick_start() {
+        let preferences = Preferences::default();
+        let proxy_on = request(json!({"command": "setQuickStart", "args": {"tool": "proxy", "include": true}}));
+        let proxy_off = request(json!({"command": "setQuickStart", "args": {"tool": "proxy", "include": false}}));
+        let caffeinate_on = request(json!({"command": "setQuickStart", "args": {"tool": "caffeinate", "include": true}}));
+        assert_eq!(allowed(CONTROL, &proxy_on, &preferences), Err("localOnly"));
+        assert_eq!(allowed(Origin::Local, &proxy_on, &preferences), Ok(()));
+        assert_eq!(allowed(CONTROL, &proxy_off, &preferences), Ok(()));
+        assert_eq!(allowed(CONTROL, &caffeinate_on, &preferences), Ok(()));
+    }
+
+    #[test]
+    fn the_id_of_a_device_in_an_origin_is_exact() {
+        let id = "0123456789abcdef0123456789abcdef";
+        let origin = Origin::Remote(Permissions { peer: PeerId::parse(id), ..Permissions::default() });
+        assert_eq!(origin.peer(), Some(id));
+        assert_eq!(Origin::Local.peer(), None);
+        for bad in ["", "short", &id.to_uppercase(), &format!("{id}0"), "../0123456789abcdef0123456789abcd"] {
+            assert!(PeerId::parse(bad).is_none(), "{bad}");
         }
     }
 }

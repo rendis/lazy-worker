@@ -764,6 +764,42 @@
           <div class="pair-body" id="pair-device-body"></div>
         </section>
       </div>
+      <div class="log-overlay" id="action-form-window" inert>
+        <section class="log-window action-window" role="dialog" aria-labelledby="action-form-title">
+          <header>
+            <i data-lucide="square-terminal"></i>
+            <h2 id="action-form-title"></h2>
+            <button type="button" class="icon-button" id="action-form-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
+          </header>
+          <form class="action-body" id="action-form-body" novalidate></form>
+        </section>
+      </div>
+      <div class="log-overlay" id="action-schedule-window" inert>
+        <section class="log-window action-window" role="dialog" aria-labelledby="action-schedule-title">
+          <header>
+            <i data-lucide="calendar-clock"></i>
+            <div class="action-heading">
+              <h2 id="action-schedule-title"></h2>
+              <p class="setting-note" id="action-schedule-subtitle"></p>
+            </div>
+            <button type="button" class="icon-button" id="action-schedule-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
+          </header>
+          <form class="action-body" id="action-schedule-body" novalidate></form>
+        </section>
+      </div>
+      <div class="log-overlay" id="action-run-window" inert>
+        <section class="log-window action-window action-run-window" role="dialog" aria-labelledby="action-run-title">
+          <header>
+            <i data-lucide="play"></i>
+            <div class="action-heading">
+              <h2 id="action-run-title"></h2>
+              <p class="setting-note" id="action-run-subtitle"></p>
+            </div>
+            <button type="button" class="icon-button" id="action-run-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
+          </header>
+          <div class="action-body" id="action-run-body"></div>
+        </section>
+      </div>
       <div class="log-overlay" id="changelog-window" inert>
         <section class="log-window changelog-window" role="dialog" aria-labelledby="changelog-title">
           <header>

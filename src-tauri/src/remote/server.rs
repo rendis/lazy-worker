@@ -15,7 +15,7 @@ use super::{
     wire::{error_line, read_line, LineError, MAX_REQUEST_LINE},
     SOCKET_PATH_MAX,
 };
-use crate::dispatch::{Origin, Permissions, Request};
+use crate::dispatch::{Origin, PeerId, Permissions, Request};
 use serde::Deserialize;
 use serde_json::Value;
 use std::{
@@ -450,6 +450,7 @@ fn connection(stream: UnixStream, mut slot: Slot) {
                     control: peer.permissions.control,
                     applications: peer.permissions.applications,
                     actions: peer.permissions.actions,
+                    peer: PeerId::parse(&id),
                 });
                 shared.handler.handle(origin, request)
             }

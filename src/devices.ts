@@ -4,6 +4,7 @@ import {
   type DiscoveredDevice, type ProxyNetwork, type RemoteApp, type RemoteDevice, type RemoteLogEntry, type RemoteTool, type SavedAction,
   type Statuses,
 } from "./desktop";
+import { mountActionWindows, type Target } from "./device-actions";
 import guideImage13 from "./assets/guide/remote-login-13.png";
 import { messages, type Language, type Message } from "./messages";
 import { tools } from "./modules";
@@ -23,6 +24,8 @@ const openSettle = 1000;
 const closeDelay = 300;
 /** How often the tools of an open device are read, in milliseconds. */
 const toolPoll = 2000;
+/** How often the actions of an open device are read, in milliseconds. */
+const actionPoll = 5000;
 const settleDelay = 260;
 const ageMessages: Record<Exclude<AgeUnit, "seconds">, Message> = {
   minutes: "minutesAgo", hours: "hoursAgo", days: "daysAgo",
@@ -34,10 +37,14 @@ const permissions: { id: ControllerPermission; icon: string; label: Message }[] 
   { id: "shell", icon: "terminal", label: "permShell" },
 ];
 /** The request names and outcomes that the log shows in words. Any other one shows as it is. */
-const logEvents: Record<string, Message> = { removePeer: "remoteLogEventRemovePeer", cutAll: "remoteLogEventCutAll" };
+const logEvents: Record<string, Message> = {
+  removePeer: "remoteLogEventRemovePeer", cutAll: "remoteLogEventCutAll", actionStart: "remoteLogEventActionStart",
+  actionEnd: "remoteLogEventActionEnd", actionSkipped: "remoteLogEventActionSkipped",
+};
 const logOutcomes: Record<string, Message> = {
   ok: "remoteOutcomeOk", notPermitted: "remoteOutcomeNotPermitted", localOnly: "remoteOutcomeLocalOnly",
-  notPaired: "remoteOutcomeNotPaired", badRequest: "remoteOutcomeBadRequest",
+  notPaired: "remoteOutcomeNotPaired", badRequest: "remoteOutcomeBadRequest", failed: "remoteOutcomeFailed",
+  stopped: "remoteOutcomeStopped", timedOut: "remoteOutcomeTimedOut", skipped: "remoteOutcomeSkipped",
 };
 /** The codes that a failed pairing can end with, in plain words. Any other code shows the generic text. */
 const pairErrors: Record<string, Message> = {
@@ -70,6 +77,13 @@ type AppsState = {
   error?: string;
   /** The applications that were asked to open and have not settled yet. */
   opening: Set<string>;
+};
+type ActionsState = {
+  /** What the device itself said about the Actions permission, once it has answered. */
+  permitted?: boolean;
+  actions?: SavedAction[];
+  /** The code that ended the last read. */
+  error?: string;
 };
 type Item = { id: string; self: boolean; name: string; kind: DeviceKind; data: DevicesOverview["thisDevice"] | RemoteDevice };
 
@@ -143,6 +157,12 @@ export function mountDevices(host: Host) {
   let appsSignature = "";
   let appsRows = new Map<string, WindowRow>();
   const appsNote = h("li", { class: "setting-note", hidden: true });
+  /** The actions of this device, and of each device that this one controls once its section is open. */
+  let localActions: SavedAction[] = [];
+  let localActionsError: string | undefined;
+  const actionStates = new Map<string, ActionsState>();
+  const readingActions = new Set<string>();
+  let actionTicker: number | undefined;
 
   function isOpen(key: string, fallback = false): boolean {
     return opened[key] ?? fallback;
@@ -188,6 +208,14 @@ export function mountDevices(host: Host) {
       setAttribute(control.button, "aria-label", t(key));
     });
   }
+
+  const windows = mountActionWindows({
+    translate: key => host.translate(key),
+    language: () => host.language(),
+    refreshIcons: () => host.refreshIcons(),
+    fail: error => host.fail(error),
+    changed: () => void refreshActions(),
+  });
 
   /** An icon-only button with its name as a tip. The wrapper carries the tip, so a disabled button can still give a reason. */
   function iconButton(label: string, name: string, extra = "") {
@@ -259,6 +287,7 @@ export function mountDevices(host: Host) {
       // An opened Tools section reads its device now. A closed one stops the reading.
       watchTools(true);
       watchApps(true);
+      watchActions(true);
     });
     head.prepend(toggle);
     return toggle;
@@ -328,16 +357,26 @@ export function mountDevices(host: Host) {
     return new Date(2024, 0, 7 + index).toLocaleDateString(host.language(), { weekday: "long" });
   }
 
-  function scheduleText(schedule: ActionSchedule): string {
-    if (schedule.every === "daily") return fill(t("actionDaily"), { time: schedule.time });
-    if (schedule.every === "weekly") return fill(t("actionWeekly"), { day: weekday(schedule.weekday), time: schedule.time });
-    return t("actionManual");
+  function scheduleText(schedule: ActionSchedule | null): string {
+    if (schedule === null) return t("actionManual");
+    if (schedule.kind === "daily") return fill(t("actionDaily"), { time: schedule.time });
+    if (schedule.kind === "weekly") return fill(t("actionWeekly"), { day: weekday(schedule.day), time: schedule.time });
+    return fill(t("actionOnce"), { time: formatClock(schedule.at, host.language()) });
   }
 
-  function actionText(action: SavedAction): string {
-    const last = action.lastRun
-      ? fill(t(action.lastRun.ok ? "actionLastOk" : "actionLastFailed"), { age: elapsed(action.lastRun.time) }) : "";
-    return [scheduleText(action.schedule), last].filter(Boolean).join(" · ");
+  /** The schedule, who set it when this is the device itself, and how the last run went. */
+  function actionText(action: SavedAction, own: boolean): string {
+    const parts = [scheduleText(action.schedule)];
+    if (own && action.schedule && action.scheduledBy) {
+      parts.push(action.scheduledBy === "local" ? t("actionSetHere")
+        : action.scheduledByName ? fill(t("actionSetBy"), { name: action.scheduledByName }) : t("actionSetByOther"));
+    }
+    const last = action.lastRun;
+    if (last) {
+      const key: Message = last.ok ? "actionLastOk" : last.timedOut ? "actionLastTimedOut" : "actionLastFailed";
+      parts.push(fill(t(key), { age: elapsed(last.end) }));
+    }
+    return parts.join(" · ");
   }
 
   function kindIcon(kind: DeviceKind): HTMLElement {
@@ -352,18 +391,81 @@ export function mountDevices(host: Host) {
     return node;
   }
 
-  function actionRow(chevronAfter: boolean) {
-    return (action: SavedAction): Row<SavedAction> => {
+  /** Runs an action and opens the window of its result. A device that refuses, or an action that is busy, says so as a notice. */
+  async function startRun(target: Target, action: SavedAction, trigger: HTMLElement): Promise<void> {
+    try {
+      const { runId } = await desktop.runAction(target.id, action.id);
+      windows.openRun(target, action, runId, trigger);
+    } catch (error) {
+      if (error === "notPermitted" && target.id !== null) actionsOf(target.id).permitted = false;
+      else host.fail(error);
+    }
+    void refreshActions();
+  }
+
+  async function deleteAction(action: SavedAction): Promise<void> {
+    confirming = undefined;
+    try {
+      await desktop.deleteAction(action.id);
+    } catch (error) {
+      host.fail(error);
+    }
+    await readLocalActions();
+  }
+
+  /** The row of an action. Its own device also edits and deletes it. Another device only runs and schedules it. */
+  function actionRow(device: { id: string; name: string } | undefined): (action: SavedAction) => Row<SavedAction> {
+    const target = (): Target => device ?? { id: null, name: "" };
+    return action => {
+      let latest = action;
       const name = h("strong", {}, action.name);
       const summary = h("span", { class: "setting-note" });
+      const edit = !device && iconButton(fill(t("editAction"), { action: action.name }), "pencil", "outlined");
       const schedule = iconButton(fill(t("scheduleAction"), { action: action.name }), "calendar-clock", "outlined");
-      const run = playButton(fill(t("runAction"), { action: action.name }), t("runAction").replace(" {action}", ""));
+      schedule.button.setAttribute("aria-haspopup", "dialog");
+      const remove = !device && iconButton(fill(t("deleteAction"), { action: action.name }), "trash-2");
+      const run = appOpenButton();
+      const confirm = remove && h("div", { class: "device-confirm", hidden: true });
+      const buttons = remove && confirmButtons(t("deleteActionAccept"), () => { void deleteAction(latest); }, () => {
+        confirming = undefined;
+        render();
+        remove.button.focus();
+      });
+      if (confirm && buttons) confirm.append(h("span", { class: "setting-note" }, t("deleteActionConfirm")), buttons.accept.root, buttons.cancel.root);
+      const controls = h("div", { class: "device-end" },
+        edit && edit.root, schedule.root, remove && remove.root, confirm, run.root);
       const root = h("div", { class: "device-row" },
         h("span", { class: "action-icon" }, icon("square-terminal")),
-        h("div", { class: "device-row-text" }, name, summary),
-        schedule.root, run.root,
-        chevronAfter && icon("chevron-right"));
-      return { root, update: current => setText(summary, actionText(current)) };
+        h("div", { class: "device-row-text" }, name, summary), controls);
+      edit && edit.button.addEventListener("click", () => windows.openForm(latest, edit.button));
+      schedule.button.addEventListener("click", () => windows.openSchedule(target(), latest, schedule.button));
+      run.button.addEventListener("click", () => void startRun(target(), latest, run.button));
+      if (remove && buttons) {
+        remove.button.addEventListener("click", () => {
+          confirming = `action:${latest.id}`;
+          render();
+          buttons.cancel.button.focus();
+        });
+      }
+      return {
+        root,
+        update(current) {
+          latest = current;
+          setText(summary, actionText(current, device === undefined));
+          root.toggleAttribute("data-failed", current.notifyOnFailure && current.lastRun !== null && !current.lastRun.ok);
+          const label = fill(t("runAction"), { action: current.name });
+          run.set(label, current.busy ? t("runRunning") : t("runNow"), current.busy);
+          if (run.button.disabled !== current.busy) run.button.disabled = current.busy;
+          if (confirm && edit && remove) {
+            const asking = confirming === `action:${current.id}`;
+            confirm.hidden = !asking;
+            edit.root.hidden = asking;
+            schedule.root.hidden = asking;
+            remove.root.hidden = asking;
+            run.root.hidden = asking;
+          }
+        },
+      };
     };
   }
 
@@ -515,9 +617,12 @@ export function mountDevices(host: Host) {
       controllerRows, controller => JSON.stringify([host.language(), controller.name, controller.kind]), controllerRow);
 
     const addAction = iconButton(t("addAction"), "plus", "outlined");
+    addAction.button.setAttribute("aria-haspopup", "dialog");
+    addAction.button.addEventListener("click", () => windows.openForm(undefined, addAction.button));
     const actionsEmpty = note(t("noActions"));
+    const actionsNote = note("", true);
     const actionRows = h("div", { class: "device-rows" });
-    const actionList = list<SavedAction>(actionRows, actionSignature, actionRow(true));
+    const actionList = list<SavedAction>(actionRows, actionSignature, actionRow(undefined));
 
     const log = iconButton(t("showLog"), "maximize-2");
     const logRow = settingRow("list", "deviceLog", log.root);
@@ -548,7 +653,7 @@ export function mountDevices(host: Host) {
       h("div", { class: "device-subhead" }, h("h3", {}, t("whoCanControl"))),
       controllerRows, controllersEmpty.root, socketNote.root,
       h("div", { class: "device-subhead" }, h("h3", {}, t("deviceActions")), addAction.root),
-      actionRows, actionsEmpty.root,
+      actionRows, actionsEmpty.root, actionsNote.root,
       logRow.root, cut);
 
     return {
@@ -586,11 +691,10 @@ export function mountDevices(host: Host) {
         const pairingName = t(data.pairing.open ? "showPairing" : "openPairing");
         pairing.disable(needsTurnOn ? t("pairNeedsAccess") : undefined, pairingName);
         setAttribute(pairing.button, "aria-label", needsTurnOn ? t("pairNeedsAccess") : pairingName);
-        // Saved actions arrive in a later step, so the app shows them off until then.
-        const later = desktop.sampleDevices ? undefined : t("notAvailableYet");
-        addAction.disable(later, t("addAction"));
+        addAction.disable(localActionsError ? t("actionsUnavailable") : undefined, t("addAction"));
         log.disable(undefined, t("showLog"));
         if (confirming && confirming !== "cut" && confirming !== "passwords" && !confirming.startsWith("forget:") &&
+          !(confirming.startsWith("action:") && localActions.some(({ id }) => `action:${id}` === confirming)) &&
           !data.controllers.some(({ id }) => id === confirming)) confirming = undefined;
         if (data.controllers.length === 0 && confirming === "cut") confirming = undefined;
         controllerList.sync(data.controllers);
@@ -600,8 +704,10 @@ export function mountDevices(host: Host) {
           reason: reason && Object.prototype.hasOwnProperty.call(messages.en, reason) ? t(reason as Message) : reason ?? "",
         }));
         socketNote.show(!data.socket.listening);
-        actionList.sync(data.actions);
-        actionsEmpty.show(data.actions.length === 0);
+        actionList.sync(localActions);
+        actionsEmpty.show(localActions.length === 0 && !localActionsError);
+        if (localActionsError) actionsNote.set(errorText(localActionsError));
+        actionsNote.show(localActionsError !== undefined);
         const nobody = data.controllers.length === 0;
         const asking = confirming === "cut";
         if (cutButton.disabled !== nobody) cutButton.disabled = nobody;
@@ -621,6 +727,11 @@ export function mountDevices(host: Host) {
       host.fail(error);
     }
     await refresh();
+  }
+
+  /** A code that a device sent, in words. A code that has no words shows the generic text. */
+  function errorText(code: string): string {
+    return Object.prototype.hasOwnProperty.call(messages.en, code) ? t(code as Message) : t("actionsUnavailable");
   }
 
   function outcomeText(outcome: string): string {
@@ -674,6 +785,7 @@ export function mountDevices(host: Host) {
   });
   document.addEventListener("keydown", event => {
     if (event.key !== "Escape") return;
+    if (windows.closeTop()) return;
     if (addOverlay.isOpen()) addOverlay.close();
     else if (pairOverlay.isOpen()) pairOverlay.close();
     else if (appsWindow.hasAttribute("data-open")) closeApps();
@@ -1257,6 +1369,7 @@ export function mountDevices(host: Host) {
     renderAddress();
     renderPairForm();
     renderPairWindow();
+    windows.retranslate();
   }
 
   /** Leaving the view drops what waits for a second click, closes the windows, and drops what was typed in them. */
@@ -1266,9 +1379,11 @@ export function mountDevices(host: Host) {
     closeGuide(false);
     addOverlay.close(false);
     pairOverlay.close(false);
+    windows.closeAll();
     syncTicker();
     watchTools();
     watchApps();
+    watchActions();
     if (confirming) {
       confirming = undefined;
       render();
@@ -1444,6 +1559,89 @@ export function mountDevices(host: Host) {
       else for (const device of current) void readApps(device.id);
     }, appPoll);
     if (starting || now) for (const device of wanted) void readApps(device.id);
+  }
+
+  function actionsOf(id: string): ActionsState {
+    let state = actionStates.get(id);
+    if (!state) {
+      state = {};
+      actionStates.set(id, state);
+    }
+    return state;
+  }
+
+  /** Reads the actions of this device. */
+  async function readLocalActions(): Promise<void> {
+    try {
+      localActions = await desktop.listActions();
+      localActionsError = undefined;
+    } catch (error) {
+      localActionsError = typeof error === "string" ? error : "actionsUnavailable";
+    }
+    render();
+  }
+
+  /** Reads the actions of one device. A device that has a read in progress is skipped. */
+  async function readActions(id: string): Promise<void> {
+    if (readingActions.has(id)) return;
+    readingActions.add(id);
+    const state = actionsOf(id);
+    try {
+      // The device's own answer says whether it allowed actions, so a refused request is not sent again and again.
+      if (state.permitted !== true) state.permitted = (await desktop.remoteSession(id)).permissions.actions === true;
+      if (state.permitted) {
+        state.actions = await desktop.remoteListActions(id);
+        state.error = undefined;
+      } else {
+        state.actions = undefined;
+        state.error = undefined;
+      }
+    } catch (error) {
+      if (error === "notPermitted") {
+        state.permitted = false;
+        state.actions = undefined;
+        state.error = undefined;
+      } else {
+        state.error = typeof error === "string" ? error : "remoteFailed";
+      }
+    } finally {
+      readingActions.delete(id);
+    }
+    render();
+  }
+
+  /** The devices whose Actions section the user can see now: the view, the device row, and the section are all open. */
+  function watchedActionDevices(): RemoteDevice[] {
+    if (deviceList.closest("[hidden]") || !overview) return [];
+    return overview.devices.filter(device =>
+      device.online !== false && isOpen(`r:${device.id}`) && isOpen(`r:${device.id}/actions`));
+  }
+
+  /** Starts or stops the reading of actions. It reads at once when it starts, and when `now` says so. */
+  function watchActions(now = false): void {
+    const viewing = !deviceList.closest("[hidden]") && overview !== undefined;
+    const own = viewing && isOpen("this", true);
+    const wanted = watchedActionDevices();
+    if (!own && wanted.length === 0) {
+      if (actionTicker !== undefined) window.clearInterval(actionTicker);
+      actionTicker = undefined;
+      return;
+    }
+    const read = (): void => {
+      if (!deviceList.closest("[hidden]") && isOpen("this", true)) void readLocalActions();
+      for (const device of watchedActionDevices()) void readActions(device.id);
+    };
+    const starting = actionTicker === undefined;
+    actionTicker ??= window.setInterval(() => {
+      if (deviceList.closest("[hidden]")) watchActions();
+      else read();
+    }, actionPoll);
+    if (starting || now) read();
+  }
+
+  /** Reads again what a change may have touched: this device, and the devices whose actions are shown. */
+  async function refreshActions(): Promise<void> {
+    await Promise.all([readLocalActions(), ...watchedActionDevices().map(device => readActions(device.id))]);
   }
 
   /** The icons that were found, by device, application, and version. They are addresses in the asset protocol. */
@@ -1723,7 +1921,11 @@ export function mountDevices(host: Host) {
     const more = moreApps(button => openApps(latest, button));
     const appsNotice = note("");
     appsSection.rows.append(more.root, appsNotice.root);
-    const actionList = list<SavedAction>(actionsSection.rows, actionSignature, actionRow(false));
+    const actionHost = h("div", {});
+    actionsSection.rows.append(actionHost);
+    const actionList = list<SavedAction>(actionHost, actionSignature, actionRow(device));
+    const actionsNotice = note("");
+    actionsSection.rows.append(actionsNotice.root);
 
     const shellNote = h("span", { class: "setting-note" });
     const terminal = iconButton(t("openTerminal"), "terminal", "outlined");
@@ -1768,11 +1970,22 @@ export function mountDevices(host: Host) {
         setText(appsSection.summary, denied ? t("off")
           : state.apps ? fill(t("deviceAppsSummary"), { count: listed.filter(app => app.open).length }) : "");
 
-        actionList.sync(current.actions);
-        const next = current.actions.flatMap(action => action.nextRun === null ? [] : [action.nextRun]);
-        setText(actionsSection.summary, next.length
-          ? fill(t("deviceActionsNext"), { time: formatClock(Math.min(...next), host.language()) })
-          : t(current.actions.length ? "actionManual" : "deviceActionsNone"));
+        const actionState = actionsOf(current.id);
+        const actionsDenied = actionState.permitted === false;
+        const listedActions = actionsDenied ? [] : actionState.actions ?? [];
+        actionList.sync(listedActions);
+        // The device says whether it allowed actions. Until it answers, the section says that it is reading.
+        let actionsMessage = "";
+        if (actionsDenied) actionsMessage = fill(t("actionsNotAllowed"), { name: current.name });
+        else if (!actionState.actions) {
+          actionsMessage = actionState.error ? t(isLinkError(actionState.error) ? "remoteLost" : "actionsUnavailable") : t("actionsLoading");
+        }
+        if (actionsMessage) actionsNotice.set(actionsMessage);
+        actionsNotice.show(actionsMessage !== "");
+        const next = listedActions.flatMap(action => action.nextRun === null ? [] : [action.nextRun]);
+        setText(actionsSection.summary, actionsDenied ? t("off") : !actionState.actions ? ""
+          : next.length ? fill(t("deviceActionsNext"), { time: formatClock(Math.min(...next), host.language()) })
+          : t(listedActions.length ? "actionManual" : "deviceActionsNone"));
 
         const on = current.shell !== null && current.shell.until > seconds();
         const until = on ? fill(t("deviceShellOn"), { time: formatClock(current.shell!.until, host.language()) }) : t("off");
@@ -1858,6 +2071,7 @@ export function mountDevices(host: Host) {
     syncTicker();
     watchTools();
     watchApps();
+    watchActions();
     if (built) {
       built = false;
       host.refreshIcons();
@@ -1877,12 +2091,13 @@ export function mountDevices(host: Host) {
           name: "", kind: "desktop",
           remoteAccess: { remoteLogin: "off", passwordLogin: "unknown", userAllowed: null, managedFile: false, macosMajor: null },
           pairing: { open: false, expires: null, attemptsLeft: 0 }, account: null, controllers: [],
-          socket: { listening: true, error: null }, actions: [],
+          socket: { listening: true, error: null },
         },
         devices: [],
       };
     }
     render();
+    void readLocalActions();
   }
 
   addButton.setAttribute("aria-haspopup", "dialog");

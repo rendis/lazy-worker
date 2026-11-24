@@ -1,9 +1,9 @@
 import "./style.css";
 import {
-  Activity, AppWindow, ArrowLeft, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronDown, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
-  Cpu, createIcons, Database, ExternalLink, EyeOff, Globe, Hand, Hash, Hourglass, Infinity as InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LockKeyhole, LockKeyholeOpen,
-  Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, Moon, MousePointer2, Network, Pencil, Pin, Play, PlugZap, Plus, Power, RefreshCw, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
-  Shield, ShieldCheck, Sparkles, Square, SquareArrowOutUpRight, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserMinus, UserRound, X, Zap,
+  Activity, AppWindow, ArrowLeft, ArrowRight, Bell, Bot, Box, Brain, Calendar, CalendarClock, CalendarDays, Check, ChevronDown, ChevronRight, CircleCheck, CircleHelp, CircleStop, CircleX, Clock, Cloud, Code, Coffee, Contrast, Copy,
+  Cpu, createIcons, Database, ExternalLink, EyeOff, Globe, Hand, Hash, Hourglass, Infinity as InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LoaderCircle, LockKeyhole, LockKeyholeOpen,
+  Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, Moon, MousePointer2, Network, Pencil, Pin, Play, PlugZap, Plus, Power, RefreshCw, Repeat, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
+  Shield, ShieldCheck, Sparkles, Square, SquareArrowOutUpRight, SquareTerminal, Sun, Sunrise, Sunset, Tag, Terminal, Timer, Trash2, TriangleAlert, UserMinus, UserRound, X, Zap,
 } from "lucide";
 import { mountCaffeinateForm } from "./caffeinate-form";
 import { mountDevices } from "./devices";
@@ -40,10 +40,10 @@ const updateToolOrder = mountTools();
 function renderIcons(): void {
   createIcons({
     icons: {
-      Activity, AppWindow, ArrowLeft, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronDown, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
-      Cpu, Database, ExternalLink, EyeOff, Globe, Hand, Hash, Hourglass, Infinity: InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LockKeyhole, LockKeyholeOpen,
-      Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, Moon, MousePointer2, Network, Pencil, Pin, Play, PlugZap, Plus, Power, RefreshCw, Rocket, RotateCcw, ScrollText, Search, Server,
-      Settings, Shield, ShieldCheck, Sparkles, Square, SquareArrowOutUpRight, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserMinus, UserRound, X, Zap,
+      Activity, AppWindow, ArrowLeft, ArrowRight, Bell, Bot, Box, Brain, Calendar, CalendarClock, CalendarDays, Check, ChevronDown, ChevronRight, CircleCheck, CircleHelp, CircleStop, CircleX, Clock, Cloud, Code, Coffee, Contrast, Copy,
+      Cpu, Database, ExternalLink, EyeOff, Globe, Hand, Hash, Hourglass, Infinity: InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LoaderCircle, LockKeyhole, LockKeyholeOpen,
+      Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, Moon, MousePointer2, Network, Pencil, Pin, Play, PlugZap, Plus, Power, RefreshCw, Repeat, Rocket, RotateCcw, ScrollText, Search, Server,
+      Settings, Shield, ShieldCheck, Sparkles, Square, SquareArrowOutUpRight, SquareTerminal, Sun, Sunrise, Sunset, Tag, Terminal, Timer, Trash2, TriangleAlert, UserMinus, UserRound, X, Zap,
     },
     attrs: { "aria-hidden": "true", "stroke-width": 1.75 },
   });

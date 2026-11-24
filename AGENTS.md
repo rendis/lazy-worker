@@ -69,6 +69,7 @@
 - Verify the packaged helper and Accessibility permission on Monterey before reporting hardware compatibility. Verify presence in the target app separately from process status.
 - Keep the pairing key in `src-tauri/src/remote/pairing_key.rs` public on purpose: it reaches only `remote --pair`, and only while a pairing window is open. The 6-digit code that SPAKE2 checks is the secret. The target saves nothing before it checks the controller's confirmation, and the controller saves nothing before it checks the target's.
 - Open an application of another device only by a bundle id from that device's scanned list, through `/usr/bin/open -b`. Keep its icons in `<remote>/icons` under hash names, keep only a PNG of at most 256 px and 256 KiB, and let the asset protocol scope in `tauri.conf.json` name that folder alone.
+- Define an action only on its own device, in `src-tauri/src/actions.rs`. A remote read never includes its command text. Record who set each schedule, and remove a device's schedules when its access goes.
 
 ## macOS releases
 

@@ -38,7 +38,7 @@ export function isRefusedLink(error: unknown): boolean {
 /** The requests that only the person at the device may send. Keep it equal to `Access::LocalOnly` in `dispatch.rs`. */
 const localOnly = new Set([
   "setProxyRole", "setProxyPort", "setProxyServer", "saveProxyApps", "saveProxyAllowed", "getProxyPeers", "getProxyLog",
-  "requestActivityAccessibility",
+  "requestActivityAccessibility", "createAction", "updateAction", "deleteAction",
 ]);
 /** The requests that need the Control permission. Only the ones that a control of this window sends. */
 const needsControl = new Set([
@@ -49,15 +49,21 @@ const needsControl = new Set([
 /** The requests that need the Applications permission. Keep it equal to `Access::Applications` in `dispatch.rs`. */
 const needsApplications = new Set(["listApplications", "getAppIcon", "openApplication"]);
 
+/** The requests that need the Actions permission. Keep it equal to `Access::Actions` in `dispatch.rs`. */
+const needsActions = new Set(["listActions", "runAction", "getActionRun", "stopActionRun", "scheduleAction", "clearSchedule"]);
+
 /** Why the device will refuse a request, when the window can know it before it asks. */
 export function refusal(
-  command: string, args: { tool?: string; active?: boolean } | undefined, permissions: Session["permissions"] | undefined,
+  command: string, args: { tool?: string; active?: boolean; enabled?: boolean } | undefined, permissions: Session["permissions"] | undefined,
 ): Reason | undefined {
   if (localOnly.has(command)) return "localOnly";
   // Starting the proxy server opens a port on the device. Stopping it does not.
   if (command === "setToolActive" && args?.tool === "proxy" && args.active) return "localOnly";
+  // Turning on the start at launch arms the next launch to open the proxy clients, which run commands.
+  if (command === "setStartToolsOnLaunch" && args?.enabled) return "localOnly";
   if (permissions && !permissions.control && needsControl.has(command)) return "notPermitted";
   if (permissions && !permissions.applications && needsApplications.has(command)) return "notPermitted";
+  if (permissions && !permissions.actions && needsActions.has(command)) return "notPermitted";
 }
 
 /** The refusals that the interface shows as a calm note instead of a failure. */
