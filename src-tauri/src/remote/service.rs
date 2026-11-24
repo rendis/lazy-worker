@@ -6,6 +6,7 @@ use super::{
     client::{Clients, SshTransport},
     controlled::{Controlled, Store},
     destination::Destination,
+    icons::Icons,
     identity::{self, DeviceId},
     known_hosts,
     log::{Entry, Log},
@@ -17,6 +18,7 @@ use super::{
     ssh, Layout,
 };
 use crate::{
+    apps,
     devices::{self, Controller, Remote, Socket},
     dispatch::{self, Origin, Request},
 };
@@ -45,6 +47,8 @@ struct Running {
     controlled: Result<Store, &'static str>,
     /// The open sessions with those devices.
     clients: Clients,
+    /// The icons of the applications of those devices.
+    icons: Result<Icons, &'static str>,
     server: Result<Server, &'static str>,
 }
 
@@ -54,6 +58,25 @@ struct Running {
 #[serde(rename_all = "camelCase")]
 pub struct Forgotten {
     pub remove_on_device: bool,
+}
+
+/// The longest version text that an icon is kept for.
+const MAX_VERSION: usize = 64;
+
+/// The bytes of the icon in the answer of a device: `{"png": "<base64>"}` and nothing else.
+fn decode_icon(answer: &Value) -> Result<Vec<u8>, &'static str> {
+    use base64::Engine;
+    let text = answer
+        .as_object()
+        .filter(|object| object.len() == 1)
+        .and_then(|object| object.get("png"))
+        .and_then(Value::as_str)
+        // Base64 grows the bytes by a third. The bytes are checked again before they are kept.
+        .filter(|text| text.len() <= 4 * super::icons::MAX_BYTES / 3 + 8)
+        .ok_or("appIconFailed")?;
+    base64::engine::general_purpose::STANDARD
+        .decode(text)
+        .map_err(|_| "appIconFailed")
 }
 
 /// The name of a device that the system does not name.
@@ -134,6 +157,7 @@ impl Service {
             own,
             controlled,
             clients: Clients::new(SshTransport::new(layout.clone())),
+            icons: Icons::open(layout.icons_dir()),
             server,
         })
     }
@@ -184,6 +208,43 @@ impl Service {
         let running = self.running()?;
         let device = self.device(id).ok_or("notPermitted")?;
         running.clients.call(&device, request)
+    }
+
+    /// Where the icon of an application of a device is kept. It asks the device for the icon when
+    /// none is kept, and drops one that is not a small PNG. It waits for the device, so call it
+    /// off the main thread.
+    pub fn cached_icon(
+        &self,
+        id: &str,
+        bundle_id: &str,
+        version: &str,
+    ) -> Result<String, &'static str> {
+        DeviceId::parse(id)?;
+        if !apps::valid_bundle_id(bundle_id) || version.len() > MAX_VERSION {
+            return Err("badRequest");
+        }
+        let running = self.running()?;
+        let icons = running.icons.as_ref().map_err(|code| *code)?;
+        self.device(id).ok_or("notPermitted")?;
+        let path = match icons.cached(id, bundle_id, version) {
+            Some(path) => path,
+            None => {
+                let answer = self.forward(
+                    id,
+                    &serde_json::json!({"command": "getAppIcon", "args": {"bundleId": bundle_id}}),
+                )?;
+                let png = decode_icon(&answer)?;
+                icons.store(id, bundle_id, version, &png)?
+            }
+        };
+        path.to_str().map(str::to_owned).ok_or("remoteIo")
+    }
+
+    /// Saves the applications that the Devices view shows first for a device that this one controls.
+    pub fn set_pinned(&self, id: &str, bundle_ids: &[String]) -> Result<(), &'static str> {
+        DeviceId::parse(id)?;
+        let store = self.running()?.controlled.as_ref().map_err(|code| *code)?;
+        store.set_pinned(id, bundle_ids)
     }
 
     /// This device as the other devices see it. It reads the system, so call it off the main thread.
@@ -485,5 +546,60 @@ mod tests {
         assert_eq!(service.socket(), Socket::unavailable("peersFileInvalid"));
         assert!(!layout.socket_file().exists());
         fs::remove_dir_all(short).unwrap();
+    }
+
+    #[test]
+    fn a_cached_icon_is_served_without_asking_and_bad_requests_are_refused() {
+        let short = PathBuf::from(format!("/tmp/lw-svc-icon-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&short);
+        fs::create_dir(&short).unwrap();
+        fs::set_permissions(&short, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+        let layout = Layout::for_paths(short.clone(), None);
+        let service = Service::for_test(&layout, short.clone(), Deny);
+        let running = service.running().unwrap();
+        running
+            .controlled
+            .as_ref()
+            .unwrap()
+            .insert(crate::remote::controlled::testing::device(ID_A, "Studio"))
+            .unwrap();
+        // A device that this one does not control, and arguments that are not valid.
+        assert_eq!(service.cached_icon(ID_B, "com.apple.Safari", "1"), Err("notPermitted"));
+        assert_eq!(service.cached_icon("short", "com.apple.Safari", "1"), Err("deviceIdInvalid"));
+        assert_eq!(service.cached_icon(ID_A, "../x", "1"), Err("badRequest"));
+        assert_eq!(service.cached_icon(ID_A, "com.apple.Safari", &"v".repeat(65)), Err("badRequest"));
+        // A kept icon comes back as a path in the icons folder, with no request to the device.
+        let png = {
+            let mut bytes = Vec::new();
+            let mut encoder = png::Encoder::new(&mut bytes, 8, 8);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder.write_header().unwrap().write_image_data(&[0; 8 * 8 * 4]).unwrap();
+            bytes
+        };
+        let kept = running.icons.as_ref().unwrap().store(ID_A, "com.apple.Safari", "17.0", &png).unwrap();
+        assert_eq!(service.cached_icon(ID_A, "com.apple.Safari", "17.0").unwrap(), kept.to_str().unwrap());
+        assert!(kept.starts_with(layout.icons_dir()));
+        service.set_pinned(ID_A, &["com.apple.Safari".to_owned()]).unwrap();
+        assert_eq!(service.device(ID_A).unwrap().pinned, ["com.apple.Safari"]);
+        assert_eq!(service.set_pinned(ID_A, &["bad id".to_owned()]), Err("badRequest"));
+        service.stop();
+        fs::remove_dir_all(short).unwrap();
+    }
+
+    #[test]
+    fn the_answer_of_a_device_is_one_small_base64_png_and_nothing_else() {
+        use serde_json::json;
+        assert!(decode_icon(&json!({"png": "aGk="})).is_ok());
+        for bad in [
+            json!({}),
+            json!({"png": 5}),
+            json!({"png": "not base64!"}),
+            json!({"png": "aGk=", "extra": 1}),
+            json!({"png": "A".repeat(400_000)}),
+            json!("aGk="),
+        ] {
+            assert_eq!(decode_icon(&bad), Err("appIconFailed"), "{bad}");
+        }
     }
 }

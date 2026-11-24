@@ -1,5 +1,5 @@
 import { getVersion } from "@tauri-apps/api/app";
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { version as previewVersion } from "../src-tauri/tauri.conf.json";
@@ -114,8 +114,8 @@ export type SavedAction = {
   nextRun: number | null;
 };
 export type RemoteTool = { id: ToolId; running: boolean };
-/** `icon` is the address of an image file, or `null` for the generic icon. */
-export type RemoteApp = { id: string; name: string; icon: string | null; open: boolean };
+/** An application of another device. `bundleId` names it, and `version` is part of the name of its cached icon. */
+export type RemoteApp = { bundleId: string; name: string; version: string; open: boolean };
 export type RemoteDevice = {
   id: string;
   name: string;
@@ -129,8 +129,8 @@ export type RemoteDevice = {
   /** `null` until the first reachability check ends. */
   online: boolean | null;
   tools: RemoteTool[];
-  /** `pinned` holds the apps the user chose to see first. `total` and `open` count every app on the device. */
-  apps: { pinned: RemoteApp[]; total: number; open: number };
+  /** The bundle identifiers of the apps the user chose to see first. The view reads the list itself. */
+  apps: { pinned: string[] };
   actions: SavedAction[];
   /** The shell is on until this time, or `null` while it is off. Only that device can turn it on. */
   shell: { until: number } | null;
@@ -444,7 +444,11 @@ function previewLinkDown(): boolean {
 }
 function previewPermissions(): Session["permissions"] {
   const level = previewQuery.get("perm");
-  return { control: level !== "none", actions: level !== "none" && level !== "control" };
+  // `?no-apps` shows a device that has not allowed applications.
+  return {
+    control: level !== "none", applications: !previewQuery.has("no-apps"),
+    actions: level !== "none" && level !== "control",
+  };
 }
 /** What a window that controls a device finds out before a call, as the device would answer it. */
 function previewGate(command: string, args?: { tool?: string; active?: boolean }): void {
@@ -459,6 +463,26 @@ function previewGate(command: string, args?: { tool?: string; active?: boolean }
 }
 /** The tools that a preview shows on another device. A change lasts until the page reloads. */
 const previewRemoteRunning = new Map<string, Set<ToolId>>();
+
+/** The applications of the sample device. A preview has real icons for three of them. */
+const previewApps: { bundleId: string; name: string; version: string; icon?: string }[] = [
+  ["com.apple.Safari", "Safari", "17.4", safariIcon], ["com.apple.Notes", "Notes", "4.11", notesIcon],
+  ["com.anthropic.claudefordesktop", "Claude", "0.9.2", claudeIcon], ["com.apple.Maps", "Maps", "3.0"],
+  ["com.apple.mail", "Mail", "16.0"], ["com.apple.iCal", "Calendar", "14.0"], ["com.apple.Photos", "Photos", "9.0"],
+  ["com.apple.Music", "Music", "1.4"], ["com.apple.TV", "TV", "1.4"], ["com.apple.podcasts", "Podcasts", "1.1"],
+  ["com.apple.reminders", "Reminders", "7.0"], ["com.apple.freeform", "Freeform", "2.0"],
+  ["com.apple.Preview", "Preview", "11.0"], ["com.apple.TextEdit", "TextEdit", "1.19"],
+  ["com.apple.calculator", "Calculator", "11.0"], ["com.apple.systempreferences", "System Settings", "15.0"],
+  ["com.apple.Terminal", "Terminal", "2.14"], ["com.apple.ActivityMonitor", "Activity Monitor", "10.14"],
+  ["com.apple.finder", "Finder", "15.0"], ["com.apple.dt.Xcode", "Xcode", "16.1"],
+  ["com.microsoft.VSCode", "Visual Studio Code with an extremely long name that has to wrap", "1.95"],
+  ["org.mozilla.firefox", "Firefox", "132.0"], ["com.spotify.client", "Spotify", "1.2"],
+  ["com.tinyspeck.slackmacgap", "Slack", "4.40"], ["us.zoom.xos", "zoom.us", "6.2"],
+  ["com.figma.Desktop", "Figma", "124.0"], ["com.docker.docker", "Docker", "4.35"],
+  ["com.rendis.lazyworker", "Lazy Worker", previewVersion],
+].map(([bundleId, name, version, icon]) => ({ bundleId, name, version, icon }));
+const previewOpen = new Set(["com.apple.Safari", "com.apple.finder", "com.anthropic.claudefordesktop"]);
+const previewPinned = ["com.apple.Safari", "com.apple.Notes", "com.anthropic.claudefordesktop"];
 
 /** The sample list a preview shows, so the whole Devices view can be checked. Times follow the clock. */
 function previewDevices(): DevicesOverview {
@@ -497,21 +521,14 @@ function previewDevices(): DevicesOverview {
         id: "studio", name: "iMac del estudio", kind: "desktop", online: true,
         user: "studio", host: "imac-del-estudio.local", port: 22, added: now - 12 * 86400,
         tools: [{ id: "activity", running: true }, { id: "caffeinate", running: false }],
-        apps: {
-          total: 27, open: 2,
-          pinned: [
-            { id: "safari", name: "Safari", icon: safariIcon, open: true },
-            { id: "notes", name: "Notes", icon: notesIcon, open: false },
-            { id: "claude", name: "Claude", icon: claudeIcon, open: true },
-          ],
-        },
+        apps: { pinned: [...previewPinned] },
         actions: [backup, docker],
         shell: { until: Math.floor(shellEnd.getTime() / 1000) },
       },
       {
         id: "old", name: "MacBook Air de la oficina con un nombre muy largo para probar el ajuste", kind: "laptop",
         user: "oficina", host: "192.168.1.40", port: 22, added: now - 90 * 86400,
-        online: false, tools: [], apps: { pinned: [], total: 0, open: 0 }, actions: [], shell: null,
+        online: false, tools: [], apps: { pinned: [] }, actions: [], shell: null,
       },
       ...previewDeviceAdditions.map(device => ({ ...device })),
     ],
@@ -585,6 +602,35 @@ export const desktop = {
     if (active) running.add(tool);
     else running.delete(tool);
     return previewRemoteStatuses(id);
+  },
+  /** The installed applications of another device, and which are open. The device decides who may ask. */
+  async remoteApplications(id: string): Promise<RemoteApp[]> {
+    if (native) return call("remoteCall", { id, request: { command: "listApplications" } });
+    if (!previewDevices().devices.some(device => device.id === id)) throw "notPaired";
+    if (refusal("listApplications", undefined, previewPermissions())) throw "notPermitted";
+    return previewApps.map(({ bundleId, name, version }) => ({ bundleId, name, version, open: previewOpen.has(bundleId) }));
+  },
+  /** Opens an application of another device. The device checks that the identifier is one that it listed. */
+  async remoteOpenApplication(id: string, bundleId: string): Promise<void> {
+    if (native) return call("remoteCall", { id, request: { command: "openApplication", args: { bundleId } } });
+    if (refusal("openApplication", undefined, previewPermissions())) throw "notPermitted";
+    await new Promise(resolve => setTimeout(resolve, 700));
+    if (!previewApps.some(app => app.bundleId === bundleId)) throw "appNotFound";
+    previewOpen.add(bundleId);
+  },
+  /** The address of the cached icon of an application of another device, or `null` when it has none. */
+  async remoteAppIcon(id: string, bundleId: string, version: string): Promise<string | null> {
+    if (native) {
+      const { path } = await call<{ path: string }>("getCachedIcon", { id, bundleId, version });
+      return convertFileSrc(path);
+    }
+    await new Promise(resolve => setTimeout(resolve, 150));
+    return previewApps.find(app => app.bundleId === bundleId)?.icon ?? null;
+  },
+  /** Saves up to three applications that the Devices view shows first for a device. */
+  async setPinnedApps(id: string, bundleIds: string[]): Promise<void> {
+    if (native) return call("setPinnedApps", { id, bundleIds });
+    previewPinned.splice(0, previewPinned.length, ...bundleIds);
   },
   macApp,
   /** True when the Devices view shows sample data, because no native app answers. */
@@ -776,7 +822,7 @@ export const desktop = {
     const device: RemoteDevice = {
       id: Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join(""),
       name: host, kind: "desktop", user, host, port: port ?? 22, added: Math.floor(Date.now() / 1000), online: true,
-      tools: [], apps: { pinned: [], total: 0, open: 0 }, actions: [], shell: null,
+      tools: [], apps: { pinned: [] }, actions: [], shell: null,
     };
     previewDeviceAdditions.push(device);
     return device;

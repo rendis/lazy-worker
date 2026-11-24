@@ -33,7 +33,8 @@ pub const BACKOFF: Duration = Duration::from_secs(5);
 /// The error words that the other device may send. Any other word becomes `remoteFailed`, so
 /// text from outside never reaches the interface as a code.
 const KNOWN_CODES: &[&str] = &[
-    "accessibilityRequestFailed", "accountUnknown", "adminCanceled", "appNotRunning",
+    "accessibilityRequestFailed", "accountUnknown", "adminCanceled", "appIconFailed", "appNotFound",
+    "appNotRunning", "appOpenFailed",
     "argumentsInvalid", "authorizedKeysIo", "authorizedKeysUnsafe", "badHello", "badMessage",
     "badRequest", "busy", "caffeinateExited", "caffeinateInvalidDuration",
     "caffeinateInvalidPid", "caffeinateNoFlags", "caffeinateProcessListFailed",

@@ -22,6 +22,8 @@ use std::{
 };
 
 const VERSION: u32 = 1;
+/// How many applications a device can have pinned.
+pub const MAX_PINNED: usize = 3;
 /// A device is checked again for reachability at most this often.
 const CHECK_EVERY: Duration = Duration::from_secs(30);
 const CHECK_TIMEOUT: Duration = Duration::from_secs(1);
@@ -37,6 +39,22 @@ pub struct Controlled {
     pub host: String,
     pub port: u16,
     pub added: u64,
+    /// The bundle identifiers of the applications that the Devices view shows first.
+    #[serde(default)]
+    pub pinned: Vec<String>,
+}
+
+/// At most `MAX_PINNED` different, valid bundle identifiers.
+fn valid_pins(pinned: &[String]) -> Result<(), &'static str> {
+    let mut seen = HashSet::new();
+    if pinned.len() > MAX_PINNED
+        || !pinned
+            .iter()
+            .all(|id| crate::apps::valid_bundle_id(id) && seen.insert(id.as_str()))
+    {
+        return Err("badRequest");
+    }
+    Ok(())
 }
 
 impl Controlled {
@@ -55,6 +73,7 @@ impl Controlled {
             host: destination.host().to_owned(),
             port: destination.port(),
             added,
+            pinned: Vec::new(),
         };
         device.validate()?;
         Ok(device)
@@ -72,7 +91,7 @@ impl Controlled {
         if destination.host() != self.host || destination.user() != self.user {
             return Err("devicesFileInvalid");
         }
-        Ok(())
+        valid_pins(&self.pinned).map_err(|_| "devicesFileInvalid")
     }
 
     pub fn destination(&self) -> Result<Destination, &'static str> {
@@ -183,12 +202,29 @@ impl Store {
         device.validate()?;
         self.change(|data| {
             if let Some(known) = data.devices.iter_mut().find(|known| known.id == device.id) {
+                // Pairing again keeps what the user pinned.
+                let pinned = std::mem::take(&mut known.pinned);
                 *known = device;
+                known.pinned = pinned;
             } else if data.devices.len() >= MAX_PEERS {
                 return Err("devicesFull");
             } else {
                 data.devices.push(device);
             }
+            Ok(())
+        })
+    }
+
+    /// Saves the applications to show first for a device.
+    pub fn set_pinned(&self, id: &str, pinned: &[String]) -> Result<(), &'static str> {
+        valid_pins(pinned)?;
+        self.change(|data| {
+            let device = data
+                .devices
+                .iter_mut()
+                .find(|device| device.id == id)
+                .ok_or("notPaired")?;
+            device.pinned = pinned.to_vec();
             Ok(())
         })
     }
@@ -372,6 +408,54 @@ mod tests {
             }
         }
         assert_eq!(answer, Some(true));
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn pinned_applications_are_validated_saved_and_kept_when_pairing_again() {
+        let (base, path) = file("ctl-pins");
+        let store = Store::open(path.clone()).unwrap();
+        store.insert(device(ID_A, "Studio")).unwrap();
+        let pins = |ids: &[&str]| ids.iter().map(|id| (*id).to_owned()).collect::<Vec<_>>();
+        store.set_pinned(ID_A, &pins(&["com.apple.Safari", "com.apple.Notes"])).unwrap();
+        assert_eq!(store.get(ID_A).unwrap().pinned, pins(&["com.apple.Safari", "com.apple.Notes"]));
+        for bad in [
+            pins(&["a.b", "c.d", "e.f", "g.h"]),
+            pins(&["a.b", "a.b"]),
+            pins(&["bad id"]),
+            pins(&["-b"]),
+            pins(&[""]),
+            pins(&["x/y"]),
+        ] {
+            assert_eq!(store.set_pinned(ID_A, &bad), Err("badRequest"), "{bad:?}");
+        }
+        assert_eq!(store.set_pinned(ID_B, &pins(&["a.b"])), Err("notPaired"));
+        // A refused change leaves the saved pins as they were.
+        assert_eq!(store.get(ID_A).unwrap().pinned, pins(&["com.apple.Safari", "com.apple.Notes"]));
+        // Pairing again keeps them, and a restart reads them back.
+        store.insert(device(ID_A, "Studio renamed")).unwrap();
+        let reopened = Store::open(path.clone()).unwrap();
+        assert_eq!(reopened.get(ID_A).unwrap().pinned, pins(&["com.apple.Safari", "com.apple.Notes"]));
+        assert_eq!(reopened.get(ID_A).unwrap().name, "Studio renamed");
+        // A file that was edited by hand to hold a bad pin is refused.
+        let text = fs::read_to_string(&path).unwrap().replace("com.apple.Notes", "bad id");
+        fs::write(&path, text).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(matches!(Store::open(path), Err("devicesFileInvalid")));
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn a_file_from_before_pins_has_none() {
+        let (base, path) = file("ctl-old");
+        let store = Store::open(path.clone()).unwrap();
+        store.insert(device(ID_A, "Studio")).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        let without: String = text.lines().filter(|line| !line.contains("pinned")).collect::<Vec<_>>().join("\n");
+        let cleaned = without.replace("\"added\": 1700000000,", "\"added\": 1700000000");
+        fs::write(&path, cleaned).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(Store::open(path).unwrap().get(ID_A).unwrap().pinned.is_empty());
         fs::remove_dir_all(base).unwrap();
     }
 }

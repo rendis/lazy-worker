@@ -715,6 +715,21 @@
           <p class="setting-note" data-text="remoteLogNote">Only the last 1000 are kept.</p>
         </section>
       </div>
+      <div class="log-overlay" id="device-apps-window" inert>
+        <section class="log-window apps-window" role="dialog" aria-labelledby="device-apps-title">
+          <header>
+            <i data-lucide="app-window"></i>
+            <h2 id="device-apps-title" data-text="sectionApplications">Applications</h2>
+            <span class="setting-note" id="device-apps-count"></span>
+            <button type="button" class="icon-button" id="device-apps-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
+          </header>
+          <div class="apps-search">
+            <i data-lucide="search"></i>
+            <input class="field" id="device-apps-search" type="search" autocomplete="off" spellcheck="false" />
+          </div>
+          <ul class="apps-list" id="device-apps-list" tabindex="0" aria-labelledby="device-apps-title"></ul>
+        </section>
+      </div>
       <div class="log-overlay" id="remote-guide-window" inert>
         <section class="log-window guide-window" role="dialog" aria-labelledby="remote-guide-title">
           <header>

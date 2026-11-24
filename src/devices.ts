@@ -13,7 +13,13 @@ import { age, formatClock, formatMoment, formatSession, type AgeUnit } from "./t
 
 // Every name and text below comes from data that other devices will send, so it is only ever set as text.
 const openKey = "lazy-worker-devices-open";
-const appRows = 3;
+/** How many applications a device can have pinned, and so how many rows its section shows. */
+const pinLimit = 3;
+const appRows = pinLimit;
+/** How often the applications of an open device are read, in milliseconds. */
+const appPoll = 5000;
+/** How long an application gets to show as open after the device accepted the request. */
+const openSettle = 1000;
 const closeDelay = 300;
 /** How often the tools of an open device are read, in milliseconds. */
 const toolPoll = 2000;
@@ -55,6 +61,16 @@ type Host = {
   notify(message: Message): void;
 };
 type Row<T> = { root: HTMLElement; update(item: T): void };
+type AppItem = RemoteApp & { id: string };
+type AppsState = {
+  /** What the device itself said about the Applications permission, once it has answered. */
+  permitted?: boolean;
+  apps?: RemoteApp[];
+  /** The code that ended the last read. */
+  error?: string;
+  /** The applications that were asked to open and have not settled yet. */
+  opening: Set<string>;
+};
 type Item = { id: string; self: boolean; name: string; kind: DeviceKind; data: DevicesOverview["thisDevice"] | RemoteDevice };
 
 /** Replaces `{name}` markers. A function does the replacing, so a `$` in a name stays as it is. */
@@ -92,6 +108,12 @@ export function mountDevices(host: Host) {
   const logCount = document.getElementById("device-log-count")!;
   const logClose = document.getElementById("device-log-close") as HTMLButtonElement;
 
+  const appsWindow = document.getElementById("device-apps-window")!;
+  const appsList = document.getElementById("device-apps-list")!;
+  const appsCount = document.getElementById("device-apps-count")!;
+  const appsClose = document.getElementById("device-apps-close") as HTMLButtonElement;
+  const appsSearch = document.getElementById("device-apps-search") as HTMLInputElement;
+
   const guideWindow = document.getElementById("remote-guide-window")!;
   const guideBody = document.getElementById("remote-guide-body")!;
   const guideClose = document.getElementById("remote-guide-close") as HTMLButtonElement;
@@ -113,6 +135,14 @@ export function mountDevices(host: Host) {
   const live = new Map<string, { tools: RemoteTool[]; error?: string; permissions?: Session["permissions"] }>();
   const polling = new Set<string>();
   let toolTicker: number | undefined;
+  const appsStates = new Map<string, AppsState>();
+  const readingApps = new Set<string>();
+  let appTicker: number | undefined;
+  let appsDevice: string | undefined;
+  let appsTrigger: HTMLElement | undefined;
+  let appsSignature = "";
+  let appsRows = new Map<string, WindowRow>();
+  const appsNote = h("li", { class: "setting-note", hidden: true });
 
   function isOpen(key: string, fallback = false): boolean {
     return opened[key] ?? fallback;
@@ -228,6 +258,7 @@ export function mountDevices(host: Host) {
       apply(open, true);
       // An opened Tools section reads its device now. A closed one stops the reading.
       watchTools(true);
+      watchApps(true);
     });
     head.prepend(toggle);
     return toggle;
@@ -645,6 +676,7 @@ export function mountDevices(host: Host) {
     if (event.key !== "Escape") return;
     if (addOverlay.isOpen()) addOverlay.close();
     else if (pairOverlay.isOpen()) pairOverlay.close();
+    else if (appsWindow.hasAttribute("data-open")) closeApps();
     else if (guideWindow.hasAttribute("data-open")) closeGuide();
     else if (logWindow.hasAttribute("data-open")) closeLog();
     else if (confirming) {
@@ -1230,11 +1262,13 @@ export function mountDevices(host: Host) {
   /** Leaving the view drops what waits for a second click, closes the windows, and drops what was typed in them. */
   function reset(): void {
     closeLog(false);
+    closeApps(false);
     closeGuide(false);
     addOverlay.close(false);
     pairOverlay.close(false);
     syncTicker();
     watchTools();
+    watchApps();
     if (confirming) {
       confirming = undefined;
       render();
@@ -1349,25 +1383,201 @@ export function mountDevices(host: Host) {
     };
   }
 
-  function appRow(app: RemoteApp): Row<RemoteApp> {
-    const image = app.icon
-      ? h("img", { src: app.icon, alt: "", width: "26", height: "26", draggable: "false" }) : icon("app-window");
-    const state = h("span", { class: "device-state" });
-    const open = playButton(`${t("open")} ${app.name}`, t("open"));
-    const root = h("div", { class: "device-row" },
-      h("span", { class: "app-icon" }, image), h("div", { class: "device-row-text" }, h("strong", {}, app.name)), state, open.root);
+  function appsOf(id: string): AppsState {
+    let state = appsStates.get(id);
+    if (!state) {
+      state = { opening: new Set() };
+      appsStates.set(id, state);
+    }
+    return state;
+  }
+
+  /** Reads the applications of one device. A device that has a read in progress is skipped. */
+  async function readApps(id: string): Promise<void> {
+    if (readingApps.has(id)) return;
+    readingApps.add(id);
+    const state = appsOf(id);
+    try {
+      // The device's own answer says whether it allowed applications, so a refused request is not sent again and again.
+      if (state.permitted !== true) state.permitted = (await desktop.remoteSession(id)).permissions.applications === true;
+      if (state.permitted) {
+        state.apps = await desktop.remoteApplications(id);
+        state.error = undefined;
+      } else {
+        state.apps = undefined;
+        state.error = undefined;
+      }
+    } catch (error) {
+      if (error === "notPermitted") {
+        state.permitted = false;
+        state.apps = undefined;
+        state.error = undefined;
+      } else {
+        state.error = typeof error === "string" ? error : "remoteFailed";
+      }
+    } finally {
+      readingApps.delete(id);
+    }
+    render();
+  }
+
+  /** The devices whose applications the user can see now: the section is open, or the window of the list is. */
+  function watchedAppDevices(): RemoteDevice[] {
+    if (!overview) return [];
+    const viewing = !deviceList.closest("[hidden]");
+    return overview.devices.filter(device => device.online !== false && (device.id === appsDevice
+      || (viewing && isOpen(`r:${device.id}`) && isOpen(`r:${device.id}/apps`))));
+  }
+
+  /** Starts or stops the reading of applications. It reads at once when it starts, and when `now` says so. */
+  function watchApps(now = false): void {
+    const wanted = watchedAppDevices();
+    if (wanted.length === 0) {
+      if (appTicker !== undefined) window.clearInterval(appTicker);
+      appTicker = undefined;
+      return;
+    }
+    const starting = appTicker === undefined;
+    appTicker ??= window.setInterval(() => {
+      const current = watchedAppDevices();
+      if (current.length === 0) watchApps();
+      else for (const device of current) void readApps(device.id);
+    }, appPoll);
+    if (starting || now) for (const device of wanted) void readApps(device.id);
+  }
+
+  /** The icons that were found, by device, application, and version. They are addresses in the asset protocol. */
+  const iconSources = new Map<string, string>();
+  const iconJobs: (() => Promise<void>)[] = [];
+  const iconLoaders = new WeakMap<Element, () => void>();
+  let iconsLoading = 0;
+  // An icon is asked for only when its row shows, so a list of hundreds loads a screenful.
+  const iconWatcher = new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      const load = iconLoaders.get(entry.target);
+      if (!load || !entry.isIntersecting || entry.intersectionRect.height === 0) continue;
+      iconLoaders.delete(entry.target);
+      iconWatcher.unobserve(entry.target);
+      load();
+    }
+  }, { rootMargin: "60px 0px" });
+
+  function pumpIcons(): void {
+    while (iconsLoading < 2 && iconJobs.length > 0) {
+      iconsLoading++;
+      void iconJobs.shift()!().finally(() => {
+        iconsLoading--;
+        pumpIcons();
+      });
+    }
+  }
+
+  /** The icon of an application. The generic icon stays while the real one loads, and when it cannot. */
+  function appIcon(deviceId: string, app: RemoteApp): HTMLElement {
+    const root = h("span", { class: "app-icon", "data-loading": true }, icon("app-window"));
+    const key = `${deviceId}/${app.bundleId}/${app.version}`;
+    const show = (src: string): void => {
+      const image = h("img", { src, alt: "", width: "26", height: "26", draggable: "false" });
+      image.addEventListener("error", () => {
+        iconSources.delete(key);
+        root.replaceChildren(icon("app-window"));
+        host.refreshIcons();
+      });
+      root.replaceChildren(image);
+    };
+    iconLoaders.set(root, () => {
+      const known = iconSources.get(key);
+      if (known) {
+        root.removeAttribute("data-loading");
+        show(known);
+        return;
+      }
+      iconJobs.push(async () => {
+        try {
+          const src = await desktop.remoteAppIcon(deviceId, app.bundleId, app.version);
+          if (src) {
+            iconSources.set(key, src);
+            show(src);
+          }
+        } catch {
+          // The generic icon stays.
+        } finally {
+          root.removeAttribute("data-loading");
+        }
+      });
+      pumpIcons();
+    });
+    iconWatcher.observe(root);
+    return root;
+  }
+
+  /** The round button that opens an application. It turns into a spinner while the device opens it. */
+  function appOpenButton() {
+    const button = h("button", { type: "button", class: "round-button" },
+      h("span", { class: "play-idle" }, icon("play")), h("span", { class: "play-busy" }, icon("refresh-cw")));
+    const root = h("span", { class: "tip" }, button);
     return {
       root,
-      update(current) {
-        state.toggleAttribute("data-on", current.open);
-        setText(state, t(current.open ? "stateOpen" : "stateClosed"));
+      button,
+      set(label: string, tip: string, busy: boolean): void {
+        setAttribute(button, "aria-label", label);
+        setTip(root, tip);
+        setAttribute(button, "aria-busy", String(busy));
       },
     };
   }
 
-  function moreApps() {
+  function paintApp(state: HTMLElement, open: ReturnType<typeof appOpenButton>, app: RemoteApp, busy: boolean): void {
+    state.toggleAttribute("data-on", app.open);
+    setText(state, t(app.open ? "stateOpen" : "stateClosed"));
+    open.set(`${t("open")} ${app.name}`, busy ? t("appsOpening") : t("open"), busy);
+  }
+
+  /** Asks the device to open an application, shows progress on its button, and reads the list again a moment later. */
+  async function openApp(deviceId: string, app: RemoteApp): Promise<void> {
+    const state = appsOf(deviceId);
+    if (state.opening.has(app.bundleId)) return;
+    state.opening.add(app.bundleId);
+    render();
+    try {
+      await desktop.remoteOpenApplication(deviceId, app.bundleId);
+      await new Promise(resolve => window.setTimeout(resolve, openSettle));
+    } catch (error) {
+      if (error === "notPermitted") {
+        state.permitted = false;
+        state.apps = undefined;
+      } else {
+        host.fail(error);
+      }
+    } finally {
+      state.opening.delete(app.bundleId);
+    }
+    render();
+    void readApps(deviceId);
+  }
+
+  function appRow(device: { id: string }): (app: AppItem) => Row<AppItem> {
+    return app => {
+      const state = h("span", { class: "device-state" });
+      const open = appOpenButton();
+      const root = h("div", { class: "device-row" },
+        appIcon(device.id, app), h("div", { class: "device-row-text" }, h("strong", {}, app.name)), state, open.root);
+      let latest = app;
+      open.button.addEventListener("click", () => void openApp(device.id, latest));
+      return {
+        root,
+        update(current) {
+          latest = current;
+          paintApp(state, open, current, appsOf(device.id).opening.has(current.bundleId));
+        },
+      };
+    };
+  }
+
+  function moreApps(onClick: (button: HTMLElement) => void) {
     const label = h("span", {});
-    const button = h("button", { type: "button", class: "device-more" }, label, icon("chevron-right"));
+    const button = h("button", { type: "button", class: "device-more", "aria-haspopup": "dialog" }, label, icon("chevron-right"));
+    button.addEventListener("click", () => onClick(button));
     const root = h("div", { class: "collapse", inert: true }, h("div", {}, button));
     return {
       root,
@@ -1378,6 +1588,124 @@ export function mountDevices(host: Host) {
       },
     };
   }
+
+  /** Saves the pins at once in the view, and on disk after. A failed save shows its notice and reads the device list again. */
+  function togglePin(id: string, bundleId: string): void {
+    const device = overview?.devices.find(item => item.id === id);
+    if (!device) return;
+    const current = device.apps.pinned;
+    const next = current.includes(bundleId) ? current.filter(item => item !== bundleId) : [...current, bundleId];
+    if (next.length > pinLimit) return;
+    device.apps.pinned = next;
+    render();
+    void desktop.setPinnedApps(id, next).catch(error => {
+      host.fail(error);
+      void refresh();
+    });
+  }
+
+  type WindowRow = { root: HTMLElement; search: string; update(app: RemoteApp, pinned: boolean, full: boolean, busy: boolean): void };
+
+  function windowRow(device: { id: string }, app: RemoteApp): WindowRow {
+    const state = h("span", { class: "device-state" });
+    const open = appOpenButton();
+    const pin = h("button", { type: "button", class: "icon-button outlined pin-button" }, icon("pin"));
+    const pinTip = h("span", { class: "tip" }, pin);
+    const root = h("li", { class: "apps-row" },
+      appIcon(device.id, app), h("div", { class: "device-row-text" }, h("strong", {}, app.name)), state, pinTip, open.root);
+    let latest = app;
+    open.button.addEventListener("click", () => void openApp(device.id, latest));
+    pin.addEventListener("click", () => togglePin(device.id, app.bundleId));
+    return {
+      root,
+      search: app.name.toLocaleLowerCase(),
+      update(current, pinned, full, busy) {
+        latest = current;
+        paintApp(state, open, current, busy);
+        const blocked = full && !pinned;
+        const label = fill(t(pinned ? "unpinApp" : "pinApp"), { app: current.name });
+        setAttribute(pin, "aria-pressed", String(pinned));
+        setAttribute(pin, "aria-label", label);
+        setTip(pinTip, blocked ? t("pinFull") : label);
+        if (pin.disabled !== blocked) pin.disabled = blocked;
+      },
+    };
+  }
+
+  /** Shows the rows that match what is typed, and says why there are none when there are none. */
+  function filterApps(name: string): void {
+    const query = appsSearch.value.trim().toLocaleLowerCase();
+    const state = appsDevice ? appsOf(appsDevice) : undefined;
+    let shown = 0;
+    for (const row of appsRows.values()) {
+      const match = query === "" || row.search.includes(query);
+      if (row.root.hidden === match) row.root.hidden = !match;
+      if (match) shown++;
+    }
+    setText(appsCount, fill(t("appsCount"), { count: shown }));
+    let message = "";
+    if (state?.permitted === false) message = fill(t("appsNotAllowed"), { name });
+    else if (appsRows.size === 0) message = state?.error ? t(isLinkError(state.error) ? "remoteLost" : "appsUnavailable") : t("appsLoading");
+    else if (shown === 0) message = t("appsEmpty");
+    setText(appsNote, message);
+    appsNote.hidden = message === "";
+  }
+
+  /** The window of every application of a device. Its rows are kept and updated in place, and rebuilt only when the list or the language changes. */
+  function renderAppsWindow(): void {
+    if (!appsWindow.hasAttribute("data-open") || !appsDevice || !overview) return;
+    const device = overview.devices.find(item => item.id === appsDevice);
+    if (!device) {
+      closeApps(false);
+      return;
+    }
+    const state = appsOf(device.id);
+    const apps = state.apps ?? [];
+    const signature = JSON.stringify([host.language(), device.id, apps.map(app => [app.bundleId, app.name, app.version])]);
+    if (signature !== appsSignature) {
+      appsSignature = signature;
+      appsRows = new Map(apps.map(app => [app.bundleId, windowRow(device, app)]));
+      appsList.replaceChildren(...[...appsRows.values()].map(row => row.root), appsNote);
+      host.refreshIcons();
+    }
+    const pinned = new Set(device.apps.pinned);
+    for (const app of apps) {
+      appsRows.get(app.bundleId)?.update(app, pinned.has(app.bundleId), pinned.size >= pinLimit, state.opening.has(app.bundleId));
+    }
+    filterApps(device.name);
+  }
+
+  function openApps(device: RemoteDevice, trigger: HTMLElement): void {
+    appsDevice = device.id;
+    appsTrigger = trigger;
+    appsSearch.value = "";
+    appsSignature = "";
+    appsWindow.setAttribute("data-open", "");
+    appsWindow.inert = false;
+    renderAppsWindow();
+    watchApps(true);
+    appsSearch.focus();
+  }
+
+  function closeApps(restoreFocus = true): void {
+    if (!appsWindow.hasAttribute("data-open")) return;
+    appsWindow.removeAttribute("data-open");
+    appsWindow.inert = true;
+    appsDevice = undefined;
+    watchApps();
+    if (restoreFocus && appsTrigger?.isConnected) appsTrigger.focus();
+  }
+
+  appsClose.addEventListener("click", () => closeApps());
+  appsWindow.addEventListener("pointerdown", event => {
+    if (event.target === appsWindow) closeApps();
+  });
+  appsSearch.addEventListener("input", () => {
+    const device = overview?.devices.find(item => item.id === appsDevice);
+    if (device) filterApps(device.name);
+  });
+  bind(appsSearch, "appsSearch", "placeholder");
+  bind(appsSearch, "appsSearch", "aria-label");
 
   function remoteBody(device: RemoteDevice) {
     const key = `r:${device.id}`;
@@ -1390,9 +1718,11 @@ export function mountDevices(host: Host) {
       tool => toolRow(device, tool));
     const appHost = h("div", {});
     appsSection.rows.append(appHost);
-    const appList = list<RemoteApp>(appHost, app => JSON.stringify([host.language(), app.name, app.icon]), appRow);
-    const more = moreApps();
-    appsSection.rows.append(more.root);
+    const appList = list<AppItem>(appHost, app => JSON.stringify([host.language(), app.name, app.version]), appRow(device));
+    let latest = device;
+    const more = moreApps(button => openApps(latest, button));
+    const appsNotice = note("");
+    appsSection.rows.append(more.root, appsNotice.root);
     const actionList = list<SavedAction>(actionsSection.rows, actionSignature, actionRow(false));
 
     const shellNote = h("span", { class: "setting-note" });
@@ -1419,10 +1749,24 @@ export function mountDevices(host: Host) {
           ? (isLinkError(found.error) ? t("remoteLost") : fill(t(found.error as "localOnly"), { name: current.name }))
           : fill(t("deviceToolsSummary"), { on: known.filter(tool => tool.running).length, total: known.length }));
 
-        const shown = current.apps.pinned.slice(0, appRows);
+        latest = current;
+        const state = appsOf(current.id);
+        const listed = state.apps ?? [];
+        const denied = state.permitted === false;
+        const shown: AppItem[] = denied ? [] : current.apps.pinned.slice(0, appRows).flatMap(id => {
+          const app = listed.find(item => item.bundleId === id);
+          return app ? [{ ...app, id: app.bundleId }] : [];
+        });
         appList.sync(shown);
-        more.update(Math.max(0, current.apps.total - shown.length));
-        setText(appsSection.summary, fill(t("deviceAppsSummary"), { count: current.apps.open }));
+        more.update(denied ? 0 : Math.max(0, listed.length - shown.length));
+        // The device says whether it allowed applications. Until it answers, the section says that it is reading.
+        let message = "";
+        if (denied) message = fill(t("appsNotAllowed"), { name: current.name });
+        else if (!state.apps) message = state.error ? t(isLinkError(state.error) ? "remoteLost" : "appsUnavailable") : t("appsLoading");
+        if (message) appsNotice.set(message);
+        appsNotice.show(message !== "");
+        setText(appsSection.summary, denied ? t("off")
+          : state.apps ? fill(t("deviceAppsSummary"), { count: listed.filter(app => app.open).length }) : "");
 
         actionList.sync(current.actions);
         const next = current.actions.flatMap(action => action.nextRun === null ? [] : [action.nextRun]);
@@ -1504,6 +1848,7 @@ export function mountDevices(host: Host) {
       })),
     ]);
     if (logWindow.hasAttribute("data-open")) renderLog();
+    renderAppsWindow();
     if (shownLanguage !== host.language()) {
       shownLanguage = host.language();
       retranslate();
@@ -1512,6 +1857,7 @@ export function mountDevices(host: Host) {
     }
     syncTicker();
     watchTools();
+    watchApps();
     if (built) {
       built = false;
       host.refreshIcons();

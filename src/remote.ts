@@ -9,7 +9,7 @@ export const PROTOCOL = 1;
 export type Session = {
   device: { id: string; name: string; kind: DeviceKind };
   /** What this device may do on the other one. */
-  permissions: { control: boolean; actions: boolean };
+  permissions: { control: boolean; applications: boolean; actions: boolean };
   version: string;
   protocol: number;
 };
@@ -46,6 +46,9 @@ const needsControl = new Set([
   "setStartToolsOnLaunch", "setHideWhileSharing", "setLoginLaunch",
 ]);
 
+/** The requests that need the Applications permission. Keep it equal to `Access::Applications` in `dispatch.rs`. */
+const needsApplications = new Set(["listApplications", "getAppIcon", "openApplication"]);
+
 /** Why the device will refuse a request, when the window can know it before it asks. */
 export function refusal(
   command: string, args: { tool?: string; active?: boolean } | undefined, permissions: Session["permissions"] | undefined,
@@ -54,6 +57,7 @@ export function refusal(
   // Starting the proxy server opens a port on the device. Stopping it does not.
   if (command === "setToolActive" && args?.tool === "proxy" && args.active) return "localOnly";
   if (permissions && !permissions.control && needsControl.has(command)) return "notPermitted";
+  if (permissions && !permissions.applications && needsApplications.has(command)) return "notPermitted";
 }
 
 /** The refusals that the interface shows as a calm note instead of a failure. */

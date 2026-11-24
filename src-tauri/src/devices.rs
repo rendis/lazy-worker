@@ -100,11 +100,10 @@ pub struct Remote {
     pub shell: Option<()>,
 }
 
+/// `pinned` holds bundle identifiers. The view reads the list itself, because it changes while the view is open.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct RemoteApps {
-    pub pinned: Vec<()>,
-    pub total: u32,
-    pub open: u32,
+    pub pinned: Vec<String>,
 }
 
 #[cfg(unix)]
@@ -120,7 +119,9 @@ impl Remote {
             added: device.added,
             online,
             tools: Vec::new(),
-            apps: RemoteApps::default(),
+            apps: RemoteApps {
+                pinned: device.pinned.clone(),
+            },
             actions: Vec::new(),
             shell: None,
         }

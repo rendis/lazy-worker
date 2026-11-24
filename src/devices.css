@@ -249,3 +249,25 @@
 .pair-result-icon .lucide { width: 28px; height: 28px; color: var(--online); }
 .pair-result-text { margin: 0; font-size: 16px; font-weight: 650; overflow-wrap: anywhere; }
 .pair-result .guide-actions { padding-top: 6px; }
+
+/* The applications of a device: the play button shows progress while an application opens. */
+.round-button .play-busy, .round-button[aria-busy="true"] .play-idle { display: none; }
+.round-button[aria-busy="true"] .play-busy { display: grid; }
+.round-button[aria-busy="true"] .lucide { animation: rescan-spin 1s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .round-button[aria-busy="true"] .lucide { animation: none; } }
+.app-icon[data-loading] .lucide { opacity: .45; }
+.apps-window { grid-template-rows: auto auto minmax(0, 1fr); }
+.apps-search { display: flex; align-items: center; gap: 8px; padding: 0 2px; }
+.apps-search .lucide { flex: none; width: 16px; height: 16px; color: var(--secondary); }
+.apps-search .field { flex: 1; }
+/* The room under the last row is for its tip, which opens below the button. */
+.apps-list { display: block; min-height: 0; margin: 0; padding: 0 4px 44px 0; overflow-y: auto; border-block: 1px solid var(--hairline); list-style: none; }
+.apps-list:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.apps-row { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 4px 2px; border-bottom: 1px solid var(--hairline); content-visibility: auto; contain-intrinsic-size: auto 49px; }
+.apps-row[hidden] { display: none; }
+.apps-row .device-state { min-inline-size: 6rem; }
+.apps-list > .setting-note { padding: 12px 2px; }
+.apps-list > .setting-note[hidden] { display: none; }
+.pin-button[aria-pressed="true"] { color: var(--control-accent); }
+.pin-button[aria-pressed="true"] .lucide { fill: currentColor; }
+.pin-button:disabled { opacity: .45; }

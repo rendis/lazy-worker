@@ -448,6 +448,7 @@ fn connection(stream: UnixStream, mut slot: Slot) {
                 read = request.is_read();
                 let origin = Origin::Remote(Permissions {
                     control: peer.permissions.control,
+                    applications: peer.permissions.applications,
                     actions: peer.permissions.actions,
                 });
                 shared.handler.handle(origin, request)
@@ -677,6 +678,28 @@ mod tests {
             .iter()
             .all(|entry| entry.request.chars().all(|c| c.is_ascii_alphanumeric())));
         assert!(setup.peers.get(ID_A).is_none());
+    }
+
+    #[test]
+    fn the_applications_permission_of_a_peer_reaches_the_dispatcher_on_every_request() {
+        let setup = setup("apps-permission");
+        setup.pair(ID_A, true, false);
+        let (mut stream, mut reader) = setup.connect(ID_A);
+        let list = serde_json::json!({"command": "listApplications"});
+        let open = serde_json::json!({"command": "openApplication", "args": {"bundleId": "com.apple.Safari"}});
+        // Control alone is refused.
+        assert_eq!(ask(&mut stream, &mut reader, list.clone()), serde_json::json!({"error": "notPermitted"}));
+        // Applications alone is enough, and it is read from the saved peer on the next request.
+        setup.peers.set_permissions(ID_A, false, true, false).unwrap();
+        assert_eq!(ask(&mut stream, &mut reader, list.clone()), serde_json::json!({"ok": "done"}));
+        assert_eq!(ask(&mut stream, &mut reader, open), serde_json::json!({"ok": "done"}));
+        assert_eq!(ask(&mut stream, &mut reader, status()), serde_json::json!({"error": "notPermitted"}));
+        setup.peers.set_permissions(ID_A, true, false, true).unwrap();
+        assert_eq!(ask(&mut stream, &mut reader, list), serde_json::json!({"error": "notPermitted"}));
+        // A refused read is logged. A read that worked is not, and opening an application always is.
+        let outcomes: Vec<_> = setup.log.read().iter().map(|e| (e.request.clone(), e.outcome.clone())).collect();
+        assert_eq!(outcomes.len(), 4);
+        assert!(outcomes.contains(&("openApplication".to_owned(), "ok".to_owned())));
     }
 
     #[test]

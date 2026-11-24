@@ -4,7 +4,7 @@
 //! the label of the window that sent it, never from data in the request.
 
 use crate::{
-    activity, caffeinate,
+    activity, apps, caffeinate,
     caffeinate::CaffeinateSettings,
     devices, lid,
     lid::LidMode,
@@ -24,6 +24,8 @@ pub enum Access {
     Control,
     /// Starts a command the user wrote.
     Actions,
+    /// Lists, draws, and opens the applications of this device.
+    Applications,
     /// Settings that store a command, an address list, or a permission, and system prompts.
     LocalOnly,
     /// Needs only that the caller is a paired device. It reads nothing that a device did not already
@@ -40,6 +42,7 @@ pub const PROTOCOL: u32 = 1;
 #[cfg_attr(not(unix), allow(dead_code))]
 pub struct Permissions {
     pub control: bool,
+    pub applications: bool,
     pub actions: bool,
 }
 
@@ -69,9 +72,10 @@ impl Origin {
             // The server looked the peer up before it came here, so any remote origin is paired.
             Access::Paired => Ok(()),
             Access::Control if permissions.control => Ok(()),
+            Access::Applications if permissions.applications => Ok(()),
             Access::Actions if permissions.actions => Ok(()),
             Access::LocalOnly => Err("localOnly"),
-            Access::Control | Access::Actions => Err("notPermitted"),
+            Access::Control | Access::Applications | Access::Actions => Err("notPermitted"),
         }
     }
 
@@ -156,6 +160,16 @@ pub enum Request {
     AllowPasswordLogin,
     EnableRemoteAccess,
     OpenSharingSettings,
+    /// The installed applications of this device, and which are open.
+    ListApplications,
+    /// The icon of an application of that list, as base64 text of one PNG.
+    GetAppIcon { bundle_id: String },
+    /// Opens an application of that list.
+    OpenApplication { bundle_id: String },
+    /// The path of the cached icon of an application on a device that this one controls. It fetches the icon first when it is not cached.
+    GetCachedIcon { id: String, bundle_id: String, version: String },
+    /// Saves the applications that the Devices view shows first for a device that this one controls.
+    SetPinnedApps { id: String, bundle_ids: Vec<String> },
     /// Opens the window that controls a paired device.
     OpenRemoteWindow { id: String },
     /// Sends one of a few requests to a paired device, for the Devices view.
@@ -192,6 +206,9 @@ impl Request {
             | Self::SetLidMode { .. }
             | Self::CheckProxyServer { .. } => Access::Control,
             Self::GetSession => Access::Paired,
+            Self::ListApplications | Self::GetAppIcon { .. } | Self::OpenApplication { .. } => {
+                Access::Applications
+            }
             // Starting the proxy server opens a port on this Mac, so only the person here may do it.
             // Stopping it, and every other tool, stays remote control.
             Self::SetToolActive { tool, active } => match (tool, active) {
@@ -233,6 +250,8 @@ impl Request {
             | Self::GetProxyPeers
             | Self::GetProxyLog
             | Self::GetViewer
+            | Self::GetCachedIcon { .. }
+            | Self::SetPinnedApps { .. }
             | Self::OpenRemoteWindow { .. }
             | Self::RemoteCall { .. }
             | Self::RequestActivityAccessibility => Access::LocalOnly,
@@ -262,7 +281,10 @@ impl Request {
             | Self::GetRemoteLog
             | Self::DiscoverDevices
             | Self::DetectProxyApps
-            | Self::ListCaffeinateProcesses => true,
+            | Self::ListCaffeinateProcesses
+            | Self::ListApplications
+            | Self::GetAppIcon { .. }
+            | Self::GetCachedIcon { .. } => true,
             Self::CheckForUpdate
             | Self::RestartToUpdate
             | Self::SetLanguage { .. }
@@ -295,6 +317,8 @@ impl Request {
             | Self::AllowPasswordLogin
             | Self::EnableRemoteAccess
             | Self::OpenSharingSettings
+            | Self::OpenApplication { .. }
+            | Self::SetPinnedApps { .. }
             | Self::OpenRemoteWindow { .. }
             | Self::RemoteCall { .. } => false,
         }
@@ -322,6 +346,9 @@ impl Request {
             | Self::DiscoverDevices
             | Self::DetectProxyApps
             | Self::ListCaffeinateProcesses
+            | Self::ListApplications
+            | Self::GetAppIcon { .. }
+            | Self::GetCachedIcon { .. }
             | Self::CheckForUpdate
             | Self::RestartToUpdate
             | Self::SetLanguage { .. }
@@ -354,6 +381,8 @@ impl Request {
             | Self::AllowPasswordLogin
             | Self::EnableRemoteAccess
             | Self::OpenSharingSettings
+            | Self::OpenApplication { .. }
+            | Self::SetPinnedApps { .. }
             | Self::OpenRemoteWindow { .. }
             | Self::RemoteCall { .. } => false,
         }
@@ -362,14 +391,25 @@ impl Request {
     /// True for a request that exists only between the main window and a device that it controls.
     /// A window that controls a device never sends one.
     fn is_controller_side(&self) -> bool {
-        matches!(self, Self::OpenRemoteWindow { .. } | Self::RemoteCall { .. })
+        matches!(
+            self,
+            Self::OpenRemoteWindow { .. }
+                | Self::RemoteCall { .. }
+                | Self::GetCachedIcon { .. }
+                | Self::SetPinnedApps { .. }
+        )
     }
 
     /// The requests that the Devices view may send to a device through `RemoteCall`.
     fn may_be_called_remotely(&self) -> bool {
         matches!(
             self,
-            Self::GetStatuses | Self::SetToolActive { .. } | Self::GetSession
+            Self::GetStatuses
+                | Self::SetToolActive { .. }
+                | Self::GetSession
+                | Self::ListApplications
+                | Self::GetAppIcon { .. }
+                | Self::OpenApplication { .. }
         )
     }
 }
@@ -587,6 +627,52 @@ async fn run(
                 return Err("notPermitted");
             }
             forward(app, &id, request).await
+        }
+        Request::ListApplications => json(
+            tauri::async_runtime::spawn_blocking(apps::list)
+                .await
+                .map_err(|_| "workerUnavailable")??,
+        ),
+        Request::GetAppIcon { bundle_id } => json(serde_json::json!({
+            "png": tauri::async_runtime::spawn_blocking(move || apps::icon_base64(&bundle_id))
+                .await
+                .map_err(|_| "appIconFailed")??,
+        })),
+        Request::OpenApplication { bundle_id } => {
+            tauri::async_runtime::spawn_blocking(move || apps::open(&bundle_id))
+                .await
+                .map_err(|_| "appOpenFailed")?
+                .map(|()| Value::Null)
+        }
+        Request::GetCachedIcon { id, bundle_id, version } => {
+            #[cfg(unix)]
+            {
+                let app = app.clone();
+                let path = tauri::async_runtime::spawn_blocking(move || {
+                    app.state::<crate::remote::service::Service>()
+                        .cached_icon(&id, &bundle_id, &version)
+                })
+                .await
+                .map_err(|_| "workerUnavailable")??;
+                json(serde_json::json!({ "path": path }))
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = (id, bundle_id, version);
+                Err("unsupported")
+            }
+        }
+        Request::SetPinnedApps { id, bundle_ids } => {
+            #[cfg(unix)]
+            return app
+                .state::<crate::remote::service::Service>()
+                .set_pinned(&id, &bundle_ids)
+                .map(|()| Value::Null);
+            #[cfg(not(unix))]
+            {
+                let _ = (id, bundle_ids);
+                Err("unsupported")
+            }
         }
         Request::GetStatuses => json(locked("workerUnavailable")?.statuses()),
         Request::GetLidStatus => json(locked("workerUnavailable")?.lid.status()),
@@ -904,6 +990,7 @@ async fn session(app: &AppHandle, origin: Origin) -> Result<Value, &'static str>
     let permissions = match origin {
         Origin::Local => Permissions {
             control: true,
+            applications: true,
             actions: true,
         },
         Origin::Remote(permissions) => permissions,
@@ -917,7 +1004,11 @@ async fn session(app: &AppHandle, origin: Origin) -> Result<Value, &'static str>
         .map_err(|_| "workerUnavailable")??;
     json(serde_json::json!({
         "device": { "id": own.id.as_str(), "name": own.name, "kind": own.kind },
-        "permissions": { "control": permissions.control, "actions": permissions.actions },
+        "permissions": {
+            "control": permissions.control,
+            "applications": permissions.applications,
+            "actions": permissions.actions,
+        },
         "version": version,
         "protocol": PROTOCOL,
     }))
@@ -958,14 +1049,22 @@ mod tests {
 
     const NONE: Origin = Origin::Remote(Permissions {
         control: false,
+        applications: false,
         actions: false,
     });
     const CONTROL: Origin = Origin::Remote(Permissions {
         control: true,
+        applications: false,
+        actions: false,
+    });
+    const APPLICATIONS: Origin = Origin::Remote(Permissions {
+        control: false,
+        applications: true,
         actions: false,
     });
     const ACTIONS: Origin = Origin::Remote(Permissions {
         control: false,
+        applications: false,
         actions: true,
     });
 
@@ -1090,7 +1189,7 @@ mod tests {
             json!({"command": "openSharingSettings"}),
         ] {
             let parsed = request(value);
-            for origin in [NONE, CONTROL, ACTIONS, Origin::Remote(Permissions { control: true, actions: true })] {
+            for origin in [NONE, CONTROL, ACTIONS, Origin::Remote(Permissions { control: true, applications: true, actions: true })] {
                 assert_eq!(allowed(origin, &parsed, &preferences), Err("localOnly"));
             }
             assert_eq!(allowed(Origin::Local, &parsed, &preferences), Ok(()));
@@ -1109,7 +1208,7 @@ mod tests {
             json!({"command": "getProxyLog"}),
         ] {
             let parsed = request(value);
-            let both = Origin::Remote(Permissions { control: true, actions: true });
+            let both = Origin::Remote(Permissions { control: true, applications: true, actions: true });
             assert_eq!(allowed(CONTROL, &parsed, &preferences), Err("localOnly"));
             assert_eq!(allowed(both, &parsed, &preferences), Err("localOnly"));
             assert_eq!(allowed(Origin::Local, &parsed, &preferences), Ok(()));
@@ -1281,7 +1380,7 @@ mod tests {
     #[test]
     fn the_viewer_and_the_windows_are_not_something_a_remote_device_may_ask() {
         let preferences = Preferences::default();
-        let both = Origin::Remote(Permissions { control: true, actions: true });
+        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true });
         for value in [
             json!({"command": "getViewer"}),
             json!({"command": "openRemoteWindow", "args": {"id": DEVICE}}),
@@ -1308,13 +1407,73 @@ mod tests {
         assert_eq!(allowed(NONE, &status, &preferences), Err("notPermitted"));
     }
 
+    fn application_requests() -> [Value; 3] {
+        [
+            json!({"command": "listApplications"}),
+            json!({"command": "getAppIcon", "args": {"bundleId": "com.apple.Safari"}}),
+            json!({"command": "openApplication", "args": {"bundleId": "com.apple.Safari"}}),
+        ]
+    }
+
     #[test]
-    fn the_devices_view_may_call_only_three_requests_on_a_device() {
+    fn applications_need_their_own_permission_and_control_alone_is_refused() {
+        let preferences = Preferences::default();
+        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true });
+        for value in application_requests() {
+            let parsed = request(value);
+            assert_eq!(parsed.access(&preferences), Access::Applications);
+            assert_eq!(allowed(NONE, &parsed, &preferences), Err("notPermitted"));
+            assert_eq!(allowed(CONTROL, &parsed, &preferences), Err("notPermitted"));
+            assert_eq!(allowed(ACTIONS, &parsed, &preferences), Err("notPermitted"));
+            // Applications alone is enough.
+            assert_eq!(allowed(APPLICATIONS, &parsed, &preferences), Ok(()));
+            assert_eq!(allowed(both, &parsed, &preferences), Ok(()));
+            assert_eq!(allowed(Origin::Local, &parsed, &preferences), Ok(()));
+        }
+        // And Applications does not open Control.
+        let status = request(json!({"command": "getStatuses"}));
+        assert_eq!(allowed(APPLICATIONS, &status, &preferences), Err("notPermitted"));
+    }
+
+    #[test]
+    fn only_opening_an_application_is_not_a_read() {
+        let [list, icon, open] = application_requests().map(request);
+        assert!(list.is_read() && icon.is_read() && !open.is_read());
+        for parsed in [&list, &icon, &open] {
+            // They run on the device that is asked, also from the window of a device.
+            assert!(!parsed.runs_on_viewer());
+            assert!(!parsed.is_controller_side());
+            assert!(parsed.may_be_called_remotely());
+        }
+    }
+
+    #[test]
+    fn the_icon_cache_and_the_pins_belong_to_the_controller() {
+        let preferences = Preferences::default();
+        let device = Route::Device(DEVICE.into());
+        for value in [
+            json!({"command": "getCachedIcon", "args": {"id": DEVICE, "bundleId": "com.apple.Safari", "version": "17.0"}}),
+            json!({"command": "setPinnedApps", "args": {"id": DEVICE, "bundleIds": ["com.apple.Safari"]}}),
+        ] {
+            let parsed = request(value);
+            assert!(parsed.is_controller_side());
+            assert!(!parsed.may_be_called_remotely());
+            assert_eq!(plan(&device, &parsed), Plan::Refuse);
+            assert_eq!(plan(&Route::Local, &parsed), Plan::Here);
+            for origin in [NONE, CONTROL, APPLICATIONS, ACTIONS] {
+                assert_eq!(allowed(origin, &parsed, &preferences), Err("localOnly"));
+            }
+            assert_eq!(allowed(Origin::Local, &parsed, &preferences), Ok(()));
+        }
+    }
+
+    #[test]
+    fn the_devices_view_may_call_only_a_few_requests_on_a_device() {
         for value in [
             json!({"command": "getStatuses"}),
             json!({"command": "setToolActive", "args": {"tool": "caffeinate", "active": false}}),
             json!({"command": "getSession"}),
-        ] {
+        ].into_iter().chain(application_requests()) {
             assert!(request(value).may_be_called_remotely());
         }
         for value in [

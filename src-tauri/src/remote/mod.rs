@@ -10,6 +10,7 @@ pub mod controlled;
 pub mod destination;
 pub mod discovery;
 pub mod helper;
+pub mod icons;
 pub mod identity;
 pub mod known_hosts;
 pub mod log;
@@ -111,6 +112,11 @@ impl Layout {
 
     pub fn pairing_config_file(&self) -> PathBuf {
         self.remote.join("ssh_config_pair")
+    }
+
+    /// Icons of the applications of other devices, under file names that are hashes.
+    pub fn icons_dir(&self) -> PathBuf {
+        self.remote.join("icons")
     }
 
     pub fn socket_file(&self) -> PathBuf {
