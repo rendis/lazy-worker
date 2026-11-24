@@ -23,12 +23,14 @@ const logPoll = 3000;
 /** The spinner of the Refresh button shows at least this long, so the check can be seen. */
 const refreshShown = 500;
 /** How long a change of tab takes: the panels crossfade while the height moves. */
-const tabHeightMs = 240;
 const tabOutMs = 110;
 const tabInMs = 180;
 /** How many applications a device can have pinned, and so how many rows its section shows. */
 const pinLimit = 3;
-const appRows = pinLimit;
+/** The applications that the tab of a device lists before the rest go behind the count: the pinned ones, then the latest used. */
+const appRows = 5;
+/** How many applications each device remembers a time of use for. */
+const recentLimit = 24;
 /** How often the applications of an open device are read, in milliseconds. */
 const appPoll = 5000;
 /** How long an application gets to show as open after the device accepted the request. */
@@ -118,7 +120,7 @@ function setAttribute(node: HTMLElement, name: string, value: string): void {
   if (node.getAttribute(name) !== value) node.setAttribute(name, value);
 }
 
-type Stored = { open: Record<string, boolean>; tabs: Record<string, string> };
+type Stored = { open: Record<string, boolean>; tabs: Record<string, string>; recent: Record<string, Record<string, number>> };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -131,7 +133,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function readStored(): Stored {
   try {
     const stored: unknown = JSON.parse(localStorage.getItem(openKey) ?? "{}");
-    if (!isRecord(stored)) return { open: {}, tabs: {} };
+    if (!isRecord(stored)) return { open: {}, tabs: {}, recent: {} };
     const nested = isRecord(stored.open) || isRecord(stored.tabs);
     const open = nested ? stored.open : stored;
     const tabs = nested ? stored.tabs : {};
@@ -140,9 +142,11 @@ function readStored(): Stored {
         .filter(([key, value]) => typeof value === "boolean" && !key.includes("/"))) as Record<string, boolean>,
       tabs: Object.fromEntries(Object.entries(isRecord(tabs) ? tabs : {})
         .filter(([, value]) => typeof value === "string")) as Record<string, string>,
+      recent: Object.fromEntries(Object.entries(isRecord(stored.recent) ? stored.recent : {}).flatMap(([device, apps]) => isRecord(apps)
+        ? [[device, Object.fromEntries(Object.entries(apps).filter(([, time]) => typeof time === "number"))]] : [])) as Record<string, Record<string, number>>,
     };
   } catch {
-    return { open: {}, tabs: {} };
+    return { open: {}, tabs: {}, recent: {} };
   }
 }
 
@@ -193,6 +197,8 @@ export function mountDevices(host: Host) {
   let opened = oneOpen(storedState.open);
   /** The last tab of each device, by key. */
   let tabChoices = storedState.tabs;
+  /** When an application was last opened from here, by device and bundle identifier. */
+  let recentApps = storedState.recent as Record<string, Record<string, number>>;
   /** How each device row opens and closes, by key. */
   const disclosures = new Map<string, (open: boolean, animate: boolean) => void>();
   let built = false;
@@ -230,7 +236,7 @@ export function mountDevices(host: Host) {
 
   function persist(): void {
     try {
-      localStorage.setItem(openKey, JSON.stringify({ open: opened, tabs: tabChoices }));
+      localStorage.setItem(openKey, JSON.stringify({ open: opened, tabs: tabChoices, recent: recentApps }));
     } catch {
       // Without storage the rows still open and close. They only start closed next time.
     }
@@ -394,11 +400,81 @@ export function mountDevices(host: Host) {
     return toggle;
   }
 
+  /**
+   * The body of a tab: a scroll area that fills the panel under its header line. A message takes the area's place and is
+   * centered in it, and the content under it cannot be reached while it shows.
+   */
+  function tabBody(...content: (Node | false)[]) {
+    const scroll = h("div", { class: "tab-scroll" }, ...content);
+    const message = h("p", { class: "tab-empty", "aria-hidden": "true" });
+    const root = h("div", { class: "tab-body" }, scroll, message);
+    return {
+      root,
+      scroll,
+      /** Shows `text` in place of the content. An empty text brings the content back. */
+      say(text: string, warning = false): void {
+        const showing = text !== "";
+        if (showing) fadeText(message, text);
+        message.toggleAttribute("data-warning", warning);
+        root.toggleAttribute("data-empty", showing);
+        scroll.inert = showing;
+        setAttribute(message, "aria-hidden", String(!showing));
+        message.setAttribute("role", showing ? "status" : "presentation");
+      },
+    };
+  }
+
+  /** The header line of a tab and the area under it. */
+  function tabColumn(body: ReturnType<typeof tabBody>, head?: HTMLElement): HTMLElement {
+    return h("div", { class: "tab-column" }, ...(head ? [head] : []), body.root);
+  }
+
+  /** Fields that hold typed input. They are emptied when the user leaves the view. */
+  const searches = new Set<() => boolean>();
+
+  /** A search field for the header line of a tab. `onChange` runs as the user types and when the field is cleared. */
+  function searchField(label: Message, onChange: () => void) {
+    const input = h("input", { class: "field", type: "text", autocomplete: "off", spellcheck: "false" });
+    const clear = iconButton(t("clearSearch"), "x");
+    clear.root.hidden = true;
+    const root = h("div", { class: "tab-search" }, icon("search"), input, clear.root);
+    const change = (): void => {
+      clear.root.hidden = input.value === "";
+      onChange();
+    };
+    input.addEventListener("input", change);
+    input.addEventListener("keydown", event => {
+      if (event.key === "Escape" && input.value !== "") {
+        event.stopPropagation();
+        input.value = "";
+        change();
+      }
+    });
+    clear.button.addEventListener("click", () => {
+      input.value = "";
+      change();
+      input.focus();
+    });
+    bind(input, label, "placeholder");
+    bind(input, label, "aria-label");
+    labelled.push(() => {
+      setTip(clear.root, t("clearSearch"));
+      setAttribute(clear.button, "aria-label", t("clearSearch"));
+    });
+    searches.add(() => {
+      if (input.value === "") return false;
+      input.value = "";
+      clear.root.hidden = true;
+      return true;
+    });
+    return { root, query: (): string => input.value.trim().toLocaleLowerCase() };
+  }
+
   type TabSpec = { id: string; title: Message; panel: HTMLElement };
 
   /**
    * The tabs of a device: a bar that looks like the app's segmented choices, and one visible panel under it.
-   * A change of tab fades the panels over each other while the height moves, and the choice is kept for the device.
+   * Every panel has the same height, so a change of tab only fades the panels over each other. The choice is kept for the device.
    * The panels keep their elements, so a row inside a hidden panel keeps updating.
    */
   function tabset(key: string, label: string, specs: readonly TabSpec[], summaries: boolean, onSelect: (id: string) => void) {
@@ -438,19 +514,16 @@ export function mountDevices(host: Host) {
       bar.dataset.selection = id;
     };
 
-    /** Shows `to` and hides `from`. The panels crossfade while the height of the stack moves from one to the other. */
+    /** Shows `to` and hides `from`. The panels have one height, so they only fade over each other. */
     const swap = (from: HTMLElement, to: HTMLElement): void => {
       const mine = ++token;
-      const before = container.offsetHeight;
-      const animate = !reducedMotion.matches && typeof container.animate === "function" && container.isConnected
-        && before > 0 && !container.closest("[hidden]");
+      const animate = !reducedMotion.matches && typeof to.animate === "function" && container.isConnected
+        && container.offsetHeight > 0 && !container.closest("[hidden]");
       for (const panel of entries.map(entry => entry.spec.panel)) {
         for (const animation of panel.getAnimations()) animation.cancel();
         panel.classList.remove("tab-leaving");
         if (panel !== from && panel !== to) panel.hidden = true;
       }
-      for (const animation of container.getAnimations()) animation.cancel();
-      container.removeAttribute("data-swapping");
       if (!animate) {
         from.hidden = true;
         to.hidden = false;
@@ -458,22 +531,18 @@ export function mountDevices(host: Host) {
       }
       from.classList.add("tab-leaving");
       to.hidden = false;
-      const after = container.offsetHeight;
-      container.setAttribute("data-swapping", "");
       const easing = "cubic-bezier(.22, .7, .36, 1)";
-      const height = container.animate([{ height: `${before}px` }, { height: `${after}px` }], { duration: tabHeightMs, easing });
       const out = from.animate([{ opacity: 1 }, { opacity: 0 }], { duration: tabOutMs, easing: "ease-in", fill: "forwards" });
       to.animate([{ opacity: 0 }, { opacity: 1 }], { duration: tabInMs, delay: tabOutMs / 2, easing, fill: "backwards" });
       const end = (): void => {
         if (mine !== token) return;
         from.hidden = true;
         from.classList.remove("tab-leaving");
-        container.removeAttribute("data-swapping");
         out.cancel();
       };
       // A timer also ends it, because a hidden window can pause animations.
-      void Promise.all([height.finished, out.finished]).then(end, end);
-      window.setTimeout(end, tabHeightMs + 120);
+      void out.finished.then(end, end);
+      window.setTimeout(end, tabOutMs + tabInMs);
     };
 
     const select = (id: string, focus = false): void => {
@@ -507,10 +576,11 @@ export function mountDevices(host: Host) {
     return {
       root: h("div", { class: "device-tabs" }, bar, container),
       selected: () => current,
-      /** The small text after the name of a tab. An empty text hides it. */
-      summary(id: string, text: string): void {
+      /** The small badge after the name of a tab. An empty text hides it. `dot` adds a dot before the text, for a state that is on. */
+      summary(id: string, text: string, dot = false): void {
         const entry = entries.find(item => item.spec.id === id);
         if (!entry) return;
+        entry.summary.toggleAttribute("data-dot", dot);
         fadeText(entry.summary, text);
       },
     };
@@ -572,6 +642,11 @@ export function mountDevices(host: Host) {
         }
       },
     };
+  }
+
+  /** The actions whose name has `query` in it. The query is already lowercase. */
+  function filterActions(actions: readonly SavedAction[], query: string): SavedAction[] {
+    return query === "" ? [...actions] : actions.filter(action => action.name.toLocaleLowerCase().includes(query));
   }
 
   /** `2 actions · next 02:00`, `1 action`, or `No actions`. */
@@ -726,6 +801,9 @@ export function mountDevices(host: Host) {
     confirming = undefined;
     try {
       const { removeOnDevice } = await desktop.forgetDevice(device.id);
+      const { [device.id]: _forgotten, ...rest } = recentApps;
+      recentApps = rest;
+      persist();
       // This device cannot take its own key out of the other one, so the user has to do it there.
       if (removeOnDevice) host.notify("forgetRemoveThere");
     } catch (error) {
@@ -896,7 +974,6 @@ export function mountDevices(host: Host) {
     pairing.button.addEventListener("click", () => openPairWindow(pairing.button));
 
     const socketNote = note("");
-    const controllersEmpty = note(t("noControllers"));
     const controllerRows = h("div", { class: "device-rows" });
     const controllerList = list<Controller>(
       controllerRows, controller => JSON.stringify([host.language(), controller.name, controller.kind]), controllerRow);
@@ -904,16 +981,18 @@ export function mountDevices(host: Host) {
     const warningList = list<WarningItem>(warningRows, warning => JSON.stringify([host.language(), warning.name]), warningRow);
 
     const actionsSummary = h("span", { class: "section-summary" });
+    const actionSearch = searchField("searchActions", () => render());
     const addAction = iconButton(t("addAction"), "plus", "outlined");
     addAction.button.setAttribute("aria-haspopup", "dialog");
     addAction.button.addEventListener("click", () => windows.openForm(undefined, addAction.button));
-    const actionsEmpty = note(t("noActions"));
-    const actionsNote = note("", true);
     const actionRows = h("div", { class: "device-rows" });
+    const actionsBody = tabBody(actionRows);
     const actionList = list<SavedAction>(actionRows, actionSignature, actionRow(undefined));
 
     const logCount = h("span", { class: "setting-note" });
-    const logList = h("ol", { class: "proxy-log device-log-list", "data-mode": "log", tabindex: "0" });
+    const logList = h("ol", { class: "proxy-log device-log-list", "data-mode": "log" });
+    const logBody = tabBody(logList, bind(h("p", { class: "setting-note" }), "remoteLogNote"));
+    const controllersBody = tabBody(controllerRows);
     let logDrawn = -1;
 
     const cutLabel = h("span", { class: "setting-label" }, t("cutAll"));
@@ -936,23 +1015,23 @@ export function mountDevices(host: Host) {
     });
 
     // The warnings and the note of the socket are alerts, so they stay above the tabs whichever tab shows.
+    const accessBody = tabBody(access.root, pairingRow.root, cut);
     const tabs = tabset("this", t("tabListThis"), [
-      { id: "access", title: "tabAccess", panel: h("div", {}, access.root, pairingRow.root, cut) },
-      { id: "who", title: "tabWho", panel: h("div", {}, controllerRows, controllersEmpty.root) },
+      { id: "access", title: "tabAccess", panel: tabColumn(accessBody) },
+      { id: "who", title: "tabWho", panel: tabColumn(controllersBody) },
       {
         id: "actions", title: "sectionActions",
-        panel: h("div", {}, h("div", { class: "tab-head" }, actionsSummary, addAction.root), actionRows, actionsEmpty.root, actionsNote.root),
+        panel: tabColumn(actionsBody, h("div", { class: "tab-head" }, actionSearch.root, actionsSummary, addAction.root)),
       },
-      {
-        id: "log", title: "deviceLog",
-        panel: h("div", {}, h("div", { class: "tab-head" }, logCount), logList,
-          bind(h("p", { class: "setting-note" }), "remoteLogNote")),
-      },
+      { id: "log", title: "deviceLog", panel: tabColumn(logBody, h("div", { class: "tab-head" }, logCount)) },
     ], false, () => {
       watchActions(true);
       watchLog(true);
     });
-    logList.setAttribute("aria-label", t("deviceLog"));
+    // The log has nothing to focus, so its area takes the focus to scroll with the keys.
+    logBody.scroll.tabIndex = 0;
+    logBody.scroll.setAttribute("role", "region");
+    logBody.scroll.setAttribute("aria-label", t("deviceLog"));
     const root = h("div", { class: "device-body" }, warningRows, socketNote.root, tabs.root);
 
     return {
@@ -999,7 +1078,7 @@ export function mountDevices(host: Host) {
         addAction.disable(localActionsError ? t("actionsUnavailable") : undefined, t("addAction"));
         if (logDrawn !== logVersion) {
           logDrawn = logVersion;
-          renderLog(logList, logCount);
+          renderLog(logList, logCount, logBody);
         }
         if (confirming && confirming !== "cut" && confirming !== "passwords" && !confirming.startsWith("forget:") &&
           !(confirming.startsWith("action:") && localActions.some(({ id }) => `action:${id}` === confirming)) &&
@@ -1008,17 +1087,17 @@ export function mountDevices(host: Host) {
         warningList.sync(data.warnings.map(warning => ({ ...warning, id: String(warning.id) })));
         if (data.controllers.length === 0 && confirming === "cut") confirming = undefined;
         controllerList.sync(data.controllers);
-        controllersEmpty.show(data.controllers.length === 0);
+        controllersBody.say(data.controllers.length === 0 ? t("noControllers") : "");
         const reason = data.socket.error;
         socketNote.set(fill(t("socketUnavailable"), {
           reason: reason && Object.prototype.hasOwnProperty.call(messages.en, reason) ? t(reason as Message) : reason ?? "",
         }));
         socketNote.show(!data.socket.listening);
-        actionList.sync(localActions);
+        const matching = filterActions(localActions, actionSearch.query());
+        actionList.sync(localActionsError ? [] : matching);
         fadeText(actionsSummary, localActionsError ? "" : actionCount(localActions));
-        actionsEmpty.show(localActions.length === 0 && !localActionsError);
-        if (localActionsError) actionsNote.set(errorText(localActionsError));
-        actionsNote.show(localActionsError !== undefined);
+        actionsBody.say(localActionsError ? errorText(localActionsError)
+          : localActions.length === 0 ? t("noActions") : matching.length === 0 ? t("actionsNoMatch") : "", localActionsError !== undefined);
         const nobody = data.controllers.length === 0;
         const asking = confirming === "cut";
         if (cutButton.disabled !== nobody) cutButton.disabled = nobody;
@@ -1073,7 +1152,7 @@ export function mountDevices(host: Host) {
   /** The entries that the list showed already, so only a new one enters with a motion. `undefined` before the first drawing. */
   let logSeen: Set<string> | undefined;
   let logLoaded = false;
-  function renderLog(list: HTMLElement, count: HTMLElement): void {
+  function renderLog(list: HTMLElement, count: HTMLElement, body: { say(text: string): void }): void {
     // Until the first read there is nothing to say, not even that the log is empty.
     if (!logLoaded) {
       setText(count, "");
@@ -1090,7 +1169,8 @@ export function mountDevices(host: Host) {
       return item;
     });
     logSeen = keys;
-    list.replaceChildren(...(items.length ? items : [h("li", { class: "setting-note" }, t("remoteLogEmpty"))]));
+    list.replaceChildren(...items);
+    body.say(items.length ? "" : t("remoteLogEmpty"));
   }
 
   /** Reads the log while its tab shows. A failed read keeps the entries that were shown. */
@@ -1774,6 +1854,8 @@ export function mountDevices(host: Host) {
 
   /** Leaving the view drops what waits for a second click, closes the windows, and drops what was typed in them. */
   function reset(): void {
+    const cleared = [...searches].map(clear => clear()).includes(true);
+    const wasConfirming = confirming !== undefined;
     closeApps(false);
     closeGuide(false);
     addOverlay.close(false);
@@ -1787,10 +1869,8 @@ export function mountDevices(host: Host) {
     watchSessions();
     watchLog();
     watchReach();
-    if (confirming) {
-      confirming = undefined;
-      render();
-    }
+    confirming = undefined;
+    if (cleared || wasConfirming) render();
   }
 
   /** The tools of a device as the Devices view lists them, from the statuses that it sent. Tools it cannot run are left out. */
@@ -2213,6 +2293,14 @@ export function mountDevices(host: Host) {
     open.set(`${t("open")} ${app.name}`, busy ? t("appsOpening") : t("open"), busy);
   }
 
+  /** Notes the time an application was opened from here, so the tab lists the ones used last. Only the newest few are kept. */
+  function rememberApp(deviceId: string, bundleId: string): void {
+    const kept = Object.entries({ ...recentApps[deviceId], [bundleId]: Date.now() })
+      .sort(([, a], [, b]) => b - a).slice(0, recentLimit);
+    recentApps = { ...recentApps, [deviceId]: Object.fromEntries(kept) };
+    persist();
+  }
+
   /** Asks the device to open an application, shows progress on its button, and reads the list again a moment later. */
   async function openApp(deviceId: string, app: RemoteApp): Promise<void> {
     const state = appsOf(deviceId);
@@ -2221,6 +2309,7 @@ export function mountDevices(host: Host) {
     render();
     try {
       await desktop.remoteOpenApplication(deviceId, app.bundleId);
+      rememberApp(deviceId, app.bundleId);
       await new Promise(resolve => window.setTimeout(resolve, openSettle));
     } catch (error) {
       if (error === "notPermitted") {
@@ -2252,6 +2341,20 @@ export function mountDevices(host: Host) {
         },
       };
     };
+  }
+
+  /** The rows of the Applications tab: the pinned applications, then the ones used or opened last, up to the row limit. */
+  function shownApps(device: RemoteDevice, listed: readonly RemoteApp[]): AppItem[] {
+    const used = recentApps[device.id] ?? {};
+    const byId = new Map(listed.map(app => [app.bundleId, app]));
+    const pinned = device.apps.pinned.flatMap(id => byId.has(id) ? [byId.get(id)!] : []);
+    const taken = new Set(pinned.map(app => app.bundleId));
+    // Opened from here comes first, newest first. The apps that the device says are open follow in its own order.
+    const recent = listed.filter(app => !taken.has(app.bundleId) && used[app.bundleId] !== undefined)
+      .sort((a, b) => used[b.bundleId] - used[a.bundleId]);
+    for (const app of recent) taken.add(app.bundleId);
+    const open = listed.filter(app => !taken.has(app.bundleId) && app.open);
+    return [...pinned, ...recent, ...open].slice(0, appRows).map(app => ({ ...app, id: app.bundleId }));
   }
 
   function moreApps(onClick: (button: HTMLElement) => void) {
@@ -2390,17 +2493,18 @@ export function mountDevices(host: Host) {
   function remoteBody(device: RemoteDevice) {
     const key = `r:${device.id}`;
     const toolRows = h("div", {});
-    const toolsNotice = note("", true);
     const toolList = list<RemoteTool>(toolRows, tool => JSON.stringify([host.language(), tool.id, device.name]),
       tool => toolRow(device, tool));
     const appHost = h("div", {});
     const appList = list<AppItem>(appHost, app => JSON.stringify([host.language(), app.name, app.version]), appRow(device));
     let latest = device;
     const more = moreApps(button => openApps(latest, button));
-    const appsNotice = note("");
     const actionHost = h("div", {});
     const actionList = list<SavedAction>(actionHost, actionSignature, actionRow(device));
-    const actionsNotice = note("");
+    const actionSearch = searchField("searchActions", () => render());
+    const toolsBody = tabBody(toolRows);
+    const appsBody = tabBody(appHost, more.root);
+    const actionsBody = tabBody(actionHost);
 
     const shellNote = h("span", { class: "setting-note" });
     const terminal = iconButton(t("openTerminalDefault"), "terminal", "outlined");
@@ -2419,16 +2523,18 @@ export function mountDevices(host: Host) {
         copiedTimer = window.setTimeout(() => copied.removeAttribute("data-show"), copiedFor);
       }).catch(error => host.fail(error));
     });
-    const shellRow = h("div", { class: "device-row" },
+    // Each way into the other device is one row. A new way is another row in this list.
+    const terminalRow = h("div", { class: "device-row" },
       h("span", { class: "action-icon" }, icon("square-terminal")),
-      h("div", { class: "device-row-text" }, h("strong", {}, t("openTerminal")), shellNote),
+      h("div", { class: "device-row-text" }, h("strong", {}, t("connectTerminal")), shellNote),
       h("div", { class: "device-end shell-buttons" }, copied, terminal.root, copy.root));
+    const connectBody = tabBody(h("div", { class: "device-rows" }, terminalRow));
 
     const tabs = tabset(key, fill(t("tabListOther"), { name: device.name }), [
-      { id: "tools", title: "tools", panel: h("div", {}, toolRows, toolsNotice.root) },
-      { id: "apps", title: "sectionApplications", panel: h("div", {}, appHost, more.root, appsNotice.root) },
-      { id: "actions", title: "sectionActions", panel: h("div", {}, actionHost, actionsNotice.root) },
-      { id: "shell", title: "sectionShell", panel: h("div", {}, shellRow) },
+      { id: "tools", title: "tools", panel: tabColumn(toolsBody) },
+      { id: "apps", title: "sectionApplications", panel: tabColumn(appsBody) },
+      { id: "actions", title: "sectionActions", panel: tabColumn(actionsBody, h("div", { class: "tab-head" }, actionSearch.root)) },
+      { id: "connect", title: "tabConnect", panel: tabColumn(connectBody) },
     ], true, () => {});
 
     const offline = h("p", { class: "setting-note device-offline" }, t("deviceOfflineNote"));
@@ -2445,41 +2551,39 @@ export function mountDevices(host: Host) {
         const toolsError = found?.error
           ? (isLinkError(found.error) ? t("remoteLost") : fill(t(found.error as "localOnly"), { name: current.name }))
           : "";
-        if (toolsError) toolsNotice.set(toolsError);
-        toolsNotice.show(toolsError !== "");
+        toolsBody.say(toolsError || (known.length === 0 ? t("toolsNone") : ""), toolsError !== "");
         tabs.summary("tools", toolsError ? "" : fill(t("tabToolsSummary"), { on: known.filter(tool => tool.running).length, total: known.length }));
 
         latest = current;
         const state = appsOf(current.id);
         const listed = state.apps ?? [];
         const denied = state.permitted === false;
-        const shown: AppItem[] = denied ? [] : current.apps.pinned.slice(0, appRows).flatMap(id => {
-          const app = listed.find(item => item.bundleId === id);
-          return app ? [{ ...app, id: app.bundleId }] : [];
-        });
+        const shown = denied ? [] : shownApps(current, listed);
         appList.sync(shown);
         more.update(denied ? 0 : Math.max(0, listed.length - shown.length));
         // The device says whether it allowed applications. Until it answers, the tab says that it is reading.
         let message = "";
         if (denied) message = fill(t("appsNotAllowed"), { name: current.name });
         else if (!state.apps) message = state.error ? t(isLinkError(state.error) ? "remoteLost" : "appsUnavailable") : t("appsLoading");
-        if (message) appsNotice.set(message);
-        appsNotice.show(message !== "");
-        tabs.summary("apps", denied ? t("off")
-          : state.apps ? fill(t("deviceAppsSummary"), { count: listed.filter(app => app.open).length }) : "");
+        if (!message && listed.length === 0) message = t("appsNone");
+        appsBody.say(message);
+        tabs.summary("apps", denied ? t("off") : state.apps ? String(listed.filter(app => app.open).length) : "");
 
         const actionState = actionsOf(current.id);
         const actionsDenied = actionState.permitted === false;
         const listedActions = actionsDenied ? [] : actionState.actions ?? [];
-        actionList.sync(listedActions);
+        const matching = filterActions(listedActions, actionSearch.query());
+        actionList.sync(matching);
         // The device says whether it allowed actions. Until it answers, the tab says that it is reading.
         let actionsMessage = "";
         if (actionsDenied) actionsMessage = fill(t("actionsNotAllowed"), { name: current.name });
         else if (!actionState.actions) {
           actionsMessage = actionState.error ? t(isLinkError(actionState.error) ? "remoteLost" : "actionsUnavailable") : t("actionsLoading");
         }
-        if (actionsMessage) actionsNotice.set(actionsMessage);
-        actionsNotice.show(actionsMessage !== "");
+        if (!actionsMessage && actionState.actions) {
+          actionsMessage = listedActions.length === 0 ? t("remoteActionsNone") : matching.length === 0 ? t("actionsNoMatch") : "";
+        }
+        actionsBody.say(actionsMessage);
         tabs.summary("actions", actionsDenied ? t("off") : !actionState.actions ? "" : String(listedActions.length));
 
         // The device says whether its shell is on. Only the person at that device turns it on.
@@ -2487,11 +2591,11 @@ export function mountDevices(host: Host) {
         const on = grant !== null && (grant.until === "untilOff" || grant.until > seconds());
         const until = !on ? t("off") : grant.until === "untilOff" ? t("deviceShellOnUntilOff")
           : fill(t("deviceShellOn"), { time: formatClock(grant.until, host.language()) });
-        tabs.summary("shell", !on ? t("off") : grant.until === "untilOff" ? t("tabShellUntilOff")
-          : fill(t("tabShellUntil"), { time: formatClock(grant.until, host.language()) }));
-        fadeText(shellNote, on ? until : t("shellOnlyThere"));
-        terminal.disable(on ? undefined : t("shellOnlyThere"), t("openTerminalTip"));
-        copy.disable(on ? undefined : t("shellOnlyThere"), t("copyShellCommand"));
+        // The tab shows a dot while a way in is on, and nothing while all are off.
+        tabs.summary("connect", on ? t("tabOn") : "", on);
+        fadeText(shellNote, on ? until : t("connectOff"));
+        terminal.disable(on ? undefined : t("connectOff"), t("openTerminalTip"));
+        copy.disable(on ? undefined : t("connectOff"), t("copyShellCommand"));
       },
     };
   }

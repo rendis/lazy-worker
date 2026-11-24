@@ -99,7 +99,7 @@ Devices lets you control one device from another. It is not a tool, so it has no
 
 Open **Devices** in the sidebar. **This device** comes first. The devices you control from here follow it. One device is open at a time. Select a device to open it.
 
-Each open device has tabs. **This device** has **Access** (remote access, pairing, and **Cut all access**), **Who controls it**, **Actions**, and **Log**. A device that you control has **Tools**, **Applications**, **Actions**, and **Shell**, each with a short state after its name, for example **1 of 3** tools on or **Off**. Use the arrow keys, **Home**, and **End** to move between tabs. Each device remembers its last tab.
+Each open device has tabs on one line. **This device** has **Access** (remote access, pairing, and **Cut all access**), **Who controls it**, **Actions**, and **Log**. A device that you control has **Tools**, **Applications**, **Actions**, and **Connect**. A small badge after the name of a tab shows its state, for example **1/3** tools on, the number of applications that are open, the number of actions, or a green dot when a way into the device is on. Every tab has the same height. A tab with more rows than fit scrolls inside. **Applications** lists your pinned applications first, then the ones you opened last from here, and a count that opens the rest. **Actions** has a search field. **Connect** lists the ways into the device. Use the arrow keys, **Home**, and **End** to move between tabs. Each device remembers its last tab.
 
 Each device you control shows if it is online. Lazy Worker checks every few seconds while Devices is open, and when you come back to the window. Select **Check this device now** (the circular arrow) to check at once and read its state again.
 
@@ -179,7 +179,7 @@ A full shell lets another device run any command on this device, as your user. O
 2. Read the warning. Choose **1 hour**, **2 hours**, **Custom** (1 minute to 24 hours), or **Until I turn it off**.
 3. Select **Allow shell**.
 
-The other device then shows **Open terminal**. It opens the shell in Terminal.
+The other device then shows **Terminal** in its **Connect** tab, with buttons to open it in Terminal or copy the command.
 
 The warning says that, while the shell is on, the other device can leave itself permanent access, for example by adding a key. Turning the shell off does not undo that. Lazy Worker watches `~/.ssh/authorized_keys` while a shell is open. It tells you when that file changes. Check it then.
 

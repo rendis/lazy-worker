@@ -21,7 +21,8 @@ const FALLBACK_SHELL: &str = "/bin/zsh";
 /// How long a command that is told to end has before it is killed.
 const KILL_AFTER: Duration = Duration::from_secs(3);
 /// How long the end of the output is awaited after the command ended, when a process that it started still holds the pipe.
-const DRAIN: Duration = Duration::from_millis(300);
+/// The longest wait for the last output after the command ended. A normal run is done long before.
+const DRAIN: Duration = Duration::from_secs(2);
 const POLL: Duration = Duration::from_millis(20);
 
 /// How a command is started. Tests replace it so they need no login shell.

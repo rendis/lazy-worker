@@ -160,7 +160,6 @@
 
 /* The log of remote access names a device in the second column, so it needs more room than a proxy address.
    It scrolls inside its tab, so the tab does not grow with the log. */
-.device-log-list { max-height: min(320px, 45vh); }
 .device-log-list .proxy-log-entry { grid-template-columns: 8em 13em minmax(0, 1fr) auto; }
 
 /* Remote access: the state in words, and the one button that fixes it. */
@@ -430,22 +429,53 @@ select.field { padding-inline: 4px 2px; }
 }
 .copy-confirm[data-show] { opacity: 1; transition-duration: .14s; }
 
-/* The tabs of a device. The bar is the app's segmented choice, and the rows of a tab start at the bar's own edge. */
-.device-tabs { padding-block: 10px 0; }
+/* The tabs of a device. The bar is the app's segmented choice on one line. Every panel has the same height, so a change of tab
+   only fades. The height holds a header line and five rows of 53px, and a panel that has more scrolls inside. */
+.device-tabs { --tab-panel-height: 316px; padding-block: 10px 0; }
 .tab-segments { display: grid; width: 100%; margin-block-end: 4px; --segment-count: 2; }
-.tab-segments button { flex-direction: column; gap: 1px; min-height: 34px; padding-inline: 8px; }
-.tab-segments[data-summaries] button { min-height: 46px; }
-.tab-title, .tab-summary { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-.tab-summary { min-height: 1.25em; font-size: 11.5px; font-weight: 620; font-variant-numeric: tabular-nums; opacity: .8; }
-.tab-segments:not([data-summaries]) .tab-summary { display: none; }
+.tab-segments button { min-height: 34px; padding-inline: 8px; }
+.tab-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tab-summary {
+  flex: none;
+  min-width: 1.6em;
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 640;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+  opacity: .8;
+}
+.tab-summary:empty:not([data-dot]), .tab-segments:not([data-summaries]) .tab-summary { display: none; }
+/* A dot says that a way in is on. Its word stays for assistive technology only. */
+.tab-summary[data-dot] { min-width: 0; padding: 0; border: 0; font-size: 0; opacity: 1; }
+.tab-summary[data-dot]::before { content: ""; display: block; width: 7px; height: 7px; border-radius: 50%; background: var(--online); }
+.tab-segments button[aria-selected="true"] .tab-summary[data-dot]::before { box-shadow: 0 0 0 1.5px var(--choice-ink); }
 .tab-segments button[aria-selected="false"]:hover:enabled { color: var(--text); }
 .tab-segments button[aria-selected="true"] { color: var(--choice-ink); }
 .tab-segments button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.tab-panels { position: relative; }
-.tab-panels[data-swapping] { overflow: hidden; }
+.tab-panels { position: relative; height: var(--tab-panel-height); }
 .tab-panel[hidden] { display: none; }
-/* The panel that leaves leaves the flow, so the one that enters sets the new height. */
-.tab-panel.tab-leaving { position: absolute; inset: 0 0 auto; pointer-events: none; }
-.tab-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 46px; padding: 0 2px; border-bottom: 1px solid var(--hairline); }
-.tab-head .section-summary { margin-inline-start: 0; }
-@media (prefers-reduced-motion: reduce) { .icon-button[aria-busy="true"] { opacity: .6; } }
+.tab-column { display: flex; flex-direction: column; height: 100%; }
+/* The panel that leaves lies over the one that enters, and both have the same box. */
+.tab-panel.tab-leaving { position: absolute; inset: 0; pointer-events: none; }
+.tab-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 46px; padding: 0 2px; border-bottom: 1px solid var(--hairline); }
+.tab-head .section-summary { margin-inline-start: 0; white-space: nowrap; }
+.tab-search { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; }
+.tab-search > .lucide { flex: none; width: 16px; height: 16px; color: var(--secondary); }
+.tab-search .field { flex: 1; min-width: 0; }
+.tab-body { position: relative; flex: 1; min-height: 0; }
+/* The scroll bar keeps its place, so the rows do not shift when it appears. */
+.tab-scroll { position: absolute; inset: 0; overflow-y: auto; scrollbar-gutter: stable; transition: opacity var(--selection-duration) ease; }
+.tab-scroll:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.tab-body[data-empty] > .tab-scroll { opacity: 0; }
+.tab-empty {
+  position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: 0 16px;
+  color: var(--secondary); font-size: 13px; line-height: 1.4; text-align: center; pointer-events: none;
+  opacity: 0; transition: opacity var(--selection-duration) ease;
+}
+.tab-empty[data-warning] { color: var(--pending-color); }
+.tab-body[data-empty] > .tab-empty { opacity: 1; }
+.device-log-list { overflow: visible; padding: 0; border: 0; }
+@media (prefers-reduced-motion: reduce) { .icon-button[aria-busy="true"] { opacity: .6; } .tab-scroll, .tab-empty { transition: none; } }
