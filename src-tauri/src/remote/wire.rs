@@ -4,8 +4,11 @@
 
 use std::io::{self, BufRead};
 
-/// The longest request line that the helper or the app accepts.
+/// The longest line of a hello or of a pairing message.
 pub const MAX_REQUEST_LINE: usize = 64 * 1024;
+/// The longest request line of a paired device. A chunk of a file is 512 KiB, which is a little
+/// under 700 KB as base64, so it fits.
+pub const MAX_DISPATCH_LINE: usize = 1024 * 1024;
 /// The longest response line that the helper relays. A log of 1000 entries stays well under it.
 pub const MAX_RESPONSE_LINE: usize = 1024 * 1024;
 

@@ -5,7 +5,10 @@ import {
   type SavedAction, type ScreenSharing, type ShellState, type Statuses,
 } from "./desktop";
 import { mountActionWindows, type Target } from "./device-actions";
+import { mountFilesExplorer } from "./device-explorer";
+import { mountFilesGrantWindow } from "./device-files";
 import { mountShellWindow } from "./device-shell";
+import { formatBytes, type FilesGrant, type FileShare } from "./files";
 import guideImage13 from "./assets/guide/remote-login-13.png";
 import { messages, type Language, type Message } from "./messages";
 import { tools } from "./modules";
@@ -53,6 +56,7 @@ const permissions: { id: ControllerPermission; icon: string; label: Message; hin
   { id: "control", icon: "layout-grid", label: "permControl", hint: "permControlHint" },
   { id: "applications", icon: "app-window", label: "permApplications", hint: "permApplicationsHint" },
   { id: "actions", icon: "play", label: "permActions", hint: "permActionsHint" },
+  { id: "files", icon: "folder", label: "permFiles", hint: "permFilesHint" },
   { id: "shell", icon: "terminal", label: "permShell" },
 ];
 /** The outcomes that the log shows in words. Any other one shows as it is. */
@@ -104,6 +108,8 @@ type WarningItem = Omit<KeysWarning, "id"> & { id: string };
 /** What the last read of a device found. The session is read less often than the tools, because it rarely changes. */
 type LiveDevice = {
   tools?: RemoteTool[]; error?: string; permissions?: Session["permissions"]; shell?: ShellState;
+  /** What the device shares with this one, and the code that ended the last read of it. */
+  files?: FileShare; filesError?: string;
   /** What the last read of its Screen Sharing found, and the code that ended it when it failed. */
   screen?: ScreenSharing; screenError?: string;
 };
@@ -218,6 +224,7 @@ export function mountDevices(host: Host) {
   let toolTicker: number | undefined;
   const readingSessions = new Set<string>();
   const readingScreens = new Set<string>();
+  const readingFiles = new Set<string>();
   let sessionTicker: number | undefined;
   const appsStates = new Map<string, AppsState>();
   const readingApps = new Set<string>();
@@ -328,6 +335,21 @@ export function mountDevices(host: Host) {
     refreshIcons: () => host.refreshIcons(),
     fail: error => host.fail(error),
     changed: () => void refresh(),
+  });
+
+  const fileGrants = mountFilesGrantWindow({
+    translate: key => host.translate(key),
+    language: () => host.language(),
+    refreshIcons: () => host.refreshIcons(),
+    fail: error => host.fail(error),
+    changed: () => void refresh(),
+  });
+
+  const explorer = mountFilesExplorer({
+    translate: key => host.translate(key),
+    language: () => host.language(),
+    refreshIcons: () => host.refreshIcons(),
+    fail: error => host.fail(error),
   });
 
   /** An icon-only button with its name as a tip. The wrapper carries the tip, so a disabled button can still give a reason. */
@@ -840,6 +862,23 @@ export function mountDevices(host: Host) {
     await refresh();
   }
 
+  /** Stops sharing files with a device now. Its transfers in progress end. */
+  async function revokeFiles(controller: Controller): Promise<void> {
+    confirming = undefined;
+    try {
+      await desktop.revokeFiles(controller.id);
+    } catch (error) {
+      host.fail(error);
+    }
+    await refresh();
+  }
+
+  /** `until 17:00` for files that have an end, and `until off` for those that do not. */
+  function filesChipText(files: FilesGrant): string {
+    return files.until === "untilOff" ? t("permFilesUntilOff")
+      : fill(t("permFilesUntil"), { time: formatClock(files.until, host.language()) });
+  }
+
   /** `until 17:00` for a shell that has an end, and `until off` for one that does not. */
   function shellChipText(shell: NonNullable<ShellState>): string {
     return shell.until === "untilOff" ? t("permShellUntilOff")
@@ -855,23 +894,32 @@ export function mountDevices(host: Host) {
       shellChip?.focus();
     });
     let shellChip: HTMLButtonElement | undefined;
+    const filesConfirm = confirmButtons(t("filesTurnOff"), () => { void revokeFiles(current); }, () => {
+      confirming = undefined;
+      render();
+      filesChip?.focus();
+    });
+    let filesChip: HTMLButtonElement | undefined;
     const chips = permissions.map(permission => {
       const label = h("span", {}, t(permission.label));
       const chip = h("button", {
         type: "button", class: "permission-chip", "aria-pressed": "false", "aria-label": t(permission.label),
       }, icon(permission.icon), label);
       if (permission.id === "shell") shellChip = chip;
+      if (permission.id === "files") filesChip = chip;
       chip.addEventListener("click", () => {
         const on = chip.getAttribute("aria-pressed") === "true";
-        if (permission.id !== "shell") {
+        if (permission.id !== "shell" && permission.id !== "files") {
           void setPermission(current, permission.id, !on);
         } else if (on) {
-          // Turning the shell off asks first, in the row.
-          confirming = `shell:${current.id}`;
+          // Turning the shell or the files off asks first, in the row.
+          confirming = `${permission.id}:${current.id}`;
           render();
-          shellConfirm.cancel.button.focus();
-        } else {
+          (permission.id === "shell" ? shellConfirm : filesConfirm).cancel.button.focus();
+        } else if (permission.id === "shell") {
           shells.open({ id: current.id, name: current.name }, chip);
+        } else {
+          fileGrants.open({ id: current.id, name: current.name }, chip);
         }
       });
       return { permission, chip, label };
@@ -889,6 +937,8 @@ export function mountDevices(host: Host) {
       h("span", { class: "setting-note" }, t("removeConfirm")), accept.root, cancel.root);
     const offConfirm = h("div", { class: "device-confirm", hidden: true },
       h("span", { class: "setting-note" }, t("shellOffConfirm")), shellConfirm.accept.root, shellConfirm.cancel.root);
+    const filesOffConfirm = h("div", { class: "device-confirm", hidden: true },
+      h("span", { class: "setting-note" }, t("filesOffConfirm")), filesConfirm.accept.root, filesConfirm.cancel.root);
     remove.button.addEventListener("click", () => {
       confirming = current.id;
       render();
@@ -897,7 +947,7 @@ export function mountDevices(host: Host) {
     const root = h("div", { class: "device-row" },
       kindIcon(controller.kind),
       h("div", { class: "device-row-text" }, h("strong", {}, controller.name), detail),
-      chipBox, remove.root, confirm, offConfirm);
+      chipBox, remove.root, confirm, offConfirm, filesOffConfirm);
     return {
       root,
       update(next) {
@@ -911,11 +961,17 @@ export function mountDevices(host: Host) {
             fadeText(label, next.shell ? shellChipText(next.shell) : t("permShell"));
             setAttribute(chip, "aria-label", next.shell ? `${t("permShell")}. ${shellChipText(next.shell)}` : t("permShell"));
           }
+          if (permission.id === "files") {
+            fadeText(label, next.files ? filesChipText(next.files) : t("permFiles"));
+            setAttribute(chip, "aria-label", next.files ? `${t("permFiles")}. ${filesChipText(next.files)}` : t("permFiles"));
+          }
         }
         const removing = confirming === next.id;
         const turningOff = confirming === `shell:${next.id}`;
+        const turningFilesOff = confirming === `files:${next.id}`;
         const normal = [chipBox, remove.root];
-        only([...normal, confirm, offConfirm], removing ? [confirm] : turningOff ? [offConfirm] : normal);
+        only([...normal, confirm, offConfirm, filesOffConfirm],
+          removing ? [confirm] : turningOff ? [offConfirm] : turningFilesOff ? [filesOffConfirm] : normal);
       },
     };
   }
@@ -1120,6 +1176,7 @@ export function mountDevices(host: Host) {
         if (confirming && confirming !== "cut" && confirming !== "passwords" && !confirming.startsWith("forget:") &&
           !(confirming.startsWith("action:") && localActions.some(({ id }) => `action:${id}` === confirming)) &&
           !(confirming.startsWith("shell:") && data.controllers.some(({ id, shell }) => `shell:${id}` === confirming && shell !== null)) &&
+          !(confirming.startsWith("files:") && data.controllers.some(({ id, files }) => `files:${id}` === confirming && files !== null)) &&
           !data.controllers.some(({ id }) => id === confirming)) confirming = undefined;
         warningList.sync(data.warnings.map(warning => ({ ...warning, id: String(warning.id) })));
         if (data.controllers.length === 0 && confirming === "cut") confirming = undefined;
@@ -1173,16 +1230,28 @@ export function mountDevices(host: Host) {
     return Object.prototype.hasOwnProperty.call(messages.en, key) ? t(key as Message) : name;
   }
 
+  /** What a file event touched: a path and a size, or for a grant its two choices in words. Text from outside, so only ever set as text. */
+  function detailText(entry: RemoteLogEntry): string {
+    if (!entry.detail) return "";
+    if (entry.request === "filesGranted") {
+      const [scope, mode] = entry.detail.split(" ");
+      return `${t(scope === "disk" ? "filesScopeDisk" : "filesScopeFolders")} · ${t(mode === "readWrite" ? "filesModeWrite" : "filesModeRead")}`;
+    }
+    return entry.size === undefined ? entry.detail : `${entry.detail} · ${formatBytes(entry.size, host.language())}`;
+  }
+
   /** Names and request names come from other devices, so they are only ever set as text. */
   function logItem(entry: RemoteLogEntry): HTMLElement {
     const event = eventText(entry.request);
+    const detail = detailText(entry);
     return h("li", { class: "proxy-log-entry", "data-outcome": entry.outcome === "ok" ? "ok" : "refused" },
       h("time", {}, formatMoment(entry.time, host.language())),
       h("span", { class: "proxy-log-target" }, entry.name ?? "—"),
       h("span", { class: "proxy-log-target" }, event,
         entry.count && entry.count > 1
           ? h("span", { class: "log-count", "aria-label": fill(t("remoteLogRepeated"), { count: entry.count }) }, `×${entry.count}`)
-          : ""),
+          : "",
+        detail !== "" && h("span", { class: "log-detail" }, detail)),
       h("span", { class: "proxy-log-outcome" }, outcomeText(entry.outcome)));
   }
 
@@ -1200,7 +1269,7 @@ export function mountDevices(host: Host) {
     const keys = new Set<string>();
     const items = logEntries.map(entry => {
       const item = logItem(entry);
-      const key = JSON.stringify([entry.time, entry.peer, entry.request, entry.name, entry.outcome, entry.count]);
+      const key = JSON.stringify([entry.time, entry.peer, entry.request, entry.name, entry.outcome, entry.count, entry.detail, entry.size]);
       keys.add(key);
       if (seen && !seen.has(key)) window.requestAnimationFrame(() => enterNode(item));
       return item;
@@ -1244,7 +1313,7 @@ export function mountDevices(host: Host) {
 
   document.addEventListener("keydown", event => {
     if (event.key !== "Escape") return;
-    if (shells.closeTop() || windows.closeTop()) return;
+    if (explorer.closeTop() || fileGrants.closeTop() || shells.closeTop() || windows.closeTop()) return;
     if (addOverlay.isOpen()) addOverlay.close();
     else if (pairOverlay.isOpen()) pairOverlay.close();
     else if (appsWindow.hasAttribute("data-open")) closeApps();
@@ -1949,6 +2018,8 @@ export function mountDevices(host: Host) {
     renderPairWindow();
     windows.retranslate();
     shells.retranslate();
+    fileGrants.retranslate();
+    explorer.retranslate();
   }
 
   /** Leaving the view drops what waits for a second click, closes the windows, and drops what was typed in them. */
@@ -1961,6 +2032,8 @@ export function mountDevices(host: Host) {
     pairOverlay.close(false);
     windows.closeAll();
     shells.closeAll();
+    fileGrants.closeAll();
+    explorer.closeAll();
     syncTicker();
     watchTools();
     watchApps();
@@ -2028,6 +2101,20 @@ export function mountDevices(host: Host) {
     render();
   }
 
+  /** Reads what a device shares with this one. Any paired device may ask. */
+  async function readFiles(id: string): Promise<void> {
+    if (readingFiles.has(id)) return;
+    readingFiles.add(id);
+    try {
+      live.set(id, { ...live.get(id), files: await desktop.remoteFileShare(id), filesError: undefined });
+    } catch (error) {
+      live.set(id, { ...live.get(id), filesError: typeof error === "string" ? error : "remoteFailed" });
+    } finally {
+      readingFiles.delete(id);
+    }
+    render();
+  }
+
   /** The devices whose row is open, whichever tab shows. Their session is what the tabs and the shell button show. */
   function watchedSessionDevices(): RemoteDevice[] {
     if (deviceList.closest("[hidden]") || !overview) return [];
@@ -2046,9 +2133,9 @@ export function mountDevices(host: Host) {
     sessionTicker ??= window.setInterval(() => {
       const current = watchedSessionDevices();
       if (current.length === 0) watchSessions();
-      else for (const device of current) void readSession(device.id).then(() => readScreen(device.id));
+      else for (const device of current) void readSession(device.id).then(() => readScreen(device.id)).then(() => readFiles(device.id));
     }, sessionPoll);
-    if (starting || now) for (const device of wanted) void readSession(device.id).then(() => readScreen(device.id));
+    if (starting || now) for (const device of wanted) void readSession(device.id).then(() => readScreen(device.id)).then(() => readFiles(device.id));
   }
 
   /** The devices whose tools the tab bar shows now: the view and the device row are open. Every tab says something in its title. */
@@ -2656,7 +2743,14 @@ export function mountDevices(host: Host) {
       h("span", { class: "action-icon" }, icon("monitor")),
       h("div", { class: "device-row-text" }, h("strong", {}, t("connectScreen")), screenState),
       h("div", { class: "device-end shell-buttons" }, screen.root));
-    const connectBody = tabBody(h("div", { class: "device-rows" }, terminalRow, screenRow));
+    const filesState = h("span", { class: "setting-note" });
+    const filesOpen = iconButton(t("openFilesTip"), "folder-open", "outlined");
+    filesOpen.button.addEventListener("click", () => explorer.open({ id: latest.id, name: latest.name }, filesOpen.button));
+    const filesRow = h("div", { class: "device-row" },
+      h("span", { class: "action-icon" }, icon("folder")),
+      h("div", { class: "device-row-text" }, h("strong", {}, t("connectFiles")), filesState),
+      h("div", { class: "device-end shell-buttons" }, filesOpen.root));
+    const connectBody = tabBody(h("div", { class: "device-rows" }, terminalRow, screenRow, filesRow));
 
     const tabs = tabset(key, fill(t("tabListOther"), { name: device.name }), [
       { id: "tools", title: "tools", panel: tabColumn(toolsBody) },
@@ -2719,8 +2813,10 @@ export function mountDevices(host: Host) {
         const on = grant !== null && (grant.until === "untilOff" || grant.until > seconds());
         const until = !on ? t("off") : grant.until === "untilOff" ? t("deviceShellOnUntilOff")
           : fill(t("deviceShellOn"), { time: formatClock(grant.until, host.language()) });
+        // The device says what it shares. Only the person at that device turns it on.
+        const sharing = found?.files?.on === true && (found.files.until === "untilOff" || found.files.until > seconds()) ? found.files : undefined;
         // The tab shows a dot while a way in is on, and nothing while all are off.
-        tabs.summary("connect", on ? t("tabOn") : "", on);
+        tabs.summary("connect", on || sharing ? t("tabOn") : "", on || sharing !== undefined);
         fadeText(shellNote, on ? until : t("connectOff"));
         terminal.disable(on ? undefined : t("connectOff"), t("openTerminalTip"));
         copy.disable(on ? undefined : t("connectOff"), t("copyShellCommand"));
@@ -2734,11 +2830,26 @@ export function mountDevices(host: Host) {
           : !screenFound.on ? t("screenOffThere")
           : screenFound.userAllowed === false ? t("screenNoUserThere") : t("screenOn");
         const screenReady = !screenError && screenFound?.on === true && screenFound.userAllowed !== false;
+        const filesError = found?.filesError;
+        const filesText = filesError
+          ? (isLinkError(filesError) ? t("remoteLost") : isRefusal(filesError) ? fill(t(filesError), { name: current.name }) : t("filesIo"))
+          : !found?.files ? t("filesReading") : !sharing ? t("filesOffThere") : filesSummary(sharing);
+        const filesReady = !filesError && sharing !== undefined;
+        fadeText(filesState, filesText);
+        filesOpen.disable(filesReady ? undefined : filesText, t("openFilesTip"));
+        setAttribute(filesOpen.button, "aria-label", filesReady ? t("openFilesTip") : filesText);
         fadeText(screenState, screenText);
         screen.disable(screenReady ? undefined : screenText, t("openScreenTip"));
         setAttribute(screen.button, "aria-label", screenReady ? t("openScreenTip") : screenText);
       },
     };
+  }
+
+  /** `2 shared folders · read and write`, or `Whole disk · read only`. */
+  function filesSummary(files: FileShare & { on: true }): string {
+    const mode = t(files.mode === "read" ? "filesModeReadShort" : "filesModeWriteShort");
+    if (files.scope === "disk") return fill(t("filesOnDisk"), { mode });
+    return files.roots.length === 1 ? fill(t("filesOnFolder"), { mode }) : fill(t("filesOnFolders"), { mode, count: files.roots.length });
   }
 
   function deviceRow(item: Item): Row<Item> {

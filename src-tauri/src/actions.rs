@@ -692,7 +692,7 @@ mod tests {
     }
 
     fn peer(id: &str) -> Origin {
-        Origin::Remote(Permissions { control: false, applications: false, actions: true, peer: crate::dispatch::PeerId::parse(id) })
+        Origin::Remote(Permissions { control: false, applications: false, actions: true, files: None, peer: crate::dispatch::PeerId::parse(id) })
     }
 
     fn names(id: &str) -> Option<String> {
@@ -708,6 +708,22 @@ mod tests {
         while !ready() {
             assert!(std::time::Instant::now() < until, "{what}");
             thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Removes a test directory. A run that just ended can still be writing its last file, so a
+    /// directory that is not empty yet is tried again for a few seconds. A failure after that is real.
+    fn cleanup(dir: std::path::PathBuf) {
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match fs::remove_dir_all(&dir) {
+                Ok(()) => return,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+                Err(error) => {
+                    assert!(std::time::Instant::now() < until, "{error}");
+                    thread::sleep(Duration::from_millis(20));
+                }
+            }
         }
     }
 
@@ -743,7 +759,7 @@ mod tests {
         let last = listed[0].last_run.as_ref().unwrap();
         assert!(!last.ok && last.exit_code == Some(2) && !last.timed_out);
         assert!(!listed[0].busy);
-        fs::remove_dir_all(dir).unwrap();
+        cleanup(dir);
     }
 
     #[test]
@@ -758,7 +774,7 @@ mod tests {
         assert_eq!(answer["output"], "hi\n");
         assert_eq!(answer["truncated"], false);
         assert!(answer["seconds"].is_u64());
-        fs::remove_dir_all(dir).unwrap();
+        cleanup(dir);
     }
 
     #[test]
@@ -778,7 +794,7 @@ mod tests {
         actions.stop_run(&second, &Owner::Local).unwrap();
         finished(&actions, &second);
         assert_eq!(actions.run("nope", Owner::Local), Err("actionNotFound"));
-        fs::remove_dir_all(dir).unwrap();
+        cleanup(dir);
     }
 
     #[test]
@@ -796,7 +812,7 @@ mod tests {
         assert_eq!(lock(&actions.0.runs).records.len(), KEPT_RUNS);
         assert_eq!(actions.get_run(&runs[0], &Owner::Local), Err("actionRunNotFound"));
         assert!(actions.get_run(runs.last().unwrap(), &Owner::Local).is_ok());
-        fs::remove_dir_all(dir).unwrap();
+        cleanup(dir);
     }
 
     #[test]
@@ -824,7 +840,7 @@ mod tests {
         wait_for("logged", || log.lock().unwrap().len() >= 2);
         let entries = log.lock().unwrap().clone();
         assert!(entries.iter().all(|entry| entry.peer.as_deref() == Some(ID_A)));
-        fs::remove_dir_all(dir).unwrap();
+        cleanup(dir);
     }
 
     #[test]
@@ -846,7 +862,7 @@ mod tests {
         }
         assert_eq!(actions.list().len(), 1);
         assert_eq!(actions.list()[0].command.as_deref(), Some("curl -H 'Authorization: sk-secret-123' https://x"));
-        fs::remove_dir_all(dir).unwrap();
+        cleanup(dir);
     }
 
     #[test]
@@ -888,7 +904,7 @@ mod tests {
                 "{schedule}"
             );
         }
-        fs::remove_dir_all(dir).unwrap();
+        cleanup(dir);
     }
 
     #[test]
@@ -908,7 +924,7 @@ mod tests {
         assert_eq!(actions.clear_schedules_of(None), Ok(1));
         assert!(by_id(&b).schedule.is_none() && by_id(&c).schedule.is_some());
         assert_eq!(actions.clear_schedules_of(Some(ID_A)), Ok(0));
-        fs::remove_dir_all(dir).unwrap();
+        cleanup(dir);
     }
 
     #[test]
@@ -932,7 +948,7 @@ mod tests {
             actions.create(&format!("a{index}"), "echo", None).unwrap();
         }
         assert_eq!(actions.create("one more", "echo", None).err(), Some("tooManyActions"));
-        fs::remove_dir_all(dir).unwrap();
+        cleanup(dir);
     }
 
     #[test]
@@ -946,7 +962,7 @@ mod tests {
         fs::write(dir.join("actions.json"), "garbage").unwrap();
         assert_eq!(Actions::open_with(dir.join("actions.json"), sink, runner(dir.clone()), Box::new(Plain), allow_all()).err(), Some("actionsFileInvalid"));
         assert_eq!(fs::read_to_string(dir.join("actions.json")).unwrap(), "garbage");
-        fs::remove_dir_all(dir).unwrap();
+        cleanup(dir);
     }
 
     fn schedule_at(actions: &Actions, id: &str, schedule: Schedule, by: &str) {
@@ -988,7 +1004,7 @@ mod tests {
         let runs = lock(&actions.0.runs);
         assert!(runs.records.iter().all(|record| record.owner == Owner::Scheduled));
         drop(runs);
-        fs::remove_dir_all(dir).unwrap();
+        cleanup(dir);
     }
 
     #[test]
@@ -1010,7 +1026,7 @@ mod tests {
         assert!(actions.list()[0].schedule.is_some());
         actions.tick(now + 15);
         assert_eq!(log.lock().unwrap().len(), 1);
-        fs::remove_dir_all(dir).unwrap();
+        cleanup(dir);
     }
 
     #[test]
@@ -1025,7 +1041,7 @@ mod tests {
         assert!(actions.list()[0].last_run.is_none() && actions.list()[0].schedule.is_none());
         let entries = log.lock().unwrap().clone();
         assert_eq!((entries[0].request.as_str(), entries[0].peer.as_deref()), ("actionSkipped", Some(ID_B)));
-        fs::remove_dir_all(dir).unwrap();
+        cleanup(dir);
     }
 
     #[test]
@@ -1043,7 +1059,7 @@ mod tests {
         assert_eq!(*lock(&actions.0.checked), 1_015);
         actions.stop_run(&running, &Owner::Local).unwrap();
         finished(&actions, &running);
-        fs::remove_dir_all(dir).unwrap();
+        cleanup(dir);
     }
 
     #[test]
@@ -1064,7 +1080,7 @@ mod tests {
         let sink: Sink = Arc::new(|_| {});
         let again = Actions::open_with(dir.join("actions.json"), sink, runner(dir.clone()), Box::new(Plain), allow_all()).unwrap();
         assert_eq!(*lock(&again.0.checked), i64::try_from(stopped).unwrap());
-        fs::remove_dir_all(dir).unwrap();
+        cleanup(dir);
     }
 
     #[test]
@@ -1089,7 +1105,7 @@ mod tests {
         // 2026-03-08: 02:30 does not exist, and the run happens once, when the skip ends.
         schedule_at(&actions, &id, Schedule::Daily { time: "02:30".into() }, LOCAL);
         assert_eq!(starts(&actions, &log, ny(2026, 3, 7, 12, 0), 54), 2, "03-08 once, and 03-09 once");
-        fs::remove_dir_all(dir).unwrap();
+        cleanup(dir);
     }
 
     #[test]
@@ -1103,7 +1119,7 @@ mod tests {
         actions.stop_run(&run, &Owner::Local).unwrap();
         assert_eq!(finished(&actions, &run).state, State::Stopped);
         wait_for("child ended", || !alive(child));
-        fs::remove_dir_all(dir).unwrap();
+        cleanup(dir);
     }
 
     #[test]
@@ -1130,7 +1146,7 @@ mod tests {
         assert!(set(Origin::Local).is_ok() && clear(Origin::Local).is_ok());
         assert!(set(peer(ID_A)).is_ok());
         assert!(set(Origin::Local).is_ok(), "the person here can replace any schedule");
-        fs::remove_dir_all(dir).unwrap();
+        cleanup(dir);
     }
 
     #[test]
@@ -1157,7 +1173,7 @@ mod tests {
         assert_eq!(starts.len(), 1, "only the person's own schedule ran");
         assert!(starts[0].peer.is_none());
         assert!(actions.list().iter().all(|view| view.schedule.is_none()));
-        fs::remove_dir_all(dir).unwrap();
+        cleanup(dir);
     }
 
     #[test]
@@ -1172,6 +1188,6 @@ mod tests {
         assert_eq!(actions.get_run(&run_b, &Owner::Local).unwrap().state, State::Running, "the person's run goes on");
         assert!(actions.list().iter().find(|view| view.id == c).unwrap().schedule.is_none());
         actions.stop_run(&run_b, &Owner::Local).unwrap();
-        fs::remove_dir_all(dir).unwrap();
+        cleanup(dir);
     }
 }

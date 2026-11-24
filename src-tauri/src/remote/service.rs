@@ -6,6 +6,7 @@ use super::{
     client::{Clients, SshTransport},
     controlled::{Controlled, Store},
     destination::Destination,
+    files::{self, Files, Uploads},
     icons::Icons,
     identity::{self, DeviceId},
     known_hosts,
@@ -22,7 +23,7 @@ use super::{
 };
 use crate::{
     apps,
-    devices::{self, Controller, KeysWarning, Remote, ShellGrant, ShellUntil, Socket},
+    devices::{self, Controller, FilesGrant, FilesMode, FilesScope, FilesView, KeysWarning, Remote, ShellGrant, ShellUntil, Socket},
     dispatch::{self, Origin, Request},
 };
 use serde::Serialize;
@@ -34,7 +35,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 /// How often the grants are checked against the wall clock, and so how late a shell can outlive its end.
@@ -84,6 +85,10 @@ struct Running {
     last_keys_check: AtomicU64,
     /// The devices whose line could not be written when their access shrank or ended. Each tick tries again.
     line_needs_rewrite: Mutex<HashSet<String>>,
+    /// The home folder of this user, for the paths that Files never shares and for how paths are shown.
+    home: Option<PathBuf>,
+    /// The uploads that devices have in progress here.
+    uploads: Arc<Uploads>,
 }
 
 /// What forgetting a device leaves undone: our key stays in its `authorized_keys`, and only that
@@ -162,6 +167,7 @@ impl Service {
     ) -> Result<Running, &'static str> {
         let peers = Arc::new(Peers::open(layout.peers_file())?);
         let log = Arc::new(Log::open(layout.log_file())?);
+        let own_home = home.clone();
         let keys = match (home, helper) {
             (Some(home), Some(helper)) => AuthorizedKeys::new(home, helper),
             _ => Err("helperPathInvalid"),
@@ -172,6 +178,14 @@ impl Service {
             if let Some(peer) = peers.get(&id) {
                 if peers.set_shell(&id, None).is_ok() {
                     let _ = log.append(&Entry::new(Some(&id), Some(&peer.name), "shellExpired", "ok"));
+                }
+            }
+        }
+        // The same for the files that a device was allowed to reach.
+        for id in peers.files_expired(now()) {
+            if let Some(peer) = peers.get(&id) {
+                if peers.set_files(&id, None).is_ok() {
+                    let _ = log.append(&Entry::new(Some(&id), Some(&peer.name), "filesExpired", "ok"));
                 }
             }
         }
@@ -217,6 +231,8 @@ impl Service {
             watch: Watch::default(),
             last_keys_check: AtomicU64::new(now()),
             line_needs_rewrite: Mutex::default(),
+            home: own_home,
+            uploads: Arc::default(),
         })
     }
 
@@ -353,7 +369,7 @@ impl Service {
             .peers
             .list()
             .into_iter()
-            .map(|peer| Controller::new(&peer, connected.contains(&peer.id)))
+            .map(|peer| Controller::new(&peer, connected.contains(&peer.id), running.home.as_deref()))
             .collect()
     }
 
@@ -421,6 +437,7 @@ impl Service {
         DeviceId::parse(id)?;
         let running = self.running()?;
         let peer = running.peers.remove(id)?.ok_or("notPaired")?;
+        running.uploads.cancel_peer(id);
         if let Ok(server) = &running.server {
             server.close_peer(id);
         }
@@ -479,6 +496,102 @@ impl Service {
             .map(|until| ShellGrant { until })
     }
 
+    /// Lets a device reach files here, for `minutes` (1 to 1440) or until the person turns it off.
+    /// `folders` holds the folders the person chose, and is ignored for the whole disk. Only the
+    /// person at this device grants it. Uploads that the device had in progress end first.
+    pub fn grant_files(
+        &self,
+        id: &str,
+        scope: FilesScope,
+        folders: &[String],
+        mode: FilesMode,
+        minutes: Option<u32>,
+    ) -> Result<FilesView, &'static str> {
+        DeviceId::parse(id)?;
+        if minutes.is_some_and(|minutes| !(1..=MAX_SHELL_MINUTES).contains(&minutes)) {
+            return Err("shellDurationInvalid");
+        }
+        let running = self.running()?;
+        let name = running.peers.get(id).ok_or("notPaired")?.name;
+        let protected = self.protected(running);
+        let checked = match scope {
+            FilesScope::Folders => files::check_folders(folders, running.home.as_deref(), &protected),
+            FilesScope::Disk => Ok(Vec::new()),
+        };
+        let folders = match checked {
+            Ok(folders) => folders,
+            Err(code) => {
+                let _ = running.log.append(&Entry::new(Some(id), Some(&name), "filesGranted", code));
+                return Err(code);
+            }
+        };
+        let until = minutes.map_or(ShellUntil::OFF, |minutes| ShellUntil::At(now() + u64::from(minutes) * 60));
+        let grant = FilesGrant { scope, folders, mode, until };
+        let result = running.peers.set_files(id, Some(grant.clone()));
+        if let Err(code) = result {
+            let _ = running.log.append(&Entry::new(Some(id), Some(&name), "filesGranted", code));
+            return Err(code);
+        }
+        running.uploads.cancel_peer(id);
+        let scope_name = if scope == FilesScope::Disk { "disk" } else { "folders" };
+        let mode_name = if mode == FilesMode::ReadWrite { "readWrite" } else { "read" };
+        let _ = running.log.append(
+            &Entry::new(Some(id), Some(&name), "filesGranted", "ok").with_file(&format!("{scope_name} {mode_name}"), None),
+        );
+        Ok(FilesView {
+            scope,
+            folders: grant.folders.iter().map(|folder| files::tilde(folder, running.home.as_deref())).collect(),
+            mode,
+            until,
+        })
+    }
+
+    /// Ends the files that a device may reach, and the uploads it has in progress, now.
+    pub fn revoke_files(&self, id: &str) -> Result<(), &'static str> {
+        DeviceId::parse(id)?;
+        self.end_files(self.running()?, id, "filesRevoked")
+    }
+
+    fn end_files(&self, running: &Running, id: &str, event: &str) -> Result<(), &'static str> {
+        let name = running.peers.get(id).ok_or("notPaired")?.name;
+        if running.peers.set_files(id, None)?.is_none() {
+            return Ok(());
+        }
+        running.uploads.cancel_peer(id);
+        let _ = running.log.append(&Entry::new(Some(id), Some(&name), event, "ok"));
+        Ok(())
+    }
+
+    fn protected(&self, running: &Running) -> Vec<PathBuf> {
+        files::protected_paths(running.layout.remote_dir().parent(), running.home.as_deref())
+    }
+
+    /// What one device may do with files here, read just now. A device that has no grant, or whose
+    /// grant ended, gets `notPermitted`, and its uploads end.
+    pub fn files_for(&self, id: &str) -> Result<Files, &'static str> {
+        let running = self.running()?;
+        let peer = running.peers.get(id).ok_or("notPaired")?;
+        let Some(grant) = peer.files_grant.filter(|grant| grant.until.active(now())) else {
+            running.uploads.cancel_peer(id);
+            return Err("notPermitted");
+        };
+        Ok(Files {
+            grant,
+            peer: peer.id,
+            name: peer.name,
+            protected: self.protected(running),
+            uploads: running.uploads.clone(),
+            log: Some(running.log.clone()),
+        })
+    }
+
+    /// The folders that a device may reach here, as that device reads them.
+    pub fn files_share(&self, id: &str) -> Value {
+        let Ok(running) = self.running() else { return serde_json::json!({ "on": false }) };
+        let peer = running.peers.get(id);
+        files::share_view(peer.as_ref().and_then(|peer| peer.files_grant.as_ref()), running.home.as_deref())
+    }
+
     /// Writes the line of a peer again, with `pty` or without it as its grant says.
     fn rewrite_line(&self, running: &Running, id: &str) -> Result<(), &'static str> {
         let peer = running.peers.get(id).ok_or("notPaired")?;
@@ -519,6 +632,15 @@ impl Service {
         for id in running.peers.shell_expired(at) {
             let _ = self.end_shell(running, &id, "shellExpired");
         }
+        for id in running.peers.files_expired(at) {
+            let _ = self.end_files(running, &id, "filesExpired");
+        }
+        running.uploads.sweep(Instant::now(), |peer| {
+            running.peers.get(peer).is_some_and(|peer| {
+                peer.files_grant
+                    .is_some_and(|grant| grant.mode == FilesMode::ReadWrite && grant.until.active(now()))
+            })
+        });
         self.retry_lines(running);
         let last = running.last_keys_check.load(Ordering::Relaxed);
         if running.watch.active() && at.saturating_sub(last) >= shell::CHECK_EVERY.as_secs() {
@@ -705,6 +827,9 @@ impl Service {
         // Nobody can pair while access is being cut.
         let _ = running.pairing.close();
         let gone = running.peers.clear()?;
+        for peer in &gone {
+            running.uploads.cancel_peer(&peer.id);
+        }
         if let Ok(server) = &running.server {
             server.close_all();
         }
@@ -823,6 +948,70 @@ mod tests {
             ""
         );
         assert_eq!(service.log().unwrap()[0].request, "cutAll");
+        service.stop();
+        fs::remove_dir_all(home).unwrap();
+        fs::remove_dir_all(short).unwrap();
+    }
+
+    #[test]
+    fn files_are_granted_only_here_for_a_time_and_end_with_their_uploads() {
+        use crate::devices::{FilesMode, FilesScope};
+        use serde_json::json;
+        let home = fs::canonicalize(scratch("svc-files-home")).unwrap();
+        let short = PathBuf::from(format!("/tmp/lw-svc-files-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&short);
+        fs::create_dir(&short).unwrap();
+        fs::set_permissions(&short, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+        fs::create_dir(home.join("Shared")).unwrap();
+        let layout = Layout::for_paths(short.clone(), None);
+        let service = Service::for_test(&layout, home.clone(), Deny);
+        let running = service.running().unwrap();
+        running.peers.insert(peer(ID_A, "Studio")).unwrap();
+        let folders = ["~/Shared".to_owned()];
+        // Nothing is shared at first, and a grant needs a valid time, a known device, and real folders.
+        assert!(matches!(service.files_for(ID_A), Err("notPermitted")));
+        assert_eq!(service.files_share(ID_A), json!({"on": false}));
+        assert_eq!(service.grant_files(ID_A, FilesScope::Folders, &folders, FilesMode::Read, Some(0)).err(), Some("shellDurationInvalid"));
+        assert_eq!(service.grant_files(ID_A, FilesScope::Folders, &folders, FilesMode::Read, Some(1441)).err(), Some("shellDurationInvalid"));
+        assert_eq!(service.grant_files(ID_B, FilesScope::Folders, &folders, FilesMode::Read, None).err(), Some("notPaired"));
+        assert_eq!(service.grant_files(ID_A, FilesScope::Folders, &[], FilesMode::Read, None).err(), Some("filesFolderInvalid"));
+        assert_eq!(service.grant_files(ID_A, FilesScope::Folders, &["/".to_owned()], FilesMode::Read, None).err(), Some("filesFolderInvalid"));
+        // The suggested folder is created when it is chosen.
+        let view = service
+            .grant_files(ID_A, FilesScope::Folders, &["~/Lazy Worker".to_owned(), folders[0].clone()], FilesMode::ReadWrite, Some(5))
+            .unwrap();
+        assert_eq!(view.folders, ["~/Lazy Worker", "~/Shared"]);
+        assert!(home.join("Lazy Worker").is_dir());
+        let listed = service.controllers();
+        assert!(listed[0].permissions.files && listed[0].files.is_some() && !listed[0].permissions.shell);
+        assert_eq!(service.files_share(ID_A)["roots"].as_array().unwrap().len(), 2);
+        // An upload in progress ends with the grant, and its partial file goes.
+        let files = service.files_for(ID_A).unwrap();
+        let root = files::roots(&files.grant).into_iter().find(|root| root.name == "Shared").unwrap().id;
+        let call = |value: Value| files.run(serde_json::from_value(value).unwrap());
+        let id = call(json!({"command": "beginUpload", "args": {"root": root, "path": "", "name": "n.bin", "size": 9}})).unwrap()["uploadId"].as_str().unwrap().to_owned();
+        call(json!({"command": "writeFileChunk", "args": {"uploadId": id, "offset": 0, "data": "AAEC"}})).unwrap();
+        assert_eq!(fs::read_dir(home.join("Shared")).unwrap().count(), 1);
+        service.revoke_files(ID_A).unwrap();
+        assert_eq!(fs::read_dir(home.join("Shared")).unwrap().count(), 0);
+        assert!(matches!(service.files_for(ID_A), Err("notPermitted")));
+        assert!(service.controllers()[0].files.is_none());
+        // Time ends the grant on the next tick, and is logged. A device that pairs again starts with nothing.
+        service.grant_files(ID_A, FilesScope::Disk, &[], FilesMode::Read, Some(1)).unwrap();
+        service.tick(now() + 61);
+        assert!(service.controllers()[0].files.is_none());
+        service.grant_files(ID_A, FilesScope::Disk, &[], FilesMode::Read, None).unwrap();
+        running.peers.insert(peer(ID_A, "Studio")).unwrap();
+        assert!(service.controllers()[0].files.is_none());
+        let events: Vec<(String, String)> = service.log().unwrap().iter().map(|e| (e.request.clone(), e.outcome.clone())).rev().collect();
+        let granted = |outcome: &str| ("filesGranted".to_owned(), outcome.to_owned());
+        assert_eq!(
+            events,
+            [
+                granted("filesFolderInvalid"), granted("filesFolderInvalid"), granted("ok"),
+                ("filesRevoked".into(), "ok".into()), granted("ok"), ("filesExpired".into(), "ok".into()), granted("ok"),
+            ]
+        );
         service.stop();
         fs::remove_dir_all(home).unwrap();
         fs::remove_dir_all(short).unwrap();

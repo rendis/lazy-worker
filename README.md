@@ -107,12 +107,13 @@ See the [user guide](docs/user-guide.md#devices) for the steps.
 
 - Turns on remote access with one button. It lets only keys log in over SSH, and nothing is reachable before that.
 - Pairs two devices with a 6-digit code that works once. The code is never sent over the network.
-- Gives each device four permissions: Control, Applications, Actions, and Shell. A new device gets Control only.
+- Gives each device five permissions: Control, Applications, Actions, Files, and Shell. A new device gets Control only.
 - Opens a window for another device. Every request runs there, and that device checks it.
 - Shows whether each device is online, checks again every few seconds, and has a button to check one now.
 - Lists the applications of another device, and opens them.
 - Runs saved actions on another device, and schedules them once, daily, or weekly.
 - Allows a full shell for a limited time, and only at the device that is shared. Pairing never turns it on.
+- Shares files with another device, in the folders you choose or on the whole disk, read only or read and write, for a time you set. It sends and saves files over the same SSH connection, with progress and a Stop button. Only the device itself turns it on.
 - Opens the screen of another device with macOS Screen Sharing. Only the device itself turns it on, and macOS asks for the account password.
 - Keeps a log of what other devices asked, and cuts all access at once.
 

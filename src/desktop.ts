@@ -5,6 +5,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { version as previewVersion } from "../src-tauri/tauri.conf.json";
 import type { Language } from "./messages";
 import type { ToolId } from "./modules";
+import {
+  previewAddFile, previewClearTransfers, previewDelete, previewFileSize, previewList, previewMakeFolder, previewQueue,
+  previewShareRoots, previewStopTransfer, previewTransfers,
+  type FileListing, type FilesGrant, type FilesMode, type FilesScope, type FileShare, type Transfer,
+} from "./files";
 import { isLinkError, PROTOCOL, refusal, type Session, type Viewer } from "./remote";
 import claudeIcon from "./assets/apps/claude.svg";
 import notesIcon from "./assets/apps/notes.svg";
@@ -82,7 +87,7 @@ export type Statuses = Record<ToolId, Status>;
 export type ActivityAccessibility = "granted" | "required" | "unsupported" | "unavailable";
 
 export type DeviceKind = "laptop" | "desktop";
-export type ControllerPermission = "control" | "applications" | "actions" | "shell";
+export type ControllerPermission = "control" | "applications" | "actions" | "shell" | "files";
 /** When a full shell ends: seconds since the Unix epoch, or `"untilOff"` while it lasts until the person turns it off. */
 export type ShellUntil = number | "untilOff";
 /** A full shell that a device granted, or `null` while it is off. */
@@ -98,6 +103,8 @@ export type Controller = {
   permissions: Record<ControllerPermission, boolean>;
   /** The shell that this device granted it. Only the person at this device turns it on. */
   shell: ShellState;
+  /** The files that this device shared with it, or `null` while they are off. Only the person at this device turns them on. */
+  files: FilesGrant | null;
 };
 /** `~/.ssh/authorized_keys` changed while a device had a shell on this one. It stays until dismissed. */
 export type KeysWarning = { id: number; peer: string; name: string; time: number };
@@ -111,6 +118,10 @@ export type RemoteLogEntry = {
   outcome: string;
   /** How many times the same request was refused in the minute that began at `time`. Missing for one. */
   count?: number;
+  /** For a file event: the path inside the shared folder, never the contents. */
+  detail?: string;
+  /** For a file event: the size in bytes. */
+  size?: number;
 };
 /** `day` counts from 0 on Sunday. `time` is a time of day as `HH:MM` on the clock of the device that runs the action. `at` is in seconds since the Unix epoch. */
 export type ActionSchedule =
@@ -391,6 +402,27 @@ function previewShellOf(id: string): ShellState {
   end.setHours(end.getHours() + 3, 0, 0, 0);
   return { until: previewQuery.has("shell-forever") ? "untilOff" : Math.floor(end.getTime() / 1000) };
 }
+/**
+ * What each controlled sample device shares with this one. `?files-off`, `?files-ro` (read only), and `?files-disk` (the whole disk)
+ * change what `studio` shares. Only that device can change it, so a preview never does.
+ */
+function previewShareOf(id: string): FileShare {
+  if (id !== "studio" || previewQuery.has("files-off")) return { on: false };
+  const disk = previewQuery.has("files-disk");
+  return {
+    on: true, scope: disk ? "disk" : "folders", mode: previewQuery.has("files-ro") ? "read" : "readWrite",
+    until: previewQuery.has("files-forever") ? "untilOff" : Math.floor(Date.now() / 1000) + 2 * 3600,
+    roots: previewShareRoots(disk ? "disk" : "folders"),
+  };
+}
+/** A sample device that has not shared files answers a file request as the real one does. */
+function previewFilesGate(id: string, write: boolean): FileShare & { on: true } {
+  if (!previewDevices().devices.some(device => device.id === id)) throw "notPaired";
+  previewGate("listFiles");
+  const share = previewShareOf(id);
+  if (!share.on || (write && share.mode !== "readWrite")) throw "notPermitted";
+  return share;
+}
 /** The changes of the keys file that a preview shows with `?keys-warning`, until they are dismissed. */
 let previewWarnings: KeysWarning[] | undefined;
 function previewWarningList(): KeysWarning[] {
@@ -406,7 +438,7 @@ function settlePreviewPairing(now: number): void {
   if (previewQuery.has("pair-in") && now - previewPairingOpened >= 6) {
     previewControllerList().push({
       id: "mini", name: "Mac mini de la sala", kind: "desktop", lastAccess: null, connected: false,
-      permissions: { control: true, applications: false, actions: false, shell: false }, shell: null,
+      permissions: { control: true, applications: false, actions: false, shell: false, files: false }, shell: null, files: null,
     });
     Object.assign(previewPairing, { open: false, expires: null, attemptsLeft: 0 });
   } else if (previewPairing.expires !== null && previewPairing.expires <= now) {
@@ -421,15 +453,15 @@ function sampleControllers(now: number): Controller[] {
   return [
     {
       id: "studio", name: "iMac del estudio", kind: "desktop", lastAccess: now - 5 * 60, connected: true,
-      permissions: { control: true, applications: true, actions: true, shell: false }, shell: null,
+      permissions: { control: true, applications: true, actions: true, shell: false, files: false }, shell: null, files: null,
     },
     {
       id: "office", name: "MacBook Air de la oficina", kind: "laptop", lastAccess: now - 26 * 3600, connected: false,
-      permissions: { control: true, applications: false, actions: false, shell: false }, shell: null,
+      permissions: { control: true, applications: false, actions: false, shell: false, files: false }, shell: null, files: null,
     },
     {
       id: "new", name: "Mac mini", kind: "desktop", lastAccess: null, connected: false,
-      permissions: { control: false, applications: false, actions: false, shell: false }, shell: null,
+      permissions: { control: false, applications: false, actions: false, shell: false, files: false }, shell: null, files: null,
     },
   ];
 }
@@ -445,6 +477,11 @@ function previewEntries(now: number): RemoteLogEntry[] {
     { time: now - 3 * 3600, ...office, request: "launchProxyApp", outcome: "notPermitted" },
     { time: now - 26 * 3600, ...office, request: "getPreferences", outcome: "ok" },
     { time: now - 2 * 86400, ...studio, request: "getStatuses", outcome: "ok" },
+    { time: now - 130, ...studio, request: "fileUpload", outcome: "ok", detail: "Proyectos/lazy-worker/docs/informe.pdf", size: 8_000_000 },
+    { time: now - 260, ...studio, request: "fileDelete", outcome: "ok", detail: "Lazy Worker/notas viejas.txt", size: 1_200 },
+    { time: now - 900, ...studio, request: "fileDownload", outcome: "ok", detail: "Lazy Worker/Clips/demo.mp4", size: 18_400_000 },
+    { time: now - 4 * 3600, ...office, request: "beginUpload", outcome: "notPermitted" },
+    { time: now - 5 * 3600, ...studio, request: "filesGranted", outcome: "ok", detail: "folders readWrite" },
   ];
 }
 
@@ -454,7 +491,7 @@ function previewControllerList(): Controller[] {
 }
 
 function previewLogList(): RemoteLogEntry[] {
-  previewLog ??= previewEntries(Math.floor(Date.now() / 1000));
+  previewLog ??= previewEntries(Math.floor(Date.now() / 1000)).sort((a, b) => b.time - a.time);
   return previewLog;
 }
 
@@ -663,7 +700,9 @@ function previewDevices(): DevicesOverview {
         // A grant that has ended is off, as on the device.
         const ended = typeof controller.shell?.until === "number" && controller.shell.until <= now;
         const shell = ended ? null : controller.shell;
-        return { ...controller, shell, permissions: { ...controller.permissions, shell: shell !== null } };
+        const filesEnded = typeof controller.files?.until === "number" && controller.files.until <= now;
+        const files = filesEnded ? null : controller.files;
+        return { ...controller, shell, files, permissions: { ...controller.permissions, shell: shell !== null, files: files !== null } };
       }),
       socket: { listening: true, error: null },
       warnings: previewWarningList().map(warning => ({ ...warning })),
@@ -1040,6 +1079,117 @@ export const desktop = {
     previewLogList().unshift({
       time: Math.floor(Date.now() / 1000), peer: id, name: controller.name, request: "shellRevoked", outcome: "ok",
     });
+  },
+  /**
+   * Lets a device that controls this one reach files here: the `folders` that the person chose (or the whole disk), read only or
+   * with writing, for `minutes` from 1 to 1440 or until the person turns it off. A leading `~/` is the home folder.
+   * Only the person at this device can do it, and only here.
+   */
+  async grantFiles(id: string, scope: FilesScope, folders: string[], mode: FilesMode, minutes: number | null): Promise<FilesGrant> {
+    if (native) return call("grantFiles", { id, scope, folders, mode, minutes });
+    const controller = previewControllerList().find(item => item.id === id);
+    if (!controller) throw "notPaired";
+    if (minutes !== null && (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440)) throw "shellDurationInvalid";
+    if (scope === "folders" && (folders.length === 0 || folders.length > 16)) throw "filesFolderInvalid";
+    controller.files = {
+      scope, folders: scope === "disk" ? [] : [...folders], mode,
+      until: minutes === null ? "untilOff" : Math.floor(Date.now() / 1000) + minutes * 60,
+    };
+    previewLogList().unshift({
+      time: Math.floor(Date.now() / 1000), peer: id, name: controller.name, request: "filesGranted", outcome: "ok",
+      detail: `${scope} ${mode}`,
+    });
+    return controller.files;
+  },
+  /** Ends the files that a device may reach, and the uploads it has in progress, now. */
+  async revokeFiles(id: string): Promise<void> {
+    if (native) return call("revokeFiles", { id });
+    const controller = previewControllerList().find(item => item.id === id);
+    if (!controller) throw "notPaired";
+    controller.files = null;
+    previewLogList().unshift({
+      time: Math.floor(Date.now() / 1000), peer: id, name: controller.name, request: "filesRevoked", outcome: "ok",
+    });
+  },
+  /** Opens the folder picker of this device and answers the path, or `null` when the person closed it. */
+  async pickFolder(): Promise<string | null> {
+    if (native) return call("pickFolder");
+    return "/Users/alex/Documents/Proyectos";
+  },
+  /** Opens the file picker of this device and answers the paths, or none when the person closed it. */
+  async pickFiles(): Promise<string[]> {
+    if (native) return call("pickFiles");
+    return ["/Users/alex/Desktop/informe.pdf", "/Users/alex/Desktop/foto.jpg"];
+  },
+  /** Opens the save window of this device, in Downloads, and answers the path, or `null` when the person closed it. */
+  async pickSaveFile(name: string): Promise<string | null> {
+    if (native) return call("pickSaveFile", { name });
+    return `/Users/alex/Downloads/${name}`;
+  },
+  /** What a device that this one controls shares with it. The device decides who may ask. */
+  async remoteFileShare(id: string): Promise<FileShare> {
+    if (native) return call("remoteCall", { id, request: { command: "getFileShare" } });
+    previewGate("getFileShare");
+    return previewShareOf(id);
+  },
+  async remoteListFiles(id: string, root: string, path: string): Promise<FileListing> {
+    if (native) return call("remoteCall", { id, request: { command: "listFiles", args: { root, path } } });
+    previewFilesGate(id, false);
+    await new Promise(resolve => setTimeout(resolve, 250));
+    return previewList(root, path);
+  },
+  async remoteMakeFolder(id: string, root: string, path: string, name: string): Promise<void> {
+    if (native) return call("remoteCall", { id, request: { command: "makeFolder", args: { root, path, name } } });
+    previewFilesGate(id, true);
+    previewMakeFolder(root, path, name);
+  },
+  async remoteDeleteEntry(id: string, root: string, path: string, recursive: boolean): Promise<void> {
+    if (native) return call("remoteCall", { id, request: { command: "deleteEntry", args: { root, path, recursive } } });
+    previewFilesGate(id, true);
+    previewDelete(root, path, recursive);
+  },
+  /** Queues files of this device to send into a folder of a shared folder of another device. */
+  async queueUpload(id: string, root: string, path: string, files: string[]): Promise<void> {
+    if (native) return call("queueUpload", { id, root, path, files });
+    previewFilesGate(id, true);
+    for (const file of files) {
+      const name = file.split("/").pop() ?? file;
+      const size = name.endsWith(".pdf") ? 8_000_000 : 2_400_000;
+      previewQueue("upload", id, name, size, () => previewAddFile(root, path, name, size));
+    }
+  },
+  /** Queues files of a shared folder to save here: one path to the file `destination`, several into the folder `destination`. */
+  async queueDownload(id: string, root: string, paths: string[], destination: string): Promise<void> {
+    if (native) return call("queueDownload", { id, root, paths, destination });
+    previewFilesGate(id, false);
+    for (const path of paths) previewQueue("download", id, path.split("/").pop() ?? path, previewFileSize(root, path), () => {});
+  },
+  async getTransfers(): Promise<Transfer[]> {
+    if (native) return call("getTransfers");
+    return previewTransfers();
+  },
+  async stopTransfer(id: number): Promise<void> {
+    if (native) return call("stopTransfer", { id });
+    previewStopTransfer(id);
+  },
+  async clearTransfers(): Promise<void> {
+    if (native) return call("clearTransfers");
+    previewClearTransfers();
+  },
+  /**
+   * Calls `listener` when files are dragged over this window (`over`), leave it, or drop on it (`paths`). A preview has no
+   * Finder, so it listens for a `lw-preview-drop` event on the window instead.
+   */
+  async onFileDrag(listener: (event: { kind: "over" } | { kind: "leave" } | { kind: "drop"; paths: string[] }) => void): Promise<void> {
+    if (!native) {
+      window.addEventListener("lw-preview-drop", event => listener({ kind: "drop", paths: (event as CustomEvent<string[]>).detail }));
+      window.addEventListener("lw-preview-over", () => listener({ kind: "over" }));
+      window.addEventListener("lw-preview-leave", () => listener({ kind: "leave" }));
+      return;
+    }
+    await listen("tauri://drag-enter", () => listener({ kind: "over" }));
+    await listen("tauri://drag-leave", () => listener({ kind: "leave" }));
+    await listen<{ paths: string[] }>("tauri://drag-drop", event => listener({ kind: "drop", paths: event.payload.paths }));
   },
   /** Hides a note that the keys file changed during a shell. */
   async dismissKeysWarning(id: number): Promise<void> {

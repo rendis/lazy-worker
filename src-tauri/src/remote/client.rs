@@ -9,7 +9,7 @@ use super::{
     controlled::Controlled,
     identity::DeviceId,
     ssh::{self, RemoteCommand},
-    wire::{read_line, LineError, MAX_REQUEST_LINE, MAX_RESPONSE_LINE},
+    wire::{read_line, LineError, MAX_DISPATCH_LINE, MAX_RESPONSE_LINE},
     Layout,
 };
 use serde_json::Value;
@@ -55,6 +55,7 @@ const KNOWN_CODES: &[&str] = &[
     "sshHostKeyChanged", "sshHostKeyUnknown", "sshInputTooLarge", "sshOutputTooLarge",
     "sshTimeout", "sshUnreachable", "unsupported", "updateChanged", "updateCheckFailed",
     "updateFailed", "workerExited", "workerUnavailable",
+    "filesChunkInvalid", "filesDenied", "filesDiskFull", "filesExists", "filesFolderInvalid", "filesIncomplete", "filesIo", "filesIsFolder", "filesNotEmpty", "filesNotFolder", "filesNotFound", "filesNotRegular", "filesOffsetInvalid", "filesOutside", "filesPathInvalid", "filesProtected", "filesRootUnknown", "filesTooLarge", "filesTooMany", "filesTooManyUploads", "filesUploadUnknown",
 ];
 
 /// Errors after which the other side ends the session, so the next request opens a new one.
@@ -260,7 +261,7 @@ impl Client {
     /// main thread. A link that ended is opened again once for the same request.
     pub fn call(&self, device: &Controlled, request: &Value) -> Result<Value, &'static str> {
         let line = format!("{}\n", serde_json::json!({ "request": request })).into_bytes();
-        if line.len() > MAX_REQUEST_LINE {
+        if line.len() > MAX_DISPATCH_LINE {
             return Err("lineTooLong");
         }
         let mut state = self.lock();
@@ -577,7 +578,7 @@ mod tests {
             let mut writer = theirs;
             thread::spawn(move || {
                 let mut answers = answers;
-                while read_line(&mut reader, MAX_REQUEST_LINE)
+                while read_line(&mut reader, MAX_DISPATCH_LINE)
                     .ok()
                     .flatten()
                     .is_some()
@@ -713,7 +714,7 @@ mod tests {
     fn an_oversized_request_never_leaves() {
         let (script, opened) = Script::of(&[b"{\"ok\":1}"]);
         let clients = quick(script);
-        let big = serde_json::json!({"command": "saveProxyApps", "args": {"apps": "a".repeat(MAX_REQUEST_LINE)}});
+        let big = serde_json::json!({"command": "saveProxyApps", "args": {"apps": "a".repeat(MAX_DISPATCH_LINE)}});
         assert_eq!(
             clients.call(&device(ID_A, "Studio"), &big),
             Err("lineTooLong")
@@ -748,7 +749,7 @@ mod tests {
                 let mut reader = BufReader::new(theirs.try_clone().unwrap());
                 let mut writer = theirs;
                 thread::spawn(move || {
-                    while read_line(&mut reader, MAX_REQUEST_LINE).ok().flatten().is_some() {
+                    while read_line(&mut reader, MAX_DISPATCH_LINE).ok().flatten().is_some() {
                         let answer = if number == 0 { "{\"ok\":\"first\"}\n" } else { "{\"ok\":\"again\"}\n" };
                         let _ = writer.write_all(answer.as_bytes());
                         if number == 0 {

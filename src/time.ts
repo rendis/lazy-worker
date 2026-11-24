@@ -80,6 +80,20 @@ export function formatClock(epochSeconds: number, locale: string, now = new Date
 }
 
 /**
+ * When a file last changed: the time alone when it was today, the day and month within this year, and the date with the
+ * year before that. A file can be years old. Its longest text has 10 characters (`24/11/2025`): reserve `MODIFIED_WIDTH`.
+ * `now` exists for tests.
+ */
+export function formatModified(epochSeconds: number, locale: string, now = new Date()): string {
+  const moment = new Date(epochSeconds * 1000);
+  if (isToday(epochSeconds, now)) return moment.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hour12: false });
+  const sameYear = moment.getFullYear() === now.getFullYear();
+  return moment.toLocaleDateString(locale, sameYear
+    ? { day: "2-digit", month: "2-digit" } : { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+export const MODIFIED_WIDTH = 10;
+
+/**
  * How long a run took: `12 s` under a minute, `4 min 05 s` under an hour, and `1 h 05 min` from one hour on.
  * Its longest text has 11 characters (`59 min 59 s`) for a run that ends within an hour, as every run does.
  * A run of 100 hours or more shows whole hours, so the text stays short. Reserve `DURATION_WIDTH` characters.

@@ -45,6 +45,47 @@ pub struct ShellGrant {
     pub until: ShellUntil,
 }
 
+/// Whether a device that has Files may change what it reaches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FilesMode {
+    Read,
+    ReadWrite,
+}
+
+/// What a device that has Files reaches: the folders the user chose, or the whole disk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FilesScope {
+    Folders,
+    Disk,
+}
+
+/// The Files permission that this device granted to one device. Only the person at this device
+/// grants it, for a time, and pairing never does. It ends like a shell: at `until`, or when the person turns it off.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(not(unix), allow(dead_code))]
+pub struct FilesGrant {
+    pub scope: FilesScope,
+    /// Absolute paths of existing folders. Empty for the whole disk.
+    #[serde(default)]
+    pub folders: Vec<String>,
+    pub mode: FilesMode,
+    pub until: ShellUntil,
+}
+
+/// A Files grant as the webview reads it. The folders are shown with `~` for the home folder.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(not(unix), allow(dead_code))]
+pub struct FilesView {
+    pub scope: FilesScope,
+    pub folders: Vec<String>,
+    pub mode: FilesMode,
+    pub until: ShellUntil,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Device {
@@ -174,6 +215,8 @@ pub struct Controller {
     pub permissions: ControllerPermissions,
     /// The shell that this device granted it, or nothing while it is off.
     pub shell: Option<ShellGrant>,
+    /// The files that this device granted it, or nothing while they are off.
+    pub files: Option<FilesView>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -183,11 +226,22 @@ pub struct ControllerPermissions {
     pub applications: bool,
     pub actions: bool,
     pub shell: bool,
+    pub files: bool,
 }
 
 #[cfg(unix)]
 impl Controller {
-    pub fn new(peer: &crate::remote::peers::Peer, connected: bool) -> Self {
+    pub fn new(peer: &crate::remote::peers::Peer, connected: bool, home: Option<&std::path::Path>) -> Self {
+        let files = peer
+            .files_grant
+            .as_ref()
+            .filter(|grant| grant.until.active(crate::remote::now()))
+            .map(|grant| FilesView {
+                scope: grant.scope,
+                folders: grant.folders.iter().map(|folder| crate::remote::files::tilde(folder, home)).collect(),
+                mode: grant.mode,
+                until: grant.until,
+            });
         Self {
             id: peer.id.clone(),
             name: peer.name.clone(),
@@ -199,11 +253,13 @@ impl Controller {
                 applications: peer.permissions.applications,
                 actions: peer.permissions.actions,
                 shell: peer.permissions.shell,
+                files: files.is_some(),
             },
             shell: peer
                 .shell_until
                 .filter(|until| until.active(crate::remote::now()))
                 .map(|until| ShellGrant { until }),
+            files,
         }
     }
 }

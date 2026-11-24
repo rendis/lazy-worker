@@ -48,6 +48,12 @@ const SECURITY: &[&str] = &[
     "actionSkipped",
     "actionScheduleCleared",
     "peerPermissions",
+    "filesGranted",
+    "filesRevoked",
+    "filesExpired",
+    "fileUpload",
+    "fileDownload",
+    "fileDelete",
 ];
 
 fn default_count() -> u32 {
@@ -77,6 +83,12 @@ pub struct Entry {
     /// How many times this happened in the minute that began at `time`.
     #[serde(default = "default_count", skip_serializing_if = "one")]
     pub count: u32,
+    /// For a file event: the path inside the shared folder, never the contents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// For a file event: the size in bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
 }
 
 impl Entry {
@@ -91,7 +103,16 @@ impl Entry {
             request: request.to_owned(),
             outcome: outcome.to_owned(),
             count: 1,
+            detail: None,
+            size: None,
         }
+    }
+
+    /// Adds what a file event touched: a path with no control characters, at most 300 characters, and a size.
+    pub fn with_file(mut self, path: &str, size: Option<u64>) -> Self {
+        self.detail = Some(path.chars().filter(|c| !c.is_control()).take(300).collect());
+        self.size = size;
+        self
     }
 
     /// Whether the entry belongs in the file that refused requests cannot fill.

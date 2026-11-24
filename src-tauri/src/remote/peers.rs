@@ -8,7 +8,7 @@ use super::{
     identity::{parse_public_key, DeviceId},
     now, read_small, write_atomic,
 };
-use crate::devices::{Kind, ShellUntil};
+use crate::devices::{FilesGrant, Kind, ShellUntil};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
@@ -53,6 +53,9 @@ pub struct Peer {
     /// When the full shell that the user granted at this device ends. Only `Peers::set_shell` sets it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shell_until: Option<ShellUntil>,
+    /// The files that the user shared with this device at this device. Only `Peers::set_files` sets it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files_grant: Option<FilesGrant>,
 }
 
 /// True for an invisible format character (Unicode Cf) that can reorder or hide text:
@@ -123,6 +126,7 @@ impl Peer {
             added,
             last_access: None,
             shell_until: None,
+            files_grant: None,
         };
         peer.validate()?;
         Ok(peer)
@@ -136,6 +140,13 @@ impl Peer {
         }
         if parse_public_key(&self.public_key).as_deref() != Ok(self.public_key.as_str()) {
             return Err("peerInvalid");
+        }
+        if let Some(grant) = &self.files_grant {
+            if grant.folders.len() > crate::remote::files::MAX_FOLDERS
+                || grant.folders.iter().any(|folder| folder.len() > 4096 || !folder.starts_with('/'))
+            {
+                return Err("peerInvalid");
+            }
         }
         Ok(())
     }
@@ -284,14 +295,46 @@ impl Peers {
         })
     }
 
+    /// The ids of the peers whose files grant ended at or before `at`, and has not been cleared.
+    pub fn files_expired(&self, at: u64) -> Vec<String> {
+        self.lock()
+            .data
+            .peers
+            .iter()
+            .filter(|peer| {
+                peer.files_grant
+                    .as_ref()
+                    .is_some_and(|grant| matches!(grant.until, ShellUntil::At(end) if end <= at))
+            })
+            .map(|peer| peer.id.clone())
+            .collect()
+    }
+
+    /// Sets or clears the files grant of a peer, and returns the grant it had.
+    pub fn set_files(
+        &self,
+        id: &str,
+        grant: Option<FilesGrant>,
+    ) -> Result<Option<FilesGrant>, &'static str> {
+        self.change(|data| {
+            let peer = data
+                .peers
+                .iter_mut()
+                .find(|peer| peer.id == id)
+                .ok_or("notPaired")?;
+            Ok(std::mem::replace(&mut peer.files_grant, grant))
+        })
+    }
+
     pub fn networks(&self) -> Vec<String> {
         self.lock().data.networks.clone()
     }
 
-    /// Adds a peer, or replaces the one with the same id. A shell grant is never carried in.
+    /// Adds a peer, or replaces the one with the same id. A shell or files grant is never carried in.
     pub fn insert(&self, mut peer: Peer) -> Result<(), &'static str> {
         peer.validate()?;
         peer.shell_until = None;
+        peer.files_grant = None;
         peer.permissions.shell = false;
         self.change(|data| {
             if let Some(known) = data.peers.iter_mut().find(|known| known.id == peer.id) {
@@ -648,4 +691,40 @@ mod tests {
         assert!(!Peers::open(dir.join("peers2.json")).unwrap().get(ID_A).unwrap().permissions.shell);
         fs::remove_dir_all(dir).unwrap();
     }
+
+    #[test]
+    fn the_files_grant_is_stored_expires_and_is_never_set_by_permissions_or_pairing() {
+        use crate::devices::{FilesGrant, FilesMode, FilesScope};
+        let (dir, peers) = store("peers-files");
+        peers.insert(peer(ID_A, "A")).unwrap();
+        let grant = |until| FilesGrant {
+            scope: FilesScope::Folders,
+            folders: vec!["/Users/a/Docs".into()],
+            mode: FilesMode::ReadWrite,
+            until,
+        };
+        assert_eq!(peers.set_files(ID_A, Some(grant(ShellUntil::At(5)))).unwrap(), None);
+        let text = fs::read_to_string(dir.join("peers.json")).unwrap();
+        assert!(text.contains("\"filesGrant\"") && text.contains("readWrite"));
+        assert_eq!(Peers::open(dir.join("peers.json")).unwrap().get(ID_A).unwrap().files_grant, Some(grant(ShellUntil::At(5))));
+        assert_eq!(peers.files_expired(5), [ID_A]);
+        assert!(peers.files_expired(4).is_empty());
+        // Other permissions leave it alone. A peer that is inserted again starts with none.
+        peers.set_permissions(ID_A, true, true, true).unwrap();
+        assert!(peers.get(ID_A).unwrap().files_grant.is_some());
+        let mut forged = peer(ID_B, "B");
+        forged.files_grant = Some(grant(ShellUntil::OFF));
+        peers.insert(forged).unwrap();
+        assert!(peers.get(ID_B).unwrap().files_grant.is_none());
+        peers.insert(peer(ID_A, "A")).unwrap();
+        assert!(peers.get(ID_A).unwrap().files_grant.is_none());
+        assert_eq!(peers.set_files(ID_B, None).unwrap(), None);
+        assert_eq!(peers.set_files("0".repeat(32).as_str(), None), Err("notPaired"));
+        // A file that holds a relative folder, or too many, is refused.
+        let mut bad = peer(ID_A, "A");
+        bad.files_grant = Some(FilesGrant { folders: vec!["relative".into()], ..grant(ShellUntil::OFF) });
+        assert_eq!(Data { version: 1, networks: vec![], peers: vec![bad] }.to_bytes().map(|bytes| Data::parse(&String::from_utf8(bytes).unwrap()).err()), Ok(Some("peersFileInvalid")));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
 }

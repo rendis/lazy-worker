@@ -9,7 +9,7 @@
 use super::{
     identity::DeviceId,
     our_uid, peer_uid,
-    wire::{error_line, read_line, LineError, MAX_REQUEST_LINE, MAX_RESPONSE_LINE},
+    wire::{error_line, read_line, LineError, MAX_DISPATCH_LINE, MAX_RESPONSE_LINE},
 };
 use std::{
     ffi::OsString,
@@ -230,7 +230,7 @@ pub fn session(
         thread::spawn(move || {
             let mut input = BufReader::new(input);
             loop {
-                match read_line(&mut input, MAX_REQUEST_LINE) {
+                match read_line(&mut input, MAX_DISPATCH_LINE) {
                     Ok(Some(mut line)) => {
                         line.push(b'\n');
                         if writer.write_all(&line).is_err() {

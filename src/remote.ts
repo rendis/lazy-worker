@@ -43,6 +43,8 @@ const localOnly = new Set([
   "requestActivityAccessibility", "createAction", "updateAction", "deleteAction",
   "grantShell", "revokeShell", "dismissKeysWarning", "openShell", "shellCommand",
   "enableScreenSharing", "openScreenSharingSettings", "openScreen",
+  "grantFiles", "revokeFiles", "pickFiles", "pickFolder", "pickSaveFile", "queueUpload", "queueDownload",
+  "getTransfers", "stopTransfer", "clearTransfers",
 ]);
 /** The requests that need the Control permission. Only the ones that a control of this window sends. */
 const needsControl = new Set([

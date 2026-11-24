@@ -168,7 +168,8 @@ fn main() {
     #[cfg(target_os = "macos")]
     let builder = builder
         .plugin(single_instance::plugin())
-        .plugin(tauri_plugin_updater::Builder::new().build());
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init());
     let app = builder
         .setup(|app| {
             let directory = app.path().app_config_dir()?;
@@ -204,6 +205,7 @@ fn main() {
             #[cfg(unix)]
             {
                 app.manage(remote::service::Service::start(app.handle(), &directory));
+                app.manage(remote::transfers::Transfers::new(remote::transfers::AppLink(app.handle().clone())));
                 // The actions come after the service, because their runs are written in its log.
                 let handle = app.handle().clone();
                 let sink: actions::Sink = std::sync::Arc::new(move |entry| {

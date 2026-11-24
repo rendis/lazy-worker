@@ -12,7 +12,7 @@ use super::{
     pairing::Pairing,
     peer_uid,
     peers::Peers,
-    wire::{error_line, read_line, LineError, MAX_REQUEST_LINE},
+    wire::{error_line, read_line, LineError, MAX_DISPATCH_LINE, MAX_REQUEST_LINE},
     SOCKET_PATH_MAX,
 };
 use crate::dispatch::{Origin, PeerId, Permissions, Request};
@@ -510,7 +510,7 @@ fn connection(stream: UnixStream, mut slot: Slot) {
     }
 
     loop {
-        let line = match read_line(&mut reader, MAX_REQUEST_LINE) {
+        let line = match read_line(&mut reader, MAX_DISPATCH_LINE) {
             Ok(Some(line)) => line,
             Err(LineError::TooLong) => return reply(&mut writer, "lineTooLong"),
             // The end of the input, an idle timeout, or a connection that was shut down.
@@ -530,11 +530,17 @@ fn connection(stream: UnixStream, mut slot: Slot) {
         let mut read = false;
         let result = match envelope.map(serde_json::from_value::<Request>) {
             Ok(Ok(request)) => {
-                read = request.is_read();
+                // A chunk of a file is one of hundreds, so it never fills the log. Uploads and deletes are logged as events.
+                read = request.is_read() || request.is_file_chunk();
                 let origin = Origin::Remote(Permissions {
                     control: peer.permissions.control,
                     applications: peer.permissions.applications,
                     actions: peer.permissions.actions,
+                    files: peer
+                        .files_grant
+                        .as_ref()
+                        .filter(|grant| grant.until.active(super::now()))
+                        .map(|grant| grant.mode),
                     peer: PeerId::parse(&id),
                 });
                 shared.handler.handle(origin, request)
@@ -791,6 +797,34 @@ mod tests {
     }
 
     #[test]
+    fn the_files_grant_of_a_peer_reaches_the_dispatcher_on_every_request_and_chunks_are_not_logged() {
+        use crate::devices::{FilesGrant, FilesMode, FilesScope, ShellUntil};
+        let setup = setup("files-permission");
+        setup.pair(ID_A, true, false);
+        let (mut stream, mut reader) = setup.connect(ID_A);
+        let list = serde_json::json!({"command": "listFiles", "args": {"root": "r", "path": ""}});
+        let chunk = serde_json::json!({"command": "writeFileChunk", "args": {"uploadId": "x", "offset": 0, "data": "AA=="}});
+        let grant = |mode, until| FilesGrant { scope: FilesScope::Disk, folders: vec![], mode, until };
+        // Control alone reaches no file.
+        assert_eq!(ask(&mut stream, &mut reader, list.clone()), serde_json::json!({"error": "notPermitted"}));
+        // Read only: a read passes, and a write does not.
+        setup.peers.set_files(ID_A, Some(grant(FilesMode::Read, ShellUntil::OFF))).unwrap();
+        assert_eq!(ask(&mut stream, &mut reader, list.clone()), serde_json::json!({"ok": "done"}));
+        assert_eq!(ask(&mut stream, &mut reader, chunk.clone()), serde_json::json!({"error": "notPermitted"}));
+        // Read and write passes both, and the grant is read again on the same connection.
+        setup.peers.set_files(ID_A, Some(grant(FilesMode::ReadWrite, ShellUntil::OFF))).unwrap();
+        assert_eq!(ask(&mut stream, &mut reader, chunk.clone()), serde_json::json!({"ok": "done"}));
+        // A grant that has ended refuses at once, with no tick needed.
+        setup.peers.set_files(ID_A, Some(grant(FilesMode::ReadWrite, ShellUntil::At(1)))).unwrap();
+        assert_eq!(ask(&mut stream, &mut reader, list.clone()), serde_json::json!({"error": "notPermitted"}));
+        setup.peers.set_files(ID_A, None).unwrap();
+        assert_eq!(ask(&mut stream, &mut reader, chunk), serde_json::json!({"error": "notPermitted"}));
+        // Chunks that worked left no line. Only the refusals did.
+        let log = setup.log.read();
+        assert!(log.iter().all(|entry| entry.outcome == "notPermitted"), "{log:?}");
+    }
+
+    #[test]
     fn a_successful_read_is_not_logged_but_a_refused_read_and_a_change_are() {
         let setup = setup("noise");
         setup.pair(ID_A, true, false);
@@ -915,7 +949,7 @@ mod tests {
             ask(&mut stream, &mut reader, status()),
             serde_json::json!({"ok": "done"})
         );
-        let mut big = vec![b'a'; MAX_REQUEST_LINE + 1];
+        let mut big = vec![b'a'; MAX_DISPATCH_LINE + 1];
         big.push(b'\n');
         let _ = stream.write_all(&big);
         let mut line = String::new();
@@ -1114,7 +1148,7 @@ mod tests {
         setup.pair(ID_A, true, false);
         let id = helper::Role::Peer(DeviceId::parse(ID_A).unwrap());
         let sink = Sink::default();
-        let mut big = vec![b'a'; MAX_REQUEST_LINE + 1];
+        let mut big = vec![b'a'; MAX_DISPATCH_LINE + 1];
         big.push(b'\n');
         let code = helper::session(
             &setup.socket,
