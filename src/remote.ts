@@ -9,7 +9,7 @@ export const PROTOCOL = 1;
 export type Session = {
   device: { id: string; name: string; kind: DeviceKind };
   /** What this device may do on the other one. */
-  permissions: { control: boolean; applications: boolean; actions: boolean };
+  permissions: { control: boolean; applications: boolean; actions: boolean; screen: boolean };
   /** The full shell that the device granted this one, or `null` while it is off. Only that device can turn it on. */
   shell: ShellState;
   version: string;
@@ -43,14 +43,17 @@ const localOnly = new Set([
   "requestActivityAccessibility", "createAction", "updateAction", "deleteAction",
   "grantShell", "revokeShell", "dismissKeysWarning", "openShell", "shellCommand",
   "enableScreenSharing", "openScreenSharingSettings", "openFullDiskAccess", "openScreen",
-  "grantFiles", "revokeFiles", "pickFiles", "pickFolder", "pickSaveFile", "queueUpload", "queueDownload",
+  "grantFiles", "revokeFiles", "pickFiles", "pickFolder", "pickSaveFile", "queueUpload", "queueDownload", "openRemoteFile",
   "getTransfers", "stopTransfer", "clearTransfers",
 ]);
 /** The requests that need the Control permission. Only the ones that a control of this window sends. */
 const needsControl = new Set([
   "setToolActive", "setQuickStart", "setDuration", "setSchedule", "saveCaffeinateSettings", "setLidMode",
-  "setStartToolsOnLaunch", "setHideWhileSharing", "setLoginLaunch", "setPinnedTools", "getScreenSharing",
+  "setStartToolsOnLaunch", "setHideWhileSharing", "setLoginLaunch", "setPinnedTools",
 ]);
+
+/** The requests that need the Screen permission. Keep it equal to `Access::Screen` in `dispatch.rs`. */
+const needsScreen = new Set(["getScreenSharing"]);
 
 /** The requests that need the Applications permission. Keep it equal to `Access::Applications` in `dispatch.rs`. */
 const needsApplications = new Set(["listApplications", "getAppIcon", "openApplication"]);
@@ -70,6 +73,7 @@ export function refusal(
   if (permissions && !permissions.control && needsControl.has(command)) return "notPermitted";
   if (permissions && !permissions.applications && needsApplications.has(command)) return "notPermitted";
   if (permissions && !permissions.actions && needsActions.has(command)) return "notPermitted";
+  if (permissions && !permissions.screen && needsScreen.has(command)) return "notPermitted";
 }
 
 /** The refusals that the interface shows as a calm note instead of a failure. */

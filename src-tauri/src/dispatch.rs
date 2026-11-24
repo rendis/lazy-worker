@@ -28,6 +28,8 @@ pub enum Access {
     Actions,
     /// Lists, draws, and opens the applications of this device.
     Applications,
+    /// Reads the Screen Sharing state, so the device can open this screen.
+    Screen,
     /// Settings that store a command, an address list, or a permission, and system prompts.
     LocalOnly,
     /// Needs only that the caller is a paired device. It reads nothing that a device did not already
@@ -49,6 +51,8 @@ pub struct Permissions {
     pub control: bool,
     pub applications: bool,
     pub actions: bool,
+    /// Whether the device may see the Screen Sharing state and open the screen.
+    pub screen: bool,
     /// What the files grant of the device allows right now, or nothing while it has none.
     pub files: Option<FilesMode>,
     /// The device that sent the request. A request that belongs to one device, such as a run, uses it.
@@ -113,13 +117,14 @@ impl Origin {
             Access::Control if permissions.control => Ok(()),
             Access::Applications if permissions.applications => Ok(()),
             Access::Actions if permissions.actions => Ok(()),
+            Access::Screen if permissions.screen => Ok(()),
             Access::Files { write } => match permissions.files {
                 Some(FilesMode::ReadWrite) => Ok(()),
                 Some(FilesMode::Read) if !write => Ok(()),
                 _ => Err("notPermitted"),
             },
             Access::LocalOnly => Err("localOnly"),
-            Access::Control | Access::Applications | Access::Actions => Err("notPermitted"),
+            Access::Control | Access::Applications | Access::Actions | Access::Screen => Err("notPermitted"),
         }
     }
 
@@ -195,9 +200,10 @@ pub enum Request {
         control: bool,
         applications: bool,
         actions: bool,
+        screen: bool,
     },
     RemovePeer { id: String },
-    OpenPairing { control: bool, applications: bool, actions: bool },
+    OpenPairing { control: bool, applications: bool, actions: bool, screen: bool },
     ClosePairing,
     PairDevice { user: String, host: String, port: Option<u16>, code: String },
     ForgetDevice { id: String },
@@ -253,6 +259,8 @@ pub enum Request {
     CancelUpload { upload_id: String },
     MakeFolder { root: String, path: String, name: String },
     DeleteEntry { root: String, path: String, recursive: bool },
+    /// Gives an entry of a shared folder a new name in the same folder. It never replaces an entry.
+    RenameEntry { root: String, path: String, name: String },
     /// Lets a device that controls this one reach files here, for `minutes` (1 to 1440) or until it is turned off.
     /// Only the person at this device may grant it, and pairing never does.
     GrantFiles { id: String, scope: FilesScope, folders: Vec<String>, mode: FilesMode, minutes: Option<u32> },
@@ -265,6 +273,8 @@ pub enum Request {
     QueueUpload { id: String, root: String, path: String, files: Vec<String> },
     /// Queues files of a shared folder of that device to save here. One path goes to the file `destination`, several into the folder `destination`.
     QueueDownload { id: String, root: String, paths: Vec<String>, destination: String },
+    /// Saves one file of a device that this one controls into a private folder of this app, then opens it with its default application. Changes stay on this device.
+    OpenRemoteFile { id: String, root: String, path: String },
     GetTransfers,
     StopTransfer { id: u64 },
     ClearTransfers,
@@ -303,7 +313,6 @@ impl Request {
             | Self::GetFirstRun
             | Self::GetSystemLanguage
             | Self::GetStatuses
-            | Self::GetScreenSharing
             | Self::GetLidStatus
             | Self::GetLoginLaunch
             | Self::GetUpdateStatus
@@ -334,6 +343,8 @@ impl Request {
             } => Access::LocalOnly,
             Self::SetQuickStart { .. } => Access::Control,
             Self::GetSession | Self::GetFileShare => Access::Paired,
+            // Screen Sharing is macOS's own, so this only decides whether the device may see its state.
+            Self::GetScreenSharing => Access::Screen,
             Self::ListFiles { .. } | Self::StatFile { .. } | Self::ReadFileChunk { .. } => {
                 Access::Files { write: false }
             }
@@ -342,7 +353,8 @@ impl Request {
             | Self::FinishUpload { .. }
             | Self::CancelUpload { .. }
             | Self::MakeFolder { .. }
-            | Self::DeleteEntry { .. } => Access::Files { write: true },
+            | Self::DeleteEntry { .. }
+            | Self::RenameEntry { .. } => Access::Files { write: true },
             Self::ListActions
             | Self::RunAction { .. }
             | Self::GetActionRun { .. }
@@ -423,6 +435,7 @@ impl Request {
             | Self::PickSaveFile { .. }
             | Self::QueueUpload { .. }
             | Self::QueueDownload { .. }
+            | Self::OpenRemoteFile { .. }
             | Self::GetTransfers
             | Self::StopTransfer { .. }
             | Self::ClearTransfers
@@ -527,6 +540,7 @@ impl Request {
             | Self::CancelUpload { .. }
             | Self::MakeFolder { .. }
             | Self::DeleteEntry { .. }
+            | Self::RenameEntry { .. }
             | Self::GrantFiles { .. }
             | Self::RevokeFiles { .. }
             | Self::PickFiles
@@ -534,6 +548,7 @@ impl Request {
             | Self::PickSaveFile { .. }
             | Self::QueueUpload { .. }
             | Self::QueueDownload { .. }
+            | Self::OpenRemoteFile { .. }
             | Self::StopTransfer { .. }
             | Self::ClearTransfers
             | Self::RemoteCall { .. } => false,
@@ -638,6 +653,7 @@ impl Request {
             | Self::CancelUpload { .. }
             | Self::MakeFolder { .. }
             | Self::DeleteEntry { .. }
+            | Self::RenameEntry { .. }
             | Self::GrantFiles { .. }
             | Self::RevokeFiles { .. }
             | Self::PickFiles
@@ -645,6 +661,7 @@ impl Request {
             | Self::PickSaveFile { .. }
             | Self::QueueUpload { .. }
             | Self::QueueDownload { .. }
+            | Self::OpenRemoteFile { .. }
             | Self::GetTransfers
             | Self::StopTransfer { .. }
             | Self::ClearTransfers
@@ -672,6 +689,7 @@ impl Request {
                 | Self::PickSaveFile { .. }
                 | Self::QueueUpload { .. }
                 | Self::QueueDownload { .. }
+                | Self::OpenRemoteFile { .. }
                 | Self::GetTransfers
                 | Self::StopTransfer { .. }
                 | Self::ClearTransfers
@@ -700,6 +718,7 @@ impl Request {
                 | Self::StatFile { .. }
                 | Self::MakeFolder { .. }
                 | Self::DeleteEntry { .. }
+                | Self::RenameEntry { .. }
         )
     }
 }
@@ -929,7 +948,8 @@ async fn run(
         | Request::FinishUpload { .. }
         | Request::CancelUpload { .. }
         | Request::MakeFolder { .. }
-        | Request::DeleteEntry { .. }) => {
+        | Request::DeleteEntry { .. }
+        | Request::RenameEntry { .. }) => {
             #[cfg(unix)]
             {
                 // Only a paired device has files here. The grant is read again now, so a grant that ended
@@ -1058,6 +1078,25 @@ async fn run(
             #[cfg(not(unix))]
             {
                 let _ = (id, root, paths, destination);
+                Err("unsupported")
+            }
+        }
+        Request::OpenRemoteFile { id, root, path } => {
+            #[cfg(unix)]
+            {
+                app.state::<crate::remote::service::Service>()
+                    .device(&id)
+                    .ok_or("notPermitted")?;
+                let base = app.path().app_config_dir().map_err(|_| "remoteIo")?;
+                let folder = crate::remote::transfers::open_folder(&base)?;
+                return app
+                    .state::<crate::remote::transfers::Transfers>()
+                    .queue_open(&id, &root, &path, &folder)
+                    .map(|()| Value::Null);
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = (id, root, path);
                 Err("unsupported")
             }
         }
@@ -1366,6 +1405,7 @@ async fn run(
                     pairing: service.pairing_state(),
                     devices: service.remote_devices(),
                     warnings: service.warnings(),
+                    home: service.home(),
                 }
             };
             #[cfg(not(unix))]
@@ -1375,6 +1415,7 @@ async fn run(
                 pairing: devices::Pairing::closed(),
                 devices: Vec::new(),
                 warnings: Vec::new(),
+                home: None,
             };
             json(
                 tauri::async_runtime::spawn_blocking(move || {
@@ -1433,12 +1474,12 @@ async fn run(
             #[cfg(not(unix))]
             Err("unsupported")
         }
-        Request::SetPeerPermissions { id, control, applications, actions } => {
+        Request::SetPeerPermissions { id, control, applications, actions, screen } => {
             #[cfg(unix)]
             {
                 let lost = app
                     .state::<crate::remote::service::Service>()
-                    .set_permissions(&id, control, applications, actions)?;
+                    .set_permissions(&id, control, applications, actions, screen)?;
                 // A device that lost Actions keeps no schedule and no run.
                 if lost {
                     crate::actions::forget_peer(app, Some(&id));
@@ -1447,7 +1488,7 @@ async fn run(
             }
             #[cfg(not(unix))]
             {
-                let _ = (id, control, applications, actions);
+                let _ = (id, control, applications, actions, screen);
                 Err("unsupported")
             }
         }
@@ -1471,14 +1512,14 @@ async fn run(
                 Err("unsupported")
             }
         }
-        Request::OpenPairing { control, applications, actions } => {
+        Request::OpenPairing { control, applications, actions, screen } => {
             #[cfg(unix)]
             return json(
                 tauri::async_runtime::spawn_blocking({
                     let app = app.clone();
                     move || {
                         app.state::<crate::remote::service::Service>()
-                            .open_pairing(control, applications, actions)
+                            .open_pairing(control, applications, actions, screen)
                     }
                 })
                 .await
@@ -1486,7 +1527,7 @@ async fn run(
             );
             #[cfg(not(unix))]
             {
-                let _ = (control, applications, actions);
+                let _ = (control, applications, actions, screen);
                 Err("unsupported")
             }
         }
@@ -1683,6 +1724,7 @@ async fn session(app: &AppHandle, origin: Origin) -> Result<Value, &'static str>
             control: true,
             applications: true,
             actions: true,
+            screen: true,
             files: None,
             peer: None,
         },
@@ -1705,6 +1747,7 @@ async fn session(app: &AppHandle, origin: Origin) -> Result<Value, &'static str>
             "control": permissions.control,
             "applications": permissions.applications,
             "actions": permissions.actions,
+            "screen": permissions.screen,
         },
         "shell": shell,
         "version": version,
@@ -1749,6 +1792,7 @@ mod tests {
         control: false,
         applications: false,
         actions: false,
+        screen: false,
         files: None,
         peer: None,
     });
@@ -1756,6 +1800,7 @@ mod tests {
         control: true,
         applications: false,
         actions: false,
+        screen: false,
         files: None,
         peer: None,
     });
@@ -1763,6 +1808,7 @@ mod tests {
         control: false,
         applications: true,
         actions: false,
+        screen: false,
         files: None,
         peer: None,
     });
@@ -1770,6 +1816,7 @@ mod tests {
         control: false,
         applications: false,
         actions: true,
+        screen: false,
         files: None,
         peer: None,
     });
@@ -1778,6 +1825,7 @@ mod tests {
         control: false,
         applications: false,
         actions: false,
+        screen: false,
         files: Some(FilesMode::Read),
         peer: None,
     });
@@ -1785,6 +1833,7 @@ mod tests {
         control: false,
         applications: false,
         actions: false,
+        screen: false,
         files: Some(FilesMode::ReadWrite),
         peer: None,
     });
@@ -1897,9 +1946,9 @@ mod tests {
         for value in [
             json!({"command": "getDevices"}),
             json!({"command": "getRemoteLog"}),
-            json!({"command": "setPeerPermissions", "args": {"id": id, "control": true, "applications": true, "actions": true}}),
+            json!({"command": "setPeerPermissions", "args": {"id": id, "control": true, "applications": true, "actions": true, "screen": true}}),
             json!({"command": "removePeer", "args": {"id": id}}),
-            json!({"command": "openPairing", "args": {"control": true, "applications": true, "actions": true}}),
+            json!({"command": "openPairing", "args": {"control": true, "applications": true, "actions": true, "screen": true}}),
             json!({"command": "closePairing"}),
             json!({"command": "pairDevice", "args": {"user": "me", "host": "studio.local", "port": 22, "code": "123456"}}),
             json!({"command": "pairDevice", "args": {"user": "me", "host": "studio.local", "code": "123456"}}),
@@ -1913,7 +1962,7 @@ mod tests {
             json!({"command": "openScreen", "args": {"id": id}}),
         ] {
             let parsed = request(value);
-            for origin in [NONE, CONTROL, ACTIONS, Origin::Remote(Permissions { control: true, applications: true, actions: true, files: None, peer: None })] {
+            for origin in [NONE, CONTROL, ACTIONS, Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, files: None, peer: None })] {
                 assert_eq!(allowed(origin, &parsed, &preferences), Err("localOnly"));
             }
             assert_eq!(allowed(Origin::Local, &parsed, &preferences), Ok(()));
@@ -1932,7 +1981,7 @@ mod tests {
             json!({"command": "getProxyLog"}),
         ] {
             let parsed = request(value);
-            let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, files: None, peer: None });
+            let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, files: None, peer: None });
             assert_eq!(allowed(CONTROL, &parsed, &preferences), Err("localOnly"));
             assert_eq!(allowed(both, &parsed, &preferences), Err("localOnly"));
             assert_eq!(allowed(Origin::Local, &parsed, &preferences), Ok(()));
@@ -2113,7 +2162,7 @@ mod tests {
     #[test]
     fn copying_is_local_only_runs_on_the_viewer_and_has_a_size_cap() {
         let preferences = Preferences::default();
-        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, files: None, peer: None });
+        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, files: None, peer: None });
         let id = "0123456789abcdef0123456789abcdef";
         for value in [
             json!({"command": "copyText", "args": {"text": "hello"}}),
@@ -2152,7 +2201,7 @@ mod tests {
     #[test]
     fn the_viewer_and_the_windows_are_not_something_a_remote_device_may_ask() {
         let preferences = Preferences::default();
-        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, files: None, peer: None });
+        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, files: None, peer: None });
         for value in [
             json!({"command": "getViewer"}),
             json!({"command": "openRemoteWindow", "args": {"id": DEVICE}}),
@@ -2190,7 +2239,7 @@ mod tests {
     #[test]
     fn applications_need_their_own_permission_and_control_alone_is_refused() {
         let preferences = Preferences::default();
-        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, files: None, peer: None });
+        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, files: None, peer: None });
         for value in application_requests() {
             let parsed = request(value);
             assert_eq!(parsed.access(&preferences), Access::Applications);
@@ -2290,7 +2339,7 @@ mod tests {
     #[test]
     fn remote_control_is_refused_for_every_action_request() {
         let preferences = Preferences::default();
-        let all = Origin::Remote(Permissions { control: true, applications: true, actions: false, files: None, peer: None });
+        let all = Origin::Remote(Permissions { control: true, applications: true, actions: false, screen: false, files: None, peer: None });
         for value in actions_requests().into_iter().chain(writing_requests()) {
             let parsed = request(value.clone());
             for origin in [NONE, CONTROL, APPLICATIONS, all] {
@@ -2312,7 +2361,7 @@ mod tests {
         for value in writing_requests() {
             let parsed = request(value.clone());
             assert_eq!(parsed.access(&preferences), Access::LocalOnly, "{value}");
-            let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, files: None, peer: None });
+            let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, files: None, peer: None });
             for origin in [NONE, CONTROL, ACTIONS, both] {
                 assert_eq!(allowed(origin, &parsed, &preferences), Err("localOnly"), "{value}");
             }
@@ -2350,7 +2399,7 @@ mod tests {
         let preferences = Preferences::default();
         let on = request(json!({"command": "setStartToolsOnLaunch", "args": {"enabled": true}}));
         let off = request(json!({"command": "setStartToolsOnLaunch", "args": {"enabled": false}}));
-        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, files: None, peer: None });
+        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, files: None, peer: None });
         for origin in [NONE, CONTROL, ACTIONS, both] {
             assert_eq!(allowed(origin, &on, &preferences), Err("localOnly"));
         }
@@ -2398,7 +2447,7 @@ mod tests {
     fn no_shell_request_is_accepted_from_any_remote_origin() {
         let preferences = Preferences::default();
         let id = "0123456789abcdef0123456789abcdef";
-        let all = Origin::Remote(Permissions { control: true, applications: true, actions: true, files: None, peer: PeerId::parse(id) });
+        let all = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, files: None, peer: PeerId::parse(id) });
         for value in [
             json!({"command": "grantShell", "args": {"id": id, "minutes": 60}}),
             json!({"command": "grantShell", "args": {"id": id, "minutes": null}}),
@@ -2421,13 +2470,18 @@ mod tests {
     }
 
     #[test]
-    fn screen_sharing_is_read_with_control_and_turned_on_only_at_the_device() {
+    fn screen_sharing_is_read_with_the_screen_permission_and_turned_on_only_at_the_device() {
         let preferences = Preferences::default();
         let id = "0123456789abcdef0123456789abcdef";
         let read = request(json!({"command": "getScreenSharing"}));
-        assert_eq!(allowed(CONTROL, &read, &preferences), Ok(()));
+        let screen = Origin::Remote(Permissions { control: false, applications: false, actions: false, screen: true, files: None, peer: None });
+        assert_eq!(read.access(&preferences), Access::Screen);
+        assert_eq!(allowed(screen, &read, &preferences), Ok(()));
+        // Control alone does not show the screen.
+        assert_eq!(allowed(CONTROL, &read, &preferences), Err("notPermitted"));
         assert_eq!(allowed(NONE, &read, &preferences), Err("notPermitted"));
         assert_eq!(allowed(ACTIONS, &read, &preferences), Err("notPermitted"));
+        assert_eq!(allowed(Origin::Local, &read, &preferences), Ok(()));
         assert!(read.is_read() && read.may_be_called_remotely() && !read.runs_on_viewer());
         // The Devices view asks the other device, and a window of a device forwards it.
         assert_eq!(plan(&Route::Device(id.to_owned()), &read), Plan::Forward(id.to_owned()));
@@ -2487,13 +2541,14 @@ mod tests {
             (json!({"command": "cancelUpload", "args": {"uploadId": "x"}}), write),
             (json!({"command": "makeFolder", "args": {"root": root, "path": path, "name": "n"}}), write),
             (json!({"command": "deleteEntry", "args": {"root": root, "path": path, "recursive": false}}), write),
+            (json!({"command": "renameEntry", "args": {"root": root, "path": path, "name": "n"}}), write),
         ]
     }
 
     #[test]
     fn each_files_request_declares_its_access_and_only_a_matching_grant_passes() {
         let preferences = Preferences::default();
-        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, files: None, peer: None });
+        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, files: None, peer: None });
         for (value, access) in files_requests() {
             let parsed = request(value.clone());
             assert_eq!(parsed.access(&preferences), access, "{value}");
@@ -2526,7 +2581,7 @@ mod tests {
     fn granting_files_and_the_helpers_of_the_person_are_local_only_and_never_sent_to_a_device() {
         let preferences = Preferences::default();
         let id = "0123456789abcdef0123456789abcdef";
-        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, files: Some(FilesMode::ReadWrite), peer: None });
+        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, files: Some(FilesMode::ReadWrite), peer: None });
         let local_only = [
             json!({"command": "grantFiles", "args": {"id": id, "scope": "folders", "folders": ["~/Lazy Worker"], "mode": "read", "minutes": 60}}),
             json!({"command": "grantFiles", "args": {"id": id, "scope": "disk", "folders": [], "mode": "readWrite", "minutes": null}}),
@@ -2563,7 +2618,7 @@ mod tests {
         for (value, _) in files_requests() {
             let parsed = request(value.clone());
             let name = value["command"].as_str().unwrap();
-            let listed = ["getFileShare", "listFiles", "statFile", "makeFolder", "deleteEntry"].contains(&name);
+            let listed = ["getFileShare", "listFiles", "statFile", "makeFolder", "deleteEntry", "renameEntry"].contains(&name);
             assert_eq!(parsed.may_be_called_remotely(), listed, "{name}");
             assert!(!parsed.runs_on_viewer() && !parsed.is_controller_side(), "{name}");
         }

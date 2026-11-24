@@ -25,6 +25,11 @@ const MAX_JOBS: usize = 50;
 /// How requests reach a device that this one controls.
 pub trait Link: Send + Sync + 'static {
     fn call(&self, device: &str, request: &Value) -> Result<Value, &'static str>;
+
+    /// Opens a saved file with its default application. A link that cannot opens nothing.
+    fn open(&self, _local: &Path) -> Result<(), &'static str> {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -48,7 +53,8 @@ enum Spec {
     /// Sends the local file into `dir` of the shared folder `root`.
     Upload { root: String, dir: String, local: PathBuf },
     /// Saves `path` of the shared folder `root` as the local file `local`.
-    Download { root: String, path: String, local: PathBuf },
+    /// With `open`, the file opens with its default application once it is saved.
+    Download { root: String, path: String, local: PathBuf, open: bool },
 }
 
 /// One transfer, as the webview reads it. `error` is an error word, never text from outside.
@@ -59,6 +65,8 @@ pub struct Job {
     pub device: String,
     pub kind: Kind,
     pub name: String,
+    /// True for a download that opens when it ends, and so was not saved by choice.
+    pub open: bool,
     pub total: u64,
     pub done: u64,
     pub state: State,
@@ -87,6 +95,18 @@ impl Link for AppLink {
         use tauri::Manager;
         self.0.state::<super::service::Service>().forward(device, request)
     }
+
+    fn open(&self, local: &Path) -> Result<(), &'static str> {
+        // The path is absolute, so `open` reads it as a file and never as an option.
+        let status = std::process::Command::new("/usr/bin/open")
+            .arg(local)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map_err(|_| "filesOpenFailed")?;
+        if status.success() { Ok(()) } else { Err("filesOpenFailed") }
+    }
 }
 
 /// The last part of a path as text for people. Nothing else of the local path leaves this device.
@@ -94,6 +114,29 @@ fn base_name(path: &str) -> String {
     Path::new(path)
         .file_name()
         .map_or_else(String::new, |name| name.to_string_lossy().chars().filter(|c| !c.is_control()).collect())
+}
+
+/// How long a file that was opened stays on this device.
+const OPENED_KEEP: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+/// A new private folder for one file that opens, under `<base>/opened`. Folders older than a day go.
+pub fn open_folder(base: &Path) -> Result<PathBuf, &'static str> {
+    use rand_core::{OsRng, RngCore};
+    let parent = base.join("opened");
+    super::ensure_private_dir(&parent)?;
+    if let Ok(items) = fs::read_dir(&parent) {
+        for item in items.flatten() {
+            let old = item.metadata().and_then(|meta| meta.modified()).ok().and_then(|at| at.elapsed().ok()).is_some_and(|age| age > OPENED_KEEP);
+            if old && item.file_type().is_ok_and(|kind| kind.is_dir()) {
+                let _ = fs::remove_dir_all(item.path());
+            }
+        }
+    }
+    let mut bytes = [0u8; 16];
+    OsRng.fill_bytes(&mut bytes);
+    let folder = parent.join(bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>());
+    super::ensure_private_dir(&folder)?;
+    Ok(folder)
 }
 
 /// A name that is free in a folder: `name`, then `name 2`, `name 3`, and so on before the extension.
@@ -177,11 +220,23 @@ impl Transfers {
                 }
                 local
             };
-            specs.push((name, 0, Spec::Download { root: root.to_owned(), path: path.clone(), local }));
+            specs.push((name, 0, Spec::Download { root: root.to_owned(), path: path.clone(), local, open: false }));
         }
         for (name, total, spec) in specs {
             self.push(device, Kind::Download, name, total, spec);
         }
+        Ok(())
+    }
+
+    /// Queues one download into the folder `dir`, which is private to this app, and opens the file
+    /// with its default application when it is saved.
+    pub fn queue_open(&self, device: &str, root: &str, path: &str, dir: &Path) -> Result<(), &'static str> {
+        let name = base_name(path);
+        if name.is_empty() || !dir.is_absolute() {
+            return Err("filesPathInvalid");
+        }
+        let local = dir.join(&name);
+        self.push(device, Kind::Download, name, 0, Spec::Download { root: root.to_owned(), path: path.to_owned(), local, open: true });
         Ok(())
     }
 
@@ -194,6 +249,7 @@ impl Transfers {
             device: device.to_owned(),
             kind,
             name,
+            open: matches!(spec, Spec::Download { open: true, .. }),
             total,
             done: 0,
             state: State::Queued,
@@ -264,7 +320,9 @@ impl Shared {
             let (id, device, spec, stop) = next;
             let outcome = match spec {
                 Some(Spec::Upload { root, dir, local }) => self.upload(id, &device, &root, &dir, &local, &stop),
-                Some(Spec::Download { root, path, local }) => self.download(id, &device, &root, &path, &local, &stop),
+                Some(Spec::Download { root, path, local, open }) => self
+                    .download(id, &device, &root, &path, &local, &stop)
+                    .and_then(|()| if open { self.link.open(&local) } else { Ok(()) }),
                 None => Err("filesIo"),
             };
             let mut jobs = self.jobs.lock().unwrap_or_else(|error| error.into_inner());
@@ -410,9 +468,16 @@ mod tests {
         calls: Mutex<Vec<String>>,
         /// After this many chunk calls the grant ends, as a revoke would.
         revoke_after: Mutex<Option<usize>>,
+        /// The files that the app would have opened.
+        opened: Mutex<Vec<PathBuf>>,
     }
 
     impl Link for Arc<Loopback> {
+        fn open(&self, local: &Path) -> Result<(), &'static str> {
+            self.opened.lock().unwrap().push(local.to_owned());
+            Ok(())
+        }
+
         fn call(&self, _device: &str, request: &Value) -> Result<Value, &'static str> {
             let mut files = self.files.lock().unwrap();
             let name = request["command"].as_str().unwrap().to_owned();
@@ -464,6 +529,7 @@ mod tests {
             }),
             calls: Mutex::default(),
             revoke_after: Mutex::default(),
+            opened: Mutex::default(),
         });
         let transfers = Transfers::new(loopback.clone());
         Setup { base, shared, local, root, loopback, transfers }
@@ -518,6 +584,31 @@ mod tests {
         assert!(!fs::read_dir(&out).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().ends_with(".part")));
         s.transfers.clear();
         assert_eq!(s.transfers.list().as_array().unwrap().len(), 0);
+        let _ = fs::remove_dir_all(&s.base);
+    }
+
+    #[test]
+    fn a_file_that_opens_is_saved_in_a_private_folder_first_and_only_then_opened() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = setup("transfer-open");
+        fs::write(s.shared.join("note.txt"), b"hello").unwrap();
+        let folder = open_folder(&s.base).unwrap();
+        assert_eq!(fs::metadata(&folder).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_ne!(open_folder(&s.base).unwrap(), folder);
+        s.transfers.queue_open("dev", &s.root, "note.txt", &folder).unwrap();
+        let jobs = wait_for_end(&s.transfers);
+        assert_eq!(jobs[0]["state"], "done");
+        assert_eq!(jobs[0]["open"], true);
+        assert_eq!(fs::read(folder.join("note.txt")).unwrap(), b"hello");
+        assert_eq!(*s.loopback.opened.lock().unwrap(), [folder.join("note.txt")]);
+        // A file that cannot be read is never opened, and a plain download never opens.
+        s.transfers.queue_open("dev", &s.root, "gone.txt", &folder).unwrap();
+        s.transfers.queue_downloads("dev", &s.root, &["note.txt".into()], s.local.join("copy.txt").to_str().unwrap()).unwrap();
+        let jobs = wait_for_end(&s.transfers);
+        assert_eq!(jobs[1]["state"], "failed");
+        assert_eq!(jobs[2]["open"], false);
+        assert_eq!(s.loopback.opened.lock().unwrap().len(), 1);
+        assert_eq!(s.transfers.queue_open("dev", &s.root, "", &folder), Err("filesPathInvalid"));
         let _ = fs::remove_dir_all(&s.base);
     }
 

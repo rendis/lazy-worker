@@ -6,7 +6,7 @@ import { version as previewVersion } from "../src-tauri/tauri.conf.json";
 import type { Language } from "./messages";
 import type { ToolId } from "./modules";
 import {
-  previewAddFile, previewClearTransfers, previewDelete, previewFileSize, previewList, previewMakeFolder, previewQueue,
+  previewAddFile, previewClearTransfers, previewDelete, previewFileSize, previewList, previewMakeFolder, previewQueue, previewRename,
   previewShareRoots, previewStopTransfer, previewTransfers,
   type FileListing, type FilesGrant, type FilesGranted, type PrivacyCheck, type FilesMode, type FilesScope, type FileShare, type Transfer,
 } from "./files";
@@ -87,7 +87,7 @@ export type Statuses = Record<ToolId, Status>;
 export type ActivityAccessibility = "granted" | "required" | "unsupported" | "unavailable";
 
 export type DeviceKind = "laptop" | "desktop";
-export type ControllerPermission = "control" | "applications" | "actions" | "shell" | "files";
+export type ControllerPermission = "control" | "applications" | "actions" | "screen" | "shell" | "files";
 /** When a full shell ends: seconds since the Unix epoch, or `"untilOff"` while it lasts until the person turns it off. */
 export type ShellUntil = number | "untilOff";
 /** A full shell that a device granted, or `null` while it is off. */
@@ -191,7 +191,7 @@ export type DiscoveredDevice = {
   /** What its open pairing window announced on this network. It is a hint: the code is still needed to pair. */
   pairing: { account: string; id: string } | null;
 };
-export type PairingPermissions = Pick<Controller["permissions"], "control" | "applications" | "actions">;
+export type PairingPermissions = Pick<Controller["permissions"], "control" | "applications" | "actions" | "screen">;
 export type DevicesOverview = {
   thisDevice: {
     /** Empty when the system gives no name. */
@@ -201,6 +201,8 @@ export type DevicesOverview = {
     pairing: PairingState;
     /** The user name on this device, as a first guess for the account on another one. */
     account: string | null;
+    /** The home folder of this user, shown where the person shares it. */
+    home: string | null;
     controllers: Controller[];
     /** Whether this device can receive requests, and an error code when it cannot. */
     socket: { listening: boolean; error: string | null };
@@ -456,7 +458,7 @@ function settlePreviewPairing(now: number): void {
   if (previewQuery.has("pair-in") && now - previewPairingOpened >= 6) {
     previewControllerList().push({
       id: "mini", name: "Mac mini de la sala", kind: "desktop", lastAccess: null, connected: false,
-      permissions: { control: true, applications: false, actions: false, shell: false, files: false }, shell: null, files: null,
+      permissions: { control: true, applications: false, actions: false, screen: false, shell: false, files: false }, shell: null, files: null,
     });
     Object.assign(previewPairing, { open: false, expires: null, attemptsLeft: 0 });
   } else if (previewPairing.expires !== null && previewPairing.expires <= now) {
@@ -476,7 +478,7 @@ function sampleControllers(now: number): Controller[] {
     const far = previewQuery.get("stress") === "far";
     return [{
       id: "studio", name: "Estación de trabajo del estudio de diseño del tercer piso 1B", kind: "desktop", lastAccess: now - 5 * 60, connected: true,
-      permissions: { control: true, applications: true, actions: true, shell: true, files: true },
+      permissions: { control: true, applications: true, actions: true, screen: true, shell: true, files: true },
       shell: { until: far ? Math.floor(tomorrow.getTime() / 1000) : now + 3600 },
       files: { scope: "folders", folders: ["~/Lazy Worker"], mode: "read", until: far ? Math.floor(tomorrow.getTime() / 1000) : "untilOff" },
     }];
@@ -484,15 +486,15 @@ function sampleControllers(now: number): Controller[] {
   return [
     {
       id: "studio", name: "iMac del estudio", kind: "desktop", lastAccess: now - 5 * 60, connected: true,
-      permissions: { control: true, applications: true, actions: true, shell: false, files: false }, shell: null, files: null,
+      permissions: { control: true, applications: true, actions: true, screen: true, shell: false, files: false }, shell: null, files: null,
     },
     {
       id: "office", name: "MacBook Air de la oficina", kind: "laptop", lastAccess: now - 26 * 3600, connected: false,
-      permissions: { control: true, applications: false, actions: false, shell: false, files: false }, shell: null, files: null,
+      permissions: { control: true, applications: false, actions: false, screen: false, shell: false, files: false }, shell: null, files: null,
     },
     {
       id: "new", name: "Mac mini", kind: "desktop", lastAccess: null, connected: false,
-      permissions: { control: false, applications: false, actions: false, shell: false, files: false }, shell: null, files: null,
+      permissions: { control: false, applications: false, actions: false, screen: false, shell: false, files: false }, shell: null, files: null,
     },
   ];
 }
@@ -537,7 +539,7 @@ const previewAccess: RemoteAccess = { ...(previewStates[previewQuery.get("remote
 /** `?macos=12` shows the guide of macOS 12, and `?remote-fails` makes turning on fail until the user does it in Sharing. */
 if (previewQuery.has("macos")) previewAccess.macosMajor = Number(previewQuery.get("macos")) || 26;
 
-/** A preview shows Screen Sharing on this device with `?screen=off|nouser`, and on the sample device with `?remote-screen=off|nouser`. */
+/** A preview shows Screen Sharing on this device with `?screen=off|nouser`, and on the sample device with `?remote-screen=off|nouser|denied`. */
 const previewScreen: ScreenSharing = {
   on: previewQuery.get("screen") !== "off", userAllowed: previewQuery.get("screen") === "nouser" ? false : true,
 };
@@ -574,6 +576,8 @@ function previewPermissions(): Session["permissions"] {
   return {
     control: level !== "none", applications: !previewQuery.has("no-apps"),
     actions: level !== "none" && level !== "control" && !previewQuery.has("no-actions"),
+    // `?no-screen` shows a device that has not allowed its screen.
+    screen: level !== "none" && !previewQuery.has("no-screen"),
   };
 }
 /** What a window that controls a device finds out before a call, as the device would answer it. */
@@ -727,6 +731,7 @@ function previewDevices(): DevicesOverview {
     thisDevice: {
       name: "MacBook Pro", kind: "laptop", remoteAccess: { ...previewAccess }, pairing: { ...previewPairing },
       account: "alex",
+      home: "/Users/alex",
       controllers: previewControllerList().map(controller => {
         // A grant that has ended is off, as on the device.
         const ended = typeof controller.shell?.until === "number" && controller.shell.until <= now;
@@ -1079,7 +1084,7 @@ export const desktop = {
     return native ? call("getDevices") : previewDevices();
   },
   async setPeerPermissions(
-    id: string, permissions: Pick<Controller["permissions"], "control" | "applications" | "actions">,
+    id: string, permissions: Pick<Controller["permissions"], "control" | "applications" | "actions" | "screen">,
   ): Promise<void> {
     if (native) return call("setPeerPermissions", { id, ...permissions });
     const controller = previewControllerList().find(item => item.id === id);
@@ -1182,6 +1187,18 @@ export const desktop = {
     if (native) return call("remoteCall", { id, request: { command: "deleteEntry", args: { root, path, recursive } } });
     previewFilesGate(id, true);
     previewDelete(root, path, recursive);
+  },
+  /** Gives an entry of a shared folder a new name in its folder. It never replaces an entry. */
+  async remoteRenameEntry(id: string, root: string, path: string, name: string): Promise<void> {
+    if (native) return call("remoteCall", { id, request: { command: "renameEntry", args: { root, path, name } } });
+    previewFilesGate(id, true);
+    previewRename(root, path, name);
+  },
+  /** Saves a file of a shared folder in a private folder of this app and opens it with its default application. */
+  async openRemoteFile(id: string, root: string, path: string): Promise<void> {
+    if (native) return call("openRemoteFile", { id, root, path });
+    previewFilesGate(id, false);
+    previewQueue("download", id, path.split("/").pop() ?? path, previewFileSize(root, path), () => {}, true);
   },
   /** Queues files of this device to send into a folder of a shared folder of another device. */
   async queueUpload(id: string, root: string, path: string, files: string[]): Promise<void> {
@@ -1358,6 +1375,8 @@ export const desktop = {
   async remoteScreenSharing(id: string): Promise<ScreenSharing> {
     if (native) return call("remoteCall", { id, request: { command: "getScreenSharing" } });
     if (!previewDevices().devices.some(device => device.id === id)) throw "notPaired";
+    // `?remote-screen=denied` is a device that has not allowed its screen to this one.
+    if (previewQuery.get("remote-screen") === "denied") throw "notPermitted";
     return previewRemoteScreen();
   },
   /** One administrator prompt turns on Screen Sharing. Only the person at this device does it. */

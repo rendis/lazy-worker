@@ -381,11 +381,12 @@ impl Service {
         control: bool,
         applications: bool,
         actions: bool,
+        screen: bool,
     ) -> Result<bool, &'static str> {
         DeviceId::parse(id)?;
         let running = self.running()?;
         let before = running.peers.get(id).ok_or("notPaired")?;
-        running.peers.set_permissions(id, control, applications, actions)?;
+        running.peers.set_permissions(id, control, applications, actions, screen)?;
         let _ = running.log.append(&Entry::new(Some(id), Some(&before.name), "peerPermissions", "ok"));
         Ok(before.permissions.actions && !actions)
     }
@@ -704,6 +705,11 @@ impl Service {
     }
 
     /// The changes of `authorized_keys` that the user has not dismissed.
+    /// The home folder of this user, as text, for the window that shares it.
+    pub fn home(&self) -> Option<String> {
+        self.running().ok()?.home.as_deref()?.to_str().map(str::to_owned)
+    }
+
     pub fn warnings(&self) -> Vec<KeysWarning> {
         self.running().map(|running| running.watch.warnings()).unwrap_or_default()
     }
@@ -762,11 +768,13 @@ impl Service {
         control: bool,
         applications: bool,
         actions: bool,
+        screen: bool,
     ) -> Result<Opened, &'static str> {
         self.running()?.pairing.open(PeerPermissions {
             control,
             applications,
             actions,
+            screen,
             shell: false,
         })
     }
@@ -1278,13 +1286,13 @@ mod tests {
     fn losing_actions_is_reported_once_and_logged() {
         let fixture = fixture("svc-perm-actions");
         let service = &fixture.service;
-        assert_eq!(service.set_permissions(ID_A, true, false, true), Ok(false));
+        assert_eq!(service.set_permissions(ID_A, true, false, true, false), Ok(false));
         assert!(service.peer_may_run_actions(ID_A));
-        assert_eq!(service.set_permissions(ID_A, true, false, false), Ok(true));
+        assert_eq!(service.set_permissions(ID_A, true, false, false, false), Ok(true));
         assert!(!service.peer_may_run_actions(ID_A));
-        assert_eq!(service.set_permissions(ID_A, true, false, false), Ok(false));
+        assert_eq!(service.set_permissions(ID_A, true, false, false, false), Ok(false));
         assert!(!service.peer_may_run_actions(ID_B), "a device that is not paired may run nothing");
-        assert_eq!(service.set_permissions(ID_B, true, false, false), Err("notPaired"));
+        assert_eq!(service.set_permissions(ID_B, true, false, false, false), Err("notPaired"));
         assert_eq!(requests(&fixture).iter().filter(|(name, _)| name == "peerPermissions").count(), 3);
     }
 

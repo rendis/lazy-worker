@@ -536,6 +536,7 @@ fn connection(stream: UnixStream, mut slot: Slot) {
                     control: peer.permissions.control,
                     applications: peer.permissions.applications,
                     actions: peer.permissions.actions,
+                    screen: peer.permissions.screen,
                     files: peer
                         .files_grant
                         .as_ref()
@@ -688,7 +689,7 @@ mod tests {
         fn pair(&self, id: &str, control: bool, actions: bool) {
             self.peers.insert(peer(id, "Studio")).unwrap();
             self.peers
-                .set_permissions(id, control, false, actions)
+                .set_permissions(id, control, false, actions, false)
                 .unwrap();
         }
     }
@@ -738,7 +739,7 @@ mod tests {
 
         setup
             .peers
-            .set_permissions(ID_A, false, false, false)
+            .set_permissions(ID_A, false, false, false, false)
             .unwrap();
         assert_eq!(
             ask(&mut stream, &mut reader, status()),
@@ -746,7 +747,7 @@ mod tests {
         );
         setup
             .peers
-            .set_permissions(ID_A, true, false, false)
+            .set_permissions(ID_A, true, false, false, false)
             .unwrap();
         assert_eq!(
             ask(&mut stream, &mut reader, status()),
@@ -782,11 +783,11 @@ mod tests {
         // Control alone is refused.
         assert_eq!(ask(&mut stream, &mut reader, list.clone()), serde_json::json!({"error": "notPermitted"}));
         // Applications alone is enough, and it is read from the saved peer on the next request.
-        setup.peers.set_permissions(ID_A, false, true, false).unwrap();
+        setup.peers.set_permissions(ID_A, false, true, false, false).unwrap();
         assert_eq!(ask(&mut stream, &mut reader, list.clone()), serde_json::json!({"ok": "done"}));
         assert_eq!(ask(&mut stream, &mut reader, open), serde_json::json!({"ok": "done"}));
         assert_eq!(ask(&mut stream, &mut reader, status()), serde_json::json!({"error": "notPermitted"}));
-        setup.peers.set_permissions(ID_A, true, false, true).unwrap();
+        setup.peers.set_permissions(ID_A, true, false, true, false).unwrap();
         assert_eq!(ask(&mut stream, &mut reader, list), serde_json::json!({"error": "notPermitted"}));
         // A refused read is logged. A read that worked is not, and opening an application always is.
         let outcomes: Vec<_> = setup.log.read().iter().map(|e| (e.request.clone(), e.outcome.clone())).collect();

@@ -17,6 +17,8 @@ type Host = {
   fail(error: unknown): void;
   /** Called when the files of a device changed, so the lists read it again. */
   changed(): void;
+  /** The home folder of this device, as the app reads it, or `null` when it is not known. */
+  home(): string | null;
 };
 
 type Choice = "hour" | "two" | "custom" | "off";
@@ -166,7 +168,14 @@ export function mountFilesGrantWindow(host: Host) {
     foldersNoteBox.root, suggestedNote);
 
   // The home folder and the whole disk open a lot, so each says plainly what it reaches.
-  const warning = h("p", { class: "shell-warning files-disk-warning" }, icon("triangle-alert"), h("span"));
+  // The first sentence says what is shared, in bold. The warning is stronger than a note: it has its own tint and an alert icon.
+  const warningLead = h("strong");
+  const warningRest = h("span");
+  const warning = h("p", { class: "shell-warning files-disk-warning", role: "alert" }, icon("triangle-alert"), h("span", { class: "files-warning-text" }, warningLead, warningRest));
+  // The exact folder that the home choice shares, as the device reads it.
+  const homePath = h("code", { class: "files-home-path-text" });
+  const homeNote = h("p", { class: "setting-note files-note files-home-path" }, icon("house"), bind(h("span"), "filesHomePath"), homePath);
+  const homeBox = collapse(homeNote);
   const hidden = bind(h("p", { class: "setting-note files-note" }), "filesAlwaysHidden");
   const wideBox = collapse(warning, hidden);
 
@@ -209,7 +218,7 @@ export function mountFilesGrantWindow(host: Host) {
   const ahead = bind(h("p", { class: "setting-note shell-log-note" }), "filesPrivacyAhead");
   const cancel = bind(h("button", { type: "button", class: "text-button" }), "cancel");
   const allow = h("button", { type: "submit", class: "access-action" }, icon("folder-key"), bind(h("span"), "filesAllow"));
-  const formStep = h("div", { class: "files-step" }, scopeRow, foldersBox.root, wideBox.root, modeRow, allowsBox.root, durationRow, timeRow, logNote, ahead,
+  const formStep = h("div", { class: "files-step" }, scopeRow, foldersBox.root, homeBox.root, wideBox.root, modeRow, allowsBox.root, durationRow, timeRow, logNote, ahead,
     h("div", { class: "action-footer" }, h("span", { class: "action-spacer" }), cancel, allow));
 
   // After the grant is saved, macOS asks about the protected folders. The person is at this device, so the questions come now.
@@ -278,8 +287,15 @@ export function mountFilesGrantWindow(host: Host) {
     const writing = mode === "readWrite";
     const warningText = t(scope === "home" ? (writing ? "filesHomeWarning" : "filesHomeWarningRead")
       : (writing ? "filesDiskWarning" : "filesDiskWarningRead"));
-    const warningNode = warning.querySelector("span")!;
-    if (warningNode.textContent !== warningText) fadeText(warningNode, warningText);
+    // The first sentence is bold, and the rest follows it.
+    const stop = warningText.search(/[.。]\s/);
+    const lead = stop < 0 ? warningText : warningText.slice(0, stop + 1);
+    const rest = stop < 0 ? "" : ` ${warningText.slice(stop + 1).trim()}`;
+    fadeText(warningLead, lead);
+    fadeText(warningRest, rest);
+    const home = host.home();
+    if (home !== null) setText(homePath, home);
+    homeBox.set(scope === "home" && home !== null);
     allowsBox.set(scope === "folders");
     fadeText(allows, fill(t(mode === "readWrite" ? "filesNoteFoldersWrite" : "filesNoteFoldersRead"), { name: device.name }));
     const custom = duration === "custom";

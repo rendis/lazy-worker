@@ -366,6 +366,7 @@ mod tests {
                     control,
                     applications,
                     actions,
+                    screen: false,
                     shell: false,
                 })
                 .unwrap()
@@ -464,6 +465,7 @@ mod tests {
                 control: true,
                 applications: false,
                 actions: true,
+                screen: false,
                 shell: false
             }
         );

@@ -21,7 +21,10 @@ type Host = {
 };
 
 type DeviceRef = { id: string; name: string };
-type Row = { entry: FileEntry; shell: HTMLElement; root: HTMLElement; size: HTMLElement; modified: HTMLElement; signature: string };
+type Row = {
+  entry: FileEntry; shell: HTMLElement; root: HTMLElement; size: HTMLElement; modified: HTMLElement; signature: string;
+  label: HTMLElement; nameInput: HTMLInputElement;
+};
 
 /** How often the sharing of the device is read again while the window is open, in milliseconds. A revoke shows within this time. */
 const sharePoll = 5000;
@@ -65,13 +68,13 @@ export function mountFilesExplorer(host: Host) {
   }
 
   /** An icon-only button with its name as a tip. The wrapper carries the tip, so a disabled button can still give a reason. */
-  function iconButton(key: Message, name: string, extra = "") {
+  function iconButton(key: Message, name: string, extra = "", tipKey: Message = key) {
     const button = h("button", { type: "button", class: `icon-button ${extra}`.trim() }, icon(name));
     const root = h("span", { class: "tip" }, button);
     let reason: string | undefined;
     const apply = (): void => {
       const label = t(key);
-      root.setAttribute("data-tip", reason ?? label);
+      root.setAttribute("data-tip", reason ?? t(tipKey));
       button.setAttribute("aria-label", label);
     };
     apply();
@@ -118,6 +121,11 @@ export function mountFilesExplorer(host: Host) {
   let selected = new Set<string>();
   let anchor: string | undefined;
   let confirmingDelete = false;
+  /** The local paths that wait for the answer to "Replace?", because a file of the same name is already there. */
+  let replacing: string[] | undefined;
+  /** The name of the entry that is being renamed in its row. */
+  let renaming: string | undefined;
+  let renameSaving = false;
   let creating = false;
   let reading = 0;
   let status = "";
@@ -133,15 +141,28 @@ export function mountFilesExplorer(host: Host) {
   bind(crumbs, "filesPath", "aria-label");
   const upload = iconButton("filesUpload", "upload", "outlined");
   const makeFolder = iconButton("filesNewFolder", "folder-plus", "outlined");
-  const download = iconButton("filesDownload", "download", "outlined");
-  const remove = iconButton("filesDelete", "trash-2", "outlined");
   const refresh = iconButton("filesRefresh", "refresh-cw", "outlined");
+  const toolbar = h("div", { class: "device-end files-tools" }, upload.root, makeFolder.root, refresh.root);
+  // A file of the same name is there already: the question is asked where the files were sent from.
+  const replaceText = h("span", { class: "setting-note files-confirm-text" });
+  const replaceAccept = iconButton("filesReplaceAccept", "check", "danger");
+  const replaceCancel = iconButton("cancel", "x");
+  const replaceConfirm = h("div", { class: "device-confirm files-confirm", hidden: true }, replaceText, replaceAccept.root, replaceCancel.root);
+  const head = h("div", { class: "files-head" }, crumbs, toolbar, replaceConfirm);
+
+  // What can be done with the selection: the bar says what is selected, and each button says why it is off.
+  const download = iconButton("filesDownload", "download", "outlined");
+  const openFile = iconButton("filesOpen", "external-link", "outlined", "filesOpenTip");
+  const rename = iconButton("filesRename", "pencil", "outlined");
+  const remove = iconButton("filesDelete", "trash-2", "outlined");
+  const selectionText = h("span", { class: "files-selection-text" });
+  const selectionActions = h("div", { class: "device-end files-selection-actions" }, download.root, openFile.root, rename.root, remove.root);
   const deleteText = h("span", { class: "setting-note files-confirm-text" });
   const deleteAccept = iconButton("filesDeleteAccept", "check", "danger");
   const deleteCancel = iconButton("cancel", "x");
-  const toolbar = h("div", { class: "device-end files-tools" }, upload.root, makeFolder.root, download.root, remove.root, refresh.root);
   const confirm = h("div", { class: "device-confirm files-confirm", hidden: true }, deleteText, deleteAccept.root, deleteCancel.root);
-  const head = h("div", { class: "files-head" }, crumbs, toolbar, confirm);
+  const selectionBar = h("div", { class: "files-selection", role: "toolbar" }, selectionText, selectionActions, confirm);
+  bind(selectionBar, "filesSelection", "aria-label");
 
   const rootList = h("div", { class: "files-roots-list" });
   const rootsTitle = bind(h("h3", { class: "files-roots-title" }), "filesRoots");
@@ -159,7 +180,7 @@ export function mountFilesExplorer(host: Host) {
   const rowsList = h("ul", { class: "files-rows", role: "listbox", tabindex: "0", "aria-multiselectable": "true" });
   bind(rowsList, "filesRoots", "aria-label");
   const message = h("p", { class: "setting-note files-message", role: "status" });
-  const listBox = h("div", { class: "files-list" }, columns, newBox.root, rowsList, message);
+  const listBox = h("div", { class: "files-list" }, selectionBar, columns, newBox.root, rowsList, message);
 
   const drop = h("div", { class: "files-drop" }, icon("upload"), h("span"));
   const barLabel = h("span", { class: "files-bar-label" });
@@ -209,13 +230,37 @@ export function mountFilesExplorer(host: Host) {
   function buildRow(entry: FileEntry): Row {
     const size = h("span", { class: "files-size" });
     const modified = h("span", { class: "files-modified" });
+    const label = h("span", { class: "files-name-text" }, entry.name);
+    // The field of a rename takes the place of the name, in the row.
+    const nameInput = h("input", {
+      class: "field files-rename-field", type: "text", maxlength: "255", autocomplete: "off", spellcheck: "false", hidden: true,
+    });
+    nameInput.setAttribute("aria-label", t("filesRenameName"));
+    labelled.push(() => nameInput.setAttribute("aria-label", t("filesRenameName")));
     const root = h("li", { class: "files-row", role: "option", "aria-selected": "false", "data-kind": entry.kind },
-      h("span", { class: "files-name" }, icon(entryIcon(entry)), h("span", { class: "files-name-text" }, entry.name)),
+      h("span", { class: "files-name" }, icon(entryIcon(entry)), label, nameInput),
       size, modified);
     const shell = h("div", { class: "collapse" }, h("div", {}, root));
     root.addEventListener("click", event => select(entry.name, event));
     root.addEventListener("dblclick", () => openEntry(entry));
-    return { entry, shell, root, size, modified, signature: "" };
+    // A press in the field edits the name. It never selects the row again or opens it.
+    for (const type of ["click", "dblclick"] as const) nameInput.addEventListener(type, event => event.stopPropagation());
+    nameInput.addEventListener("input", () => renderSelection());
+    nameInput.addEventListener("keydown", event => {
+      event.stopPropagation();
+      if (event.key === "Enter") {
+        event.preventDefault();
+        commitRename();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        cancelRename(true);
+      }
+    });
+    nameInput.addEventListener("blur", () => {
+      if (renaming === row.entry.name && !renameSaving) cancelRename(false);
+    });
+    const row: Row = { entry, shell, root, size, modified, signature: "", label, nameInput };
+    return row;
   }
 
   function renderList(): void {
@@ -246,6 +291,18 @@ export function mountFilesExplorer(host: Host) {
         created = true;
       }
       row.entry = entry;
+      const editing = renaming === entry.name;
+      if (row.nameInput.hidden === editing) {
+        row.nameInput.hidden = !editing;
+        row.label.hidden = editing;
+        row.root.toggleAttribute("data-renaming", editing);
+        if (editing) {
+          row.nameInput.value = entry.name;
+          row.nameInput.focus();
+          row.nameInput.setSelectionRange(0, entry.name.lastIndexOf(".") > 0 && entry.kind === "file" ? entry.name.lastIndexOf(".") : entry.name.length);
+          row.root.scrollIntoView({ block: "nearest" });
+        }
+      }
       setText(row.size, entry.kind === "folder" ? "" : formatBytes(entry.size, host.language()));
       setText(row.modified, formatModified(entry.modified, host.language()));
       row.root.setAttribute("aria-selected", String(selected.has(entry.name)));
@@ -329,10 +386,18 @@ export function mountFilesExplorer(host: Host) {
     const readOnly = t("filesReadOnlyReason");
     upload.disable(!current() ? readOnly : writable() ? undefined : readOnly);
     makeFolder.disable(!current() ? readOnly : writable() ? undefined : readOnly);
+    const picked = selectedEntries();
     download.disable(files.length === 0 ? t("filesSelectFirst") : files.some(entry => entry.kind === "folder") ? t("filesSelectFiles") : undefined);
+    openFile.disable(picked.length !== 1 || picked[0].kind !== "file" ? t("filesOpenOne") : undefined);
+    rename.disable(!writable() ? readOnly : picked.length !== 1 ? t("filesRenameOne") : undefined);
     remove.disable(!writable() ? readOnly : files.length === 0 ? t("filesSelectFirst") : undefined);
     refresh.disable(current() ? undefined : t("filesNoRoots"));
-    only([toolbar, confirm], confirmingDelete ? [confirm] : [toolbar]);
+    only([toolbar, replaceConfirm], replacing ? [replaceConfirm] : [toolbar]);
+    only([selectionActions, confirm], confirmingDelete ? [confirm] : [selectionActions]);
+    if (replacing) {
+      const names = replacing.map(file => file.split("/").pop() ?? file).filter(name => entries.some(entry => entry.kind === "file" && entry.name === name));
+      setText(replaceText, names.length === 1 ? fill(t("filesReplaceOne"), { name: names[0] }) : fill(t("filesReplaceMany"), { count: names.length }));
+    }
     if (confirmingDelete) {
       const picked = selectedEntries();
       setText(deleteText, picked.length > 1 ? fill(t("filesDeleteMany"), { count: picked.length })
@@ -362,6 +427,7 @@ export function mountFilesExplorer(host: Host) {
     renderList();
     renderMessage();
     renderButtons();
+    renderSelection();
     newBox.set(creating && writable());
     const name = newName.value.trim();
     newCreate.disable(name === "" || name.includes("/") || name === "." || name === ".." || new TextEncoder().encode(name).length > 255
@@ -370,6 +436,77 @@ export function mountFilesExplorer(host: Host) {
 
   function selectedEntries(): FileEntry[] {
     return entries.filter(entry => selected.has(entry.name));
+  }
+
+  /** The line of the selection bar: what is selected, or what a rename asks. */
+  function renderSelection(): void {
+    const picked = selectedEntries();
+    let text = picked.length === 0 ? t("filesSelectHint")
+      : picked.length === 1 ? fill(t("filesSelectionOne"), { name: picked[0].name })
+      : fill(t("filesSelectionMany"), { count: picked.length });
+    let warning = false;
+    if (renaming !== undefined) {
+      const problem = renameProblem();
+      text = problem ?? t("filesRenameHint");
+      warning = problem !== undefined;
+      rows.get(renaming)?.nameInput.setAttribute("aria-invalid", String(warning));
+    }
+    selectionText.toggleAttribute("data-warning", warning);
+    selectionText.toggleAttribute("data-empty", picked.length === 0 && renaming === undefined);
+    if (selectionText.textContent !== text) fadeText(selectionText, text);
+  }
+
+  /** Why the typed name cannot be saved, or nothing when it can. */
+  function renameProblem(): string | undefined {
+    const field = renaming === undefined ? undefined : rows.get(renaming)?.nameInput;
+    if (!field) return undefined;
+    const name = field.value.trim();
+    if (name === "" || name === "." || name === ".." || name.includes("/") || name.includes("\0") || new TextEncoder().encode(name).length > 255) {
+      return t("filesPathInvalid");
+    }
+    if (name !== renaming && entries.some(entry => entry.name === name)) return t("filesExists");
+    return undefined;
+  }
+
+  function startRename(): void {
+    const [entry] = selectedEntries();
+    if (!entry || !writable() || selectedEntries().length !== 1) return;
+    renaming = entry.name;
+    confirmingDelete = false;
+    render();
+  }
+
+  /** Leaves the field with the name as it was. Escape puts the focus back on the list. */
+  function cancelRename(restoreFocus: boolean): void {
+    if (renaming === undefined) return;
+    renaming = undefined;
+    render();
+    if (restoreFocus) rowsList.focus();
+  }
+
+  function commitRename(): void {
+    const root = current();
+    const old = renaming;
+    const field = old === undefined ? undefined : rows.get(old)?.nameInput;
+    if (!device || !root || old === undefined || !field || renameSaving) return;
+    if (renameProblem() !== undefined) return;
+    const name = field.value.trim();
+    if (name === old) {
+      cancelRename(true);
+      return;
+    }
+    renameSaving = true;
+    const id = device.id;
+    void desktop.remoteRenameEntry(id, root.id, joinPath(path, old), name).then(() => {
+      selected = new Set([name]);
+      anchor = name;
+    }, (error: unknown) => host.fail(error)).finally(() => {
+      renameSaving = false;
+      renaming = undefined;
+      void load();
+      render();
+      rowsList.focus();
+    });
   }
 
   function select(name: string, event?: MouseEvent): void {
@@ -386,6 +523,7 @@ export function mountFilesExplorer(host: Host) {
       anchor = name;
     }
     confirmingDelete = false;
+    renaming = undefined;
     render();
   }
 
@@ -465,6 +603,8 @@ export function mountFilesExplorer(host: Host) {
     selected = new Set();
     anchor = undefined;
     confirmingDelete = false;
+    replacing = undefined;
+    renaming = undefined;
     creating = false;
     loaded = false;
     status = "";
@@ -484,11 +624,33 @@ export function mountFilesExplorer(host: Host) {
   }
 
   // ---- What the buttons do ----
-  function startUpload(files: string[]): void {
+  function startUpload(files: string[], replace = false): void {
     const root = current();
     if (!device || !root || !writable() || files.length === 0) return;
+    // A file that is already there is overwritten, so the person says so first, where the files were sent from.
+    const taken = files.some(file => entries.some(entry => entry.kind === "file" && entry.name === (file.split("/").pop() ?? file)));
+    if (taken && !replace) {
+      replacing = files;
+      confirmingDelete = false;
+      render();
+      replaceCancel.button.focus();
+      return;
+    }
     void desktop.queueUpload(device.id, root.id, path, files).then(() => readTransfers(), (error: unknown) => host.fail(error));
   }
+
+  replaceCancel.button.addEventListener("click", () => {
+    replacing = undefined;
+    render();
+    upload.button.focus();
+  });
+  replaceAccept.button.addEventListener("click", () => {
+    const files = replacing;
+    replacing = undefined;
+    render();
+    if (files) startUpload(files, true);
+    upload.button.focus();
+  });
 
   upload.button.addEventListener("click", () => {
     void desktop.pickFiles().then(files => startUpload(files), (error: unknown) => host.fail(error));
@@ -506,6 +668,14 @@ export function mountFilesExplorer(host: Host) {
     }).catch((error: unknown) => host.fail(error));
   });
 
+  openFile.button.addEventListener("click", () => {
+    const [entry] = selectedEntries();
+    const root = current();
+    if (!device || !root || !entry || entry.kind !== "file") return;
+    void desktop.openRemoteFile(device.id, root.id, joinPath(path, entry.name)).then(() => readTransfers(), (error: unknown) => host.fail(error));
+  });
+  rename.button.addEventListener("click", startRename);
+
   refresh.button.addEventListener("click", () => {
     void readShare();
     void load();
@@ -513,6 +683,7 @@ export function mountFilesExplorer(host: Host) {
 
   remove.button.addEventListener("click", () => {
     confirmingDelete = true;
+    renaming = undefined;
     render();
     deleteCancel.button.focus();
   });
@@ -607,7 +778,7 @@ export function mountFilesExplorer(host: Host) {
     const active = jobs.filter(job => job.state === "queued" || job.state === "running");
     const running = active.find(job => job.state === "running") ?? active[0];
     if (running) {
-      const label = fill(t(running.kind === "upload" ? "filesSendingName" : "filesSavingName"), { name: running.name });
+      const label = fill(t(running.kind === "upload" ? "filesSendingName" : running.open ? "filesOpeningName" : "filesSavingName"), { name: running.name });
       const progress = fill(t("filesProgress"), {
         done: formatBytes(running.done, host.language()), total: formatBytes(running.total, host.language()),
       });
@@ -651,7 +822,7 @@ export function mountFilesExplorer(host: Host) {
       if (job.state === "queued" || job.state === "running" || handled.has(job.id)) continue;
       handled.add(job.id);
       if (job.state === "done" && job.kind === "upload") reload = true;
-      const text = job.state === "done" ? fill(t("filesTransferDone"), { name: job.name })
+      const text = job.state === "done" ? fill(t(job.open ? "filesTransferOpened" : "filesTransferDone"), { name: job.name })
         : job.state === "stopped" ? fill(t("filesTransferStopped"), { name: job.name })
         : fill(t("filesTransferFailed"), { name: job.name, reason: errorText(job.error) });
       result = { text, failed: job.state === "failed", until: Date.now() + resultShown };
@@ -687,6 +858,8 @@ export function mountFilesExplorer(host: Host) {
     selected = new Set();
     anchor = undefined;
     confirmingDelete = false;
+    replacing = undefined;
+    renaming = undefined;
     creating = false;
     status = "";
     result = undefined;
@@ -736,9 +909,11 @@ export function mountFilesExplorer(host: Host) {
     closeTop(): boolean {
       if (!overlay.hasAttribute("data-open")) return false;
       // The first press of Escape leaves what is open inside the window, such as a question or a new folder.
-      if (confirmingDelete || creating) {
+      if (confirmingDelete || creating || replacing || renaming !== undefined) {
         confirmingDelete = false;
         creating = false;
+        replacing = undefined;
+        renaming = undefined;
         render();
         return true;
       }

@@ -98,7 +98,10 @@
 .device-row-text strong { font-size: 14.5px; }
 /* A controller row keeps its height: its status is one line too. Its chips take the width they need first. */
 .controller-row .device-row-text { min-width: 120px; }
-.controller-row[data-compact] .chip-label { display: none; }
+/* Two lines of three chips. The row is as high as the two lines and keeps that height, so a controller never changes it. */
+.controller-row { min-height: 76px; }
+.controller-row[data-compact] .chip-label, .permission-chip[data-long] .chip-label { display: none; }
+.controller-row[data-compact] .permission-chips { grid-template-columns: repeat(3, auto); }
 .controller-row .device-row-text > .setting-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .action-description { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .action-description[hidden] { display: none; }
@@ -113,7 +116,11 @@
 .app-icon img { display: block; width: 100%; height: 100%; }
 .app-icon .lucide { width: 20px; height: 20px; color: var(--secondary); }
 
-.permission-chips { display: flex; flex: none; flex-wrap: nowrap; justify-content: flex-end; gap: 6px; }
+.permission-chips { display: grid; flex: none; grid-template-columns: repeat(3, 132px); gap: 6px; justify-items: stretch; }
+.permission-chips > .tip { display: grid; min-width: 0; }
+/* A tip is as tall as its hint, and a hidden tip still counts for the scroll area. From the third controller on, tips open upward, so
+   they stay inside the panel instead of making it scroll or being cut at its bottom edge. */
+.device-rows > .collapse:nth-child(n+3) > div > .controller-row .tip[data-tip]::after { top: auto; bottom: calc(100% + 8px); }
 .permission-chip {
   appearance: none;
   background: transparent;
@@ -129,8 +136,11 @@
   font-size: 13px;
   font-weight: 640;
   white-space: nowrap;
+  min-width: 0;
+  min-height: 29px;
 }
-.chip-suffix { font-variant-numeric: tabular-nums; }
+.chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.chip-suffix { flex: none; font-variant-numeric: tabular-nums; }
 .chip-suffix:empty { display: none; }
 .permission-chip:disabled { opacity: .55; cursor: default; }
 .permission-chip:hover:enabled:not([data-on]) { border-color: var(--secondary); color: var(--text); }
@@ -455,8 +465,8 @@ select.field { padding-inline: 4px 2px; }
 /* The tabs of a device. The bar is the app's segmented choice on one line. Every panel of a device has the same height, so a change
    of tab only fades. Another device's panels hold a header line and four rows of 53px, and a panel that has more scrolls inside. */
 .device-tabs { --tab-panel-height: 258px; padding-block: 10px 0; }
-/* This device's Access tab holds four rows of 54px, which is its fullest panel. */
-.device-tabs[data-device="this"] { --tab-panel-height: 224px; }
+/* This device's Who controls it tab holds three controller rows of 77px, which is its fullest panel. */
+.device-tabs[data-device="this"] { --tab-panel-height: 240px; }
 .tab-segments { display: grid; width: 100%; margin-block-end: 4px; --segment-count: 2; }
 .tab-segments button { min-height: 34px; padding-inline: 8px; }
 .tab-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -524,8 +534,16 @@ select.field { padding-inline: 4px 2px; }
 .files-add:disabled { opacity: .55; cursor: default; }
 .files-add:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .files-note { margin: 0; padding: 8px 2px; }
-.files-disk-warning { display: flex; align-items: flex-start; gap: 10px; color: var(--pending-color); }
-.files-disk-warning .lucide { flex: none; width: 18px; height: 18px; margin-block-start: 2px; }
+/* A warning that reaches the whole home folder or disk is stronger than a note: a danger tint, a border, an alert icon and a bold first sentence. */
+.files-disk-warning {
+  display: flex; align-items: flex-start; gap: 12px; margin-block: 6px 2px; padding: 12px 14px;
+  border: 1px solid var(--warning-border); border-radius: 10px; background: var(--warning-panel); color: var(--text);
+}
+.files-disk-warning .lucide { flex: none; width: 22px; height: 22px; margin-block-start: 1px; color: var(--warning); }
+.files-disk-warning strong { color: var(--warning); font-weight: 760; }
+.files-home-path { display: flex; align-items: center; gap: 8px; padding-block: 4px 2px; }
+.files-home-path .lucide { flex: none; width: 16px; height: 16px; color: var(--secondary); }
+.files-home-path-text { min-width: 0; overflow: hidden; color: var(--text); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .files-allows { min-height: 3em; }
 /* The grant window has two steps that swap: the questions, then what macOS answered. */
 .files-step { display: grid; align-content: start; gap: 2px; min-width: 0; }
@@ -571,7 +589,17 @@ strong.files-crumb { color: var(--text); font-weight: 700; cursor: default; }
 .files-root:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .files-root .lucide { flex: none; width: 17px; height: 17px; }
 .files-root-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.files-list { position: relative; display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height: 0; }
+.files-list { position: relative; display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); min-height: 0; }
+/* What can be done with the selection. The bar keeps its height, and its words fade, so selecting a row never moves the list. */
+.files-selection { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 42px; padding: 0 8px; border-bottom: 1px solid var(--hairline); }
+.files-selection-text { min-width: 0; overflow: hidden; font-size: 13.5px; font-weight: 640; text-overflow: ellipsis; white-space: nowrap; }
+.files-selection-text[data-empty] { color: var(--secondary); font-weight: 520; }
+.files-selection-text[data-warning] { color: var(--pending-color); }
+.files-selection-actions { flex: none; }
+.files-selection .files-confirm { min-width: 0; }
+.files-rename-field { flex: 1; min-width: 0; height: 28px; padding-block: 2px; background: var(--panel); color: var(--text); font-weight: 520; user-select: text; }
+.files-rename-field[hidden] { display: none; }
+.files-name-text[hidden] { display: none; }
 .files-columns, .files-row { display: grid; grid-template-columns: minmax(0, 1fr) 9ch 11ch; align-items: center; gap: 12px; padding-inline: 8px; }
 .files-columns { min-height: 32px; border-bottom: 1px solid var(--hairline); color: var(--secondary); font-size: 13px; font-weight: 650; }
 .files-sort { display: inline-flex; align-items: center; gap: 6px; justify-self: start; padding: 4px 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
@@ -591,7 +619,7 @@ strong.files-crumb { color: var(--text); font-weight: 700; cursor: default; }
 .files-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .files-size, .files-modified { overflow: hidden; color: var(--secondary); font-variant-numeric: tabular-nums; white-space: nowrap; transition: color var(--selection-duration) ease; }
 .files-row[data-selected] :is(.lucide, .files-size, .files-modified) { color: inherit; }
-.files-message { position: absolute; inset: 70px 0 0; display: grid; place-items: center; margin: 0; padding: 0 16px; text-align: center; pointer-events: none; }
+.files-message { position: absolute; inset: 112px 0 0; display: grid; place-items: center; margin: 0; padding: 0 16px; text-align: center; pointer-events: none; }
 .files-drop { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; border: 1px dashed var(--line); border-radius: 10px; color: var(--secondary); font-size: 13px; transition: border-color var(--selection-duration) ease, background-color var(--selection-duration) ease, color var(--selection-duration) ease, opacity var(--selection-duration) ease; }
 .files-drop .lucide { flex: none; width: 16px; height: 16px; }
 .files-drop[data-off] { opacity: .6; }

@@ -27,6 +27,8 @@ export type Transfer = {
   device: string;
   kind: "upload" | "download";
   name: string;
+  /** True for a download that opens with its default application when it ends. */
+  open: boolean;
   total: number;
   done: number;
   state: TransferState;
@@ -150,6 +152,21 @@ export function previewDelete(root: string, path: string, recursive: boolean): v
   delete folder[name];
 }
 
+/** Gives a sample entry a new name in its folder. A name that is taken is refused, as the device refuses it. */
+export function previewRename(root: string, path: string, name: string): void {
+  const { folder, name: old } = sampleParent(root, path);
+  if (folder[old] === undefined) throw "filesNotFound";
+  if (name === "" || name.includes("/") || name === "." || name === "..") throw "filesPathInvalid";
+  if (name === old) return;
+  if (name in folder) throw "filesExists";
+  const parent = pathParts(path).slice(0, -1).join("/");
+  const entries = Object.entries(folder);
+  // The entry keeps its place in the object, so a refresh lists what it listed before.
+  for (const [key] of entries) delete folder[key];
+  for (const [key, value] of entries) folder[key === old ? name : key] = value;
+  sampleTimes.set(`${root}/${joinPath(parent, name)}`, sampleTime(`${root}/${path}`));
+}
+
 export function previewAddFile(root: string, path: string, name: string, size: number): void {
   const folder = sampleAt(root, path);
   if (typeof folder !== "object") throw "filesNotFound";
@@ -193,9 +210,9 @@ function previewAdvance(): void {
   }
 }
 
-export function previewQueue(kind: Transfer["kind"], device: string, name: string, total: number, onDone: () => void): void {
+export function previewQueue(kind: Transfer["kind"], device: string, name: string, total: number, onDone: () => void, open = false): void {
   previewJobs.push({
-    id: previewJobId++, device, kind, name, total, done: 0, state: "queued", error: null, onDone, runningSince: null,
+    id: previewJobId++, device, kind, name, open, total, done: 0, state: "queued", error: null, onDone, runningSince: null,
   });
   previewAdvance();
 }

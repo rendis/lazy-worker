@@ -227,6 +227,7 @@ pub struct ControllerPermissions {
     pub control: bool,
     pub applications: bool,
     pub actions: bool,
+    pub screen: bool,
     pub shell: bool,
     pub files: bool,
 }
@@ -254,6 +255,7 @@ impl Controller {
                 control: peer.permissions.control,
                 applications: peer.permissions.applications,
                 actions: peer.permissions.actions,
+                screen: peer.permissions.screen,
                 shell: peer.permissions.shell,
                 files: files.is_some(),
             },
@@ -303,6 +305,8 @@ pub struct ThisDevice {
     /// The user name of this process, which the Add device window offers as the first guess for
     /// the account on the other device. Nothing when the system gives none.
     pub account: Option<String>,
+    /// The home folder of this user, shown where the person shares it.
+    pub home: Option<String>,
     pub controllers: Vec<Controller>,
     pub socket: Socket,
     /// Changes to `~/.ssh/authorized_keys` that happened while a device had a shell, until dismissed.
@@ -346,6 +350,7 @@ pub struct Stores {
     pub pairing: Pairing,
     pub devices: Vec<Remote>,
     pub warnings: Vec<KeysWarning>,
+    pub home: Option<String>,
 }
 
 /// This device by its name and kind. It runs commands, so call it off the main thread.
@@ -365,6 +370,7 @@ pub fn overview(stores: Stores, remote_access: RemoteAccess) -> Overview {
             account: crate::remote::pairing::current_account(),
             #[cfg(not(unix))]
             account: None,
+            home: stores.home,
             controllers: stores.controllers,
             socket: stores.socket,
             warnings: stores.warnings,
@@ -440,6 +446,7 @@ mod tests {
                     attempts_left: 2,
                 },
                 account: Some("me".into()),
+                home: Some("/Users/me".into()),
                 controllers: Vec::new(),
                 socket: Socket::unavailable("x"),
                 warnings: Vec::new(),
@@ -465,6 +472,7 @@ mod tests {
             serde_json::json!({"open": false, "expires": null, "attemptsLeft": 0})
         );
         assert_eq!(value["thisDevice"]["account"], "me");
+        assert_eq!(value["thisDevice"]["home"], "/Users/me");
         assert_eq!(value["devices"], serde_json::json!([]));
         assert_eq!(value["thisDevice"]["socket"]["listening"], false);
         assert_eq!(value["thisDevice"]["socket"]["error"], "x");

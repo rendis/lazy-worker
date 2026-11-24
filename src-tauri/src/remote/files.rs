@@ -329,6 +329,7 @@ impl Files {
             Request::CancelUpload { upload_id } => self.cancel(&upload_id),
             Request::MakeFolder { root, path, name } => self.make_folder(&root, &path, &name),
             Request::DeleteEntry { root, path, recursive } => self.delete(&root, &path, recursive),
+            Request::RenameEntry { root, path, name } => self.rename(&root, &path, &name),
             _ => Err("badRequest"),
         }
     }
@@ -557,6 +558,44 @@ impl Files {
         Ok(Value::Null)
     }
 
+    /// Gives an entry a new name in its own folder. A name that exists is refused, and an entry never
+    /// leaves its folder.
+    fn rename(&self, root: &str, path: &str, name: &str) -> Result<Value, &'static str> {
+        if !valid_name(name) || name.starts_with(".lw-upload-") {
+            return Err("filesPathInvalid");
+        }
+        let root = self.root(root)?;
+        let (parent, old) = self.child(&root, path)?;
+        let from = parent.join(&old);
+        let to = parent.join(name);
+        if self.is_protected(&from) || self.is_protected(&to) {
+            return Err("filesProtected");
+        }
+        let meta = fs::symlink_metadata(&from).map_err(|error| io_code(&error))?;
+        if !(meta.is_file() || meta.is_dir() || meta.file_type().is_symlink()) {
+            return Err("filesNotRegular");
+        }
+        if old == name {
+            return Ok(Value::Null);
+        }
+        // `rename` would replace an entry, so look first. A name that only changes case on a
+        // case-insensitive disk is the same entry and passes.
+        if let Ok(existing) = fs::symlink_metadata(&to) {
+            use std::os::unix::fs::MetadataExt;
+            if (existing.dev(), existing.ino()) != (meta.dev(), meta.ino()) {
+                return Err("filesExists");
+            }
+        }
+        // A case-only change is the same entry, so it may replace. Any other rename refuses an entry
+        // that appeared after the check above (RENAME_EXCL), so it never replaces a file.
+        let same_entry = fs::symlink_metadata(&to).is_ok();
+        rename_exclusive(&from, &to, same_entry).map_err(|error| io_code(&error))?;
+        let size = meta.is_file().then(|| meta.len());
+        let shown = format!("{path} -> {name}");
+        self.record("fileRename", "ok", &root, &shown, size);
+        Ok(Value::Null)
+    }
+
     fn delete(&self, root: &str, path: &str, recursive: bool) -> Result<Value, &'static str> {
         let root = self.root(root)?;
         // The entry itself is not followed: a link is removed, never what it points to.
@@ -755,6 +794,29 @@ pub fn touch_locations(locations: &[PathBuf], home: Option<&Path>) -> Vec<Checke
         .collect()
 }
 
+/// Renames without replacing an existing entry, unless the destination is the same entry (a case change).
+fn rename_exclusive(from: &Path, to: &Path, same_entry: bool) -> std::io::Result<()> {
+    if same_entry {
+        return fs::rename(from, to);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use std::{ffi::CString, os::unix::ffi::OsStrExt};
+        let from = CString::new(from.as_os_str().as_bytes())?;
+        let to = CString::new(to.as_os_str().as_bytes())?;
+        // SAFETY: both are valid NUL-terminated paths that live for the call.
+        let status = unsafe { libc::renamex_np(from.as_ptr(), to.as_ptr(), libc::RENAME_EXCL) };
+        if status == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if fs::symlink_metadata(to).is_ok() {
+            return Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists));
+        }
+        fs::rename(from, to)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -826,6 +888,9 @@ mod tests {
         }
         fn delete(&self, path: &str, recursive: bool) -> Result<Value, &'static str> {
             self.call(json!({"command": "deleteEntry", "args": {"root": self.root, "path": path, "recursive": recursive}}))
+        }
+        fn rename(&self, path: &str, name: &str) -> Result<Value, &'static str> {
+            self.call(json!({"command": "renameEntry", "args": {"root": self.root, "path": path, "name": name}}))
         }
         fn names(&self, path: &str) -> Vec<String> {
             self.list(path).unwrap()["entries"]
@@ -933,6 +998,27 @@ mod tests {
     }
 
     #[test]
+    fn a_rename_stays_in_its_folder_and_never_replaces_an_entry() {
+        let s = setup("files-rename", FilesMode::ReadWrite);
+        fs::write(s.shared.join("docs/b.txt"), b"b").unwrap();
+        assert_eq!(s.rename("a.txt", "c.txt"), Ok(Value::Null));
+        assert!(!s.shared.join("a.txt").exists() && s.shared.join("c.txt").exists());
+        assert_eq!(s.rename("docs", "papers"), Ok(Value::Null));
+        assert_eq!(s.rename("papers/b.txt", "papers"), Ok(Value::Null));
+        // An existing name, a path, a dot name, and a name of ours for partial uploads are refused.
+        fs::write(s.shared.join("d.txt"), b"d").unwrap();
+        assert_eq!(s.rename("c.txt", "d.txt"), Err("filesExists"));
+        assert_eq!(fs::read(s.shared.join("d.txt")).unwrap(), b"d");
+        for bad in ["", ".", "..", "x/y", "../x", ".lw-upload-1.part"] {
+            assert_eq!(s.rename("c.txt", bad), Err("filesPathInvalid"), "{bad}");
+        }
+        assert_eq!(s.rename("../c.txt", "e"), Err("filesPathInvalid"));
+        assert_eq!(s.rename("gone.txt", "e"), Err("filesNotFound"));
+        assert_eq!(s.rename("", "e"), Err("filesPathInvalid"));
+        s.done();
+    }
+
+    #[test]
     fn a_read_only_grant_refuses_every_write() {
         let s = setup("files-readonly", FilesMode::Read);
         let writes = [
@@ -942,6 +1028,7 @@ mod tests {
             json!({"command": "cancelUpload", "args": {"uploadId": "x"}}),
             json!({"command": "makeFolder", "args": {"root": s.root, "path": "", "name": "n"}}),
             json!({"command": "deleteEntry", "args": {"root": s.root, "path": "a.txt", "recursive": false}}),
+            json!({"command": "renameEntry", "args": {"root": s.root, "path": "a.txt", "name": "n"}}),
         ];
         for write in writes {
             assert_eq!(s.call(write.clone()), Err("notPermitted"), "{write}");

@@ -99,7 +99,7 @@ Devices lets you control one device from another. It is not a tool, so it has no
 
 Open **Devices** in the sidebar. **This device** comes first. The devices you control from here follow it. One device is open at a time. Select a device to open it.
 
-Each open device has tabs on one line. **This device** has **Access** (remote access, pairing, and **Cut all access**), **Who controls it**, **Actions**, and **Log**. A device that you control has **Tools**, **Applications**, **Actions**, and **Connect**. A small badge after the name of a tab shows its state, for example **1/3** tools on, the number of applications that are open, the number of actions, or a green dot when a way into the device is on. Every tab of a device has the same height: the tabs of a device that you control hold four rows. A tab with more rows than fit scrolls inside. The title of the view and **Add device** stay at the top while the devices scroll. **Applications** lists your pinned applications first, then the ones you opened last from here, and a count that opens the rest. **Actions** has a search field. **Connect** lists the ways into the device: a terminal, the screen, and files. Use the arrow keys, **Home**, and **End** to move between tabs. Each device remembers its last tab.
+Each open device has tabs on one line. **This device** has **Access** (remote access, pairing, and **Cut all access**), **Who controls it**, **Actions**, and **Log**. In **Who controls it**, each device shows its permissions as chips in two lines of three: **Control**, **Applications**, **Actions**, **Files**, **Shell**, and **Screen**. Each row has the height of two lines, and the tab holds three of them before it scrolls. Hover a chip to read what it allows. A device that you control has **Tools**, **Applications**, **Actions**, and **Connect**. A small badge after the name of a tab shows its state, for example **1/3** tools on, the number of applications that are open, the number of actions, or a green dot when a way into the device is on. Every tab of a device has the same height: the tabs of a device that you control hold four rows. A tab with more rows than fit scrolls inside. The title of the view and **Add device** stay at the top while the devices scroll. **Applications** lists your pinned applications first, then the ones you opened last from here, and a count that opens the rest. **Actions** has a search field. **Connect** lists the ways into the device: a terminal, the screen, and files. Use the arrow keys, **Home**, and **End** to move between tabs. Each device remembers its last tab.
 
 Each device you control shows if it is online. Lazy Worker checks every few seconds while Devices is open, and when you come back to the window. Select **Check this device now** (the circular arrow) to check at once and read its state again.
 
@@ -121,7 +121,7 @@ If the row says that passwords can still log in, select **Allow passwords again*
 Pairing links two devices with a code that works once. Start on the device you want to control.
 
 1. On that device, open **Devices**. In **Access**, find **Add a device** and select **Pair**. The row shows how many devices are paired.
-2. Choose what the new device may do. **Control** starts on. **Applications** and **Actions** start off. Shell and files are never part of pairing. You turn them on later, at this device.
+2. Choose what the new device may do. **Control** starts on. **Applications**, **Actions**, and **Screen** start off. Shell and files are never part of pairing. You turn them on later, at this device.
 3. Select **Open for 10 minutes**. The row then says **Waiting for a device** with the time left, and the button becomes **Show code**. The device shows a 6-digit code, the user name to enter, and the address to reach it.
 4. On the other device, open **Devices** and select **Add device**.
 5. Choose the device in the list. If it is not there, select **Enter an address**. Use this for a device on a VPN such as Tailscale, for example `studio.local` or `100.64.0.5`. Add `:port` if the port is not 22.
@@ -177,7 +177,7 @@ An action is a named shell command that you save on a device. Each device keeps 
 A full shell lets another device run any command on this device, as your user. Only you can allow it, only at this device.
 
 1. In the **Who controls it** tab, select **Shell** on the row of a device.
-2. Read the warning. Choose **1 hour**, **2 hours**, **Custom** (1 minute to 24 hours), or **Until I turn it off**.
+2. Read the warning. Choose **1 hour**, **2 hours**, **Custom** (1 minute to 24 hours), or **No limit**.
 3. Select **Allow shell**.
 
 The other device then shows **Terminal** in its **Connect** tab, with buttons to open it in Terminal or copy the command.
@@ -191,26 +191,29 @@ The shell turns off by itself when the time ends. Select **Turn off shell** to e
 Files lets another device open folders on this device and move files in both directions. Everything goes through the same SSH connection as the rest of Devices. It adds no network service and no sharing in System Settings. Only you can allow it, only at this device.
 
 1. In the **Who controls it** tab, select **Files** on the row of a device.
-2. Under **Where**, choose **Chosen folders**, **My home folder**, or **Whole disk**. For folders, use **Add folder…** and pick each folder. **~/Lazy Worker** is offered first. Lazy Worker creates it the first time you share it. You can share up to 16 folders. **My home folder** shares your whole home folder, and **Whole disk** shares `/`.
+2. Under **Where**, choose **Chosen folders**, **My home folder**, or **Whole disk**. For folders, use **Add folder…** and pick each folder. **~/Lazy Worker** is offered first. Lazy Worker creates it the first time you share it. You can share up to 16 folders. **My home folder** shares your whole home folder, and the window shows its exact path, for example `/Users/alex`. **Whole disk** shares `/`.
 3. Under **Permission**, choose **Read only** or **Read and write**.
-4. Under **Duration**, choose **1 hour**, **2 hours**, **Custom** (1 minute to 24 hours), or **Until I turn it off**.
+4. Under **Duration**, choose **1 hour**, **2 hours**, **Custom** (1 minute to 24 hours), or **No limit**.
 5. Select **Share files**.
 
-**My home folder** and **Whole disk** show a warning. The home folder includes Desktop, Documents, Downloads, and iCloud Drive. The whole disk includes the system and connected drives. macOS still keeps other users' private files closed. Choose them only for a device you trust. Lazy Worker's own data and your SSH keys are never shared, with any choice. A grant that was saved as **Whole disk** before keeps that meaning.
+**My home folder** and **Whole disk** show a warning in a red box, with an alert icon and a bold first sentence. The home folder includes Desktop, Documents, Downloads, and iCloud Drive. The whole disk includes the system and connected drives. macOS still keeps other users' private files closed. Choose them only for a device you trust. Lazy Worker's own data and your SSH keys are never shared, with any choice. A grant that was saved as **Whole disk** before keeps that meaning.
 
 **Answer the macOS questions now.** The first time an app reads Desktop, Documents, Downloads, iCloud Drive, a removable drive, or a network drive, macOS asks you. If the other device were first to read them, nobody would be here to answer. So when you select **Share files**, Lazy Worker reads each of these places inside what you shared, one by one, on this device. The window says that macOS may ask for access to your folders. Answer each question while you are here. Then it lists each place as **Allowed**, **Not allowed**, **No answer yet**, or **Could not read**. A place that is closed stays closed for the other device. Its explorer says "macOS on that device did not allow this folder." Allow it in Privacy & Security, under Files and Folders, on this device.
 
 **Full Disk Access** skips the questions. With **My home folder** and **Whole disk**, the window recommends it. **Open Full Disk Access** opens Privacy & Security at that list. Switch Lazy Worker on there yourself. Lazy Worker changes nothing in Settings.
 
-The chip then says **Files 17:00**, with **∞** instead of a time for **Until I turn it off**. When the row is too narrow, the chips show only their icons and times. Hover a chip for its full text. Select it to stop sharing. Lazy Worker asks first, in the row. Stopping, or the end of the time, takes effect on the next request and ends the transfers in progress. An upload that did not finish leaves no partial file.
+The chip then says **Files 17:00**, with **∞** instead of a time for **No limit**. A chip with a date and a time, or a row that is too narrow, shows only its icon and its time. Hover a chip for its full text. Select it to stop sharing. Lazy Worker asks first, in the row. Stopping, or the end of the time, takes effect on the next request and ends the transfers in progress. An upload that did not finish leaves no partial file.
 
 On the other device, the **Connect** tab shows a **Files** row, for example **2 shared folders · read and write**, **Home folder · read only**, or **Whole disk · read only**. Select **Open the files of that device** to open the explorer:
 
 - The shared folders are on the left. The path is above the list. Select **Name** to sort. Double-click a folder to open it. Backspace goes up.
-- **Send files here** picks files on your device and sends them to the open folder. You can also drag files from Finder onto the window. A file that has the same name is replaced.
+- **Send files here** picks files on your device and sends them to the open folder. You can also drag files from Finder onto the window. A file that has the same name is replaced, and the toolbar asks first: **Replace {name}?**
 - **New folder** makes a folder in the open one.
+- Select a row to select it. The bar above the list says what is selected, and holds the actions for it. Each button says why it is off. Use Shift or Command to select more than one.
 - **Save a copy on this device** saves the selected files. One file asks where to save it, starting in Downloads. Several ask for a folder, and a name that is taken gets a number. Folders cannot be saved yet.
-- **Delete** asks in the toolbar before it deletes. A folder is deleted with everything in it. A folder with more than 10,000 items is refused.
+- **Open** saves a copy of the selected file in a private folder of Lazy Worker on this device, then opens it with its default app. Any change you make stays on this device. Lazy Worker removes these copies after a day.
+- **Rename** (read and write only) turns the name into a field in its row. Press Enter to save and Escape to cancel. A name that is empty, has a `/`, or is already taken is refused, and the bar says why. A rename never replaces another item and never moves it to another folder.
+- **Delete** (read and write only) asks in the bar before it deletes. A folder is deleted with everything in it. A folder with more than 10,000 items is refused.
 - **Refresh** reads the folder again.
 - The bar at the bottom shows the transfer in progress, with **Stop this transfer**. Several transfers wait in line.
 
@@ -218,7 +221,7 @@ With **Read only**, the buttons that change files are off, and their tip says wh
 
 ### Screen sharing
 
-Screen sharing uses the Screen Sharing that macOS already has. Lazy Worker adds no permission of its own for it. macOS asks for the password of the account on the other device and decides who gets in. Any device with **Control** sees if it is on, but only the device itself can turn it on.
+Screen sharing uses the Screen Sharing that macOS already has. macOS asks for the password of the account on the other device and decides who gets in. Lazy Worker adds one permission, **Screen**, that is off until you turn it on at the device. Without it, the device cannot see the state of screen sharing or open the screen from Lazy Worker, and its **Screen** row says "That device has not allowed screen sharing from Lazy Worker". Only the device itself can turn screen sharing on.
 
 To share a screen, do this on the device that is shared:
 
@@ -227,7 +230,7 @@ To share a screen, do this on the device that is shared:
 
 The row then says **Open to your network, protected by this account's password**. If macOS does not let Lazy Worker turn it on, a guide opens with the steps: select **Open Sharing settings**, turn on **Screen Sharing**, and make sure your user is allowed. macOS may ask for your password there. The guide has no picture yet.
 
-To open the screen of a device you control, open its **Connect** tab and select **Open screen** on the **Screen** row. The button works only while the row says that screen sharing is on. Screen Sharing opens, and macOS asks for the password of the account.
+To open the screen of a device you control, once it allowed **Screen**, open its **Connect** tab and select **Open screen** on the **Screen** row. The button works only while the row says that screen sharing is on. Screen Sharing opens, and macOS asks for the password of the account.
 
 ### The log
 

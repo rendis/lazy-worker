@@ -60,6 +60,7 @@ const permissions: { id: ControllerPermission; icon: string; label: Message; hin
   { id: "actions", icon: "play", label: "permActions", hint: "permActionsHint" },
   { id: "files", icon: "folder", label: "permFiles", hint: "permFilesHint" },
   { id: "shell", icon: "terminal", label: "permShell" },
+  { id: "screen", icon: "monitor", label: "permScreen", hint: "permScreenHint" },
 ];
 /** The outcomes that the log shows in words. Any other one shows as it is. */
 const logOutcomes: Record<string, Message> = {
@@ -359,6 +360,7 @@ export function mountDevices(host: Host) {
     refreshIcons: () => host.refreshIcons(),
     fail: error => host.fail(error),
     changed: () => void refresh(),
+    home: () => overview?.thisDevice.home ?? null,
   });
 
   const explorer = mountFilesExplorer({
@@ -831,7 +833,7 @@ export function mountDevices(host: Host) {
     const next = { ...controller.permissions, [id]: on };
     try {
       await desktop.setPeerPermissions(controller.id, {
-        control: next.control, applications: next.applications, actions: next.actions,
+        control: next.control, applications: next.applications, actions: next.actions, screen: next.screen,
       });
     } catch (error) {
       host.fail(error);
@@ -994,7 +996,10 @@ export function mountDevices(host: Host) {
           const until = permission.id === "shell" ? next.shell?.until : permission.id === "files" ? next.files?.until : undefined;
           const full = until === undefined ? name
             : permission.id === "shell" ? shellChipText(next.shell!) : filesChipText(next.files!);
-          fadeText(suffix, until === undefined ? "" : until === "untilOff" ? "∞" : formatClock(until, host.language()));
+          const when = until === undefined ? "" : until === "untilOff" ? "∞" : formatClock(until, host.language());
+          fadeText(suffix, when);
+          // A date and a time (`11/25, 02:00`) take the room of the word, which the tip and the label of the button keep.
+          chip.toggleAttribute("data-long", when.length > 5);
           setAttribute(chip, "aria-label", full);
           setTip(wrapper, permission.hint ? `${full}. ${t(permission.hint)}` : full);
         }
@@ -1893,7 +1898,7 @@ export function mountDevices(host: Host) {
   let opening = false;
   let openFailed = false;
   let reach: ProxyNetwork | undefined;
-  const grant = { control: true, applications: false, actions: false };
+  const grant = { control: true, applications: false, actions: false, screen: false };
 
   function permissionSwitch(id: keyof typeof grant, iconName: string, label: Message, hint: Message) {
     const input = h("input", { type: "checkbox", switch: true, role: "switch" });
@@ -1910,6 +1915,7 @@ export function mountDevices(host: Host) {
     permissionSwitch("control", "layout-grid", "permControl", "permControlHint"),
     permissionSwitch("applications", "app-window", "permApplications", "permApplicationsHint"),
     permissionSwitch("actions", "play", "permActions", "permActionsHint"),
+    permissionSwitch("screen", "monitor", "permScreen", "permScreenHint"),
   ];
   const openLabel = h("span");
   const openButton = h("button", { type: "button", class: "access-action" }, icon("lock-keyhole-open"), openLabel);
@@ -1949,7 +1955,7 @@ export function mountDevices(host: Host) {
     stage = "setup";
     outcomeName = undefined;
     openFailed = false;
-    Object.assign(grant, { control: true, applications: false, actions: false });
+    Object.assign(grant, { control: true, applications: false, actions: false, screen: false });
     switches.forEach(({ input }, index) => { input.checked = index === 0; });
     renderPairWindow();
   });
@@ -2872,7 +2878,7 @@ export function mountDevices(host: Host) {
         const screenFound = found?.screen;
         const screenError = found?.screenError;
         const screenText = screenError
-          ? (isLinkError(screenError) ? t("remoteLost") : isRefusal(screenError) ? fill(t(screenError), { name: current.name }) : t("screenOpenFailed"))
+          ? (isLinkError(screenError) ? t("remoteLost") : screenError === "notPermitted" ? t("screenNotAllowed") : isRefusal(screenError) ? fill(t(screenError), { name: current.name }) : t("screenOpenFailed"))
           : !screenFound ? t("screenReading")
           : !screenFound.on ? t("screenOffThere")
           : screenFound.userAllowed === false ? t("screenNoUserThere") : t("screenOn");
@@ -3003,7 +3009,7 @@ export function mountDevices(host: Host) {
         thisDevice: {
           name: "", kind: "desktop",
           remoteAccess: { remoteLogin: "off", passwordLogin: "unknown", userAllowed: null, managedFile: false, macosMajor: null },
-          pairing: { open: false, expires: null, attemptsLeft: 0 }, account: null, controllers: [],
+          pairing: { open: false, expires: null, attemptsLeft: 0 }, account: null, home: null, controllers: [],
           socket: { listening: true, error: null }, warnings: [],
         },
         devices: [],

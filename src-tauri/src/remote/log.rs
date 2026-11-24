@@ -54,6 +54,7 @@ const SECURITY: &[&str] = &[
     "fileUpload",
     "fileDownload",
     "fileDelete",
+    "fileRename",
 ];
 
 fn default_count() -> u32 {

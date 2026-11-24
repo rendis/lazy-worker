@@ -34,6 +34,9 @@ pub struct PeerPermissions {
     pub applications: bool,
     #[serde(default)]
     pub actions: bool,
+    /// Whether the device may see the Screen Sharing state and open this screen. Off until the user turns it on here.
+    #[serde(default)]
+    pub screen: bool,
     /// Derived from `Peer::shell_until` each time a peer is read. A value in the file is ignored.
     #[serde(default)]
     pub shell: bool,
@@ -355,6 +358,7 @@ impl Peers {
         control: bool,
         applications: bool,
         actions: bool,
+        screen: bool,
     ) -> Result<(), &'static str> {
         self.change(|data| {
             let peer = data
@@ -366,6 +370,7 @@ impl Peers {
                 control,
                 applications,
                 actions,
+                screen,
                 shell: false,
             };
             Ok(())
@@ -582,7 +587,7 @@ mod tests {
     fn permissions_default_off_and_shell_cannot_be_set_here() {
         let (dir, peers) = store("peers-perm");
         peers.insert(peer(ID_A, "Studio")).unwrap();
-        peers.set_permissions(ID_A, true, true, false).unwrap();
+        peers.set_permissions(ID_A, true, true, false, true).unwrap();
         let stored = peers.get(ID_A).unwrap().permissions;
         assert_eq!(
             stored,
@@ -590,13 +595,29 @@ mod tests {
                 control: true,
                 applications: true,
                 actions: false,
+                screen: true,
                 shell: false
             }
         );
         assert_eq!(
-            peers.set_permissions(ID_B, true, true, true),
+            peers.set_permissions(ID_B, true, true, true, false),
             Err("notPaired")
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_file_without_screen_loads_with_it_off() {
+        let (dir, peers) = store("peers-screen-old");
+        peers.insert(peer(ID_A, "Studio")).unwrap();
+        peers.set_permissions(ID_A, true, true, true, true).unwrap();
+        let path = dir.join("peers.json");
+        let mut file: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let permissions = file["peers"][0]["permissions"].as_object_mut().unwrap();
+        assert_eq!(permissions.remove("screen"), Some(serde_json::Value::Bool(true)));
+        fs::write(&path, file.to_string()).unwrap();
+        let stored = Peers::open(path).unwrap().get(ID_A).unwrap().permissions;
+        assert!(stored.control && stored.applications && stored.actions && !stored.screen);
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -673,7 +694,7 @@ mod tests {
         peers.insert(peer(ID_A, "A")).unwrap();
         peers.set_shell(ID_A, Some(ShellUntil::OFF)).unwrap();
         // Setting the other permissions leaves the grant as it is, and a stored `shell: true` is ignored.
-        peers.set_permissions(ID_A, true, true, true).unwrap();
+        peers.set_permissions(ID_A, true, true, true, false).unwrap();
         assert!(peers.get(ID_A).unwrap().permissions.shell);
         peers.set_shell(ID_A, None).unwrap();
         let mut forged = peer(ID_B, "B");
@@ -710,7 +731,7 @@ mod tests {
         assert_eq!(peers.files_expired(5), [ID_A]);
         assert!(peers.files_expired(4).is_empty());
         // Other permissions leave it alone. A peer that is inserted again starts with none.
-        peers.set_permissions(ID_A, true, true, true).unwrap();
+        peers.set_permissions(ID_A, true, true, true, false).unwrap();
         assert!(peers.get(ID_A).unwrap().files_grant.is_some());
         let mut forged = peer(ID_B, "B");
         forged.files_grant = Some(grant(ShellUntil::OFF));
