@@ -64,6 +64,10 @@
 .section-head .device-chevron { order: -1; }
 
 .device-body { margin-inline-start: 13px; }
+/* Every titled segment puts its title after the room a chevron takes, and the rows under it start at the title. */
+.device-body:not([data-remote]) > :not(.device-subhead) { margin-inline-start: 28px; }
+.section-rows { margin-inline-start: 28px; }
+.pair-step:has(> .device-subhead) > :not(.device-subhead) { margin-inline-start: 28px; }
 .device-body[data-remote] { padding-inline-start: 14px; border-inline-start: 1px solid var(--hairline); }
 .device-section { border-bottom: 1px solid var(--hairline); }
 .device-section:last-child { border-bottom: 0; }
@@ -73,7 +77,9 @@
 
 .device-end { display: flex; align-items: center; gap: 10px; }
 .device-subhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 46px; padding: 0 2px; border-bottom: 1px solid var(--hairline); }
+.device-subhead { padding-inline-start: 30px; }
 .device-subhead h3 { margin: 0; font-size: 14.5px; font-weight: 680; }
+.device-subhead .section-summary { margin-inline-end: 4px; }
 .device-row {
   display: flex;
   align-items: center;
@@ -224,7 +230,7 @@
 .found-row { width: 100%; border-inline: 0; border-top: 0; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; }
 .found-row:hover { background: var(--glass); }
 .found-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.pair-field { width: 190px; }
+.pair-field { width: 250px; }
 .pair-code-field { width: 9.5ch; height: 40px; font-size: 22px; font-weight: 650; letter-spacing: .12em; text-align: center; }
 .icon-button[aria-busy="true"] .lucide { animation: rescan-spin 1s linear infinite; }
 @keyframes rescan-spin { to { transform: rotate(360deg); } }
@@ -394,3 +400,27 @@ select.field { padding-inline: 4px 2px; }
 .keys-warning > .lucide { color: var(--pending-color); }
 .keys-warning .setting-note { color: var(--pending-color); overflow-wrap: anywhere; }
 
+
+/* A change of state moves over a short time: colors fade, and texts and swapped content fade through `src/motion.ts`. */
+.permission-chip { transition: background-color var(--selection-duration) ease, border-color var(--selection-duration) ease, color var(--selection-duration) ease; }
+.device-state, .device-row .status { transition: color var(--selection-duration) ease; }
+.device-state::before, .device-row .status::before { transition: background-color var(--selection-duration) ease, opacity var(--selection-duration) ease, box-shadow var(--selection-duration) ease; }
+.device-row .setting-note, .access-note, .access-icon .lucide, .run-icon .lucide, .shell-end { transition: color var(--selection-duration) ease; }
+.pin-button, .pin-button .lucide { transition: color var(--selection-duration) ease, fill var(--selection-duration) ease; }
+
+/* The shell row has two buttons. The confirmation of a copy shows left of them and fades. */
+.shell-buttons { position: relative; }
+.copy-confirm {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-end: calc(100% + 10px);
+  translate: 0 -50%;
+  color: var(--online);
+  font-size: 12.5px;
+  font-weight: 640;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .3s ease;
+}
+.copy-confirm[data-show] { opacity: 1; transition-duration: .14s; }

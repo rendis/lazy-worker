@@ -18,15 +18,17 @@
       <div class="remote-banner" id="remote-banner" data-state="connected" hidden>
         <div class="remote-banner-line">
           <span class="remote-banner-device" aria-hidden="true">
-            <i data-lucide="monitor" data-kind="desktop"></i><i data-lucide="laptop" data-kind="laptop" hidden></i>
+            <span data-kind="desktop"><i data-lucide="monitor"></i></span><span data-kind="laptop" hidden><i data-lucide="laptop"></i></span>
           </span>
           <strong id="remote-banner-text"></strong>
           <span class="remote-banner-shell tip" id="remote-banner-shell"><i data-lucide="terminal"></i><span id="remote-banner-shell-text"></span></span>
           <span class="remote-banner-link" role="status"><span class="remote-banner-dot" aria-hidden="true"></span><span id="remote-banner-link"></span></span>
         </div>
-        <div class="remote-banner-update" id="remote-banner-update" hidden>
-          <span id="remote-banner-update-text"></span>
-          <button class="accessibility-button" id="remote-update" type="button"></button>
+        <div class="collapse" id="remote-banner-update" inert>
+          <div class="remote-banner-update">
+            <span id="remote-banner-update-text"></span>
+            <button class="accessibility-button" id="remote-update" type="button"></button>
+          </div>
         </div>
       </div>
       <aside class="sidebar">

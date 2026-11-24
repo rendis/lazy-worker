@@ -1872,7 +1872,6 @@ h1:focus { outline: none; }
 .remote-banner {
   grid-column: 1 / -1;
   display: grid;
-  gap: 6px;
   padding: 8px var(--content-inset);
   border-bottom: 1px solid var(--line);
   background: var(--glass);
@@ -1896,18 +1895,19 @@ h1:focus { outline: none; }
   font-weight: 640;
   white-space: nowrap;
   opacity: .65;
+  transition: background-color .2s ease, border-color .2s ease, color .2s ease, opacity .2s ease;
 }
 .remote-banner-shell .lucide { width: 13px; height: 13px; }
 .remote-banner-shell[data-on] { border-color: transparent; background: var(--choice); color: var(--choice-ink); opacity: 1; }
 .remote-banner-shell[hidden] { display: none; }
 .remote-banner-shell + .remote-banner-link { margin-inline-start: 4px; }
 .remote-banner-shell[hidden] + .remote-banner-link { margin-inline-start: auto; }
-.remote-banner-link { display: inline-flex; align-items: center; gap: 7px; margin-inline-start: auto; color: var(--secondary); white-space: nowrap; }
+.remote-banner-link { display: inline-flex; align-items: center; gap: 7px; margin-inline-start: auto; color: var(--secondary); white-space: nowrap; transition: color .2s ease; }
 .remote-banner-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--online); transition: background-color .2s ease; }
 .remote-banner[data-state="lost"] { border-color: var(--pending-border); background: var(--pending-panel); }
 .remote-banner[data-state="lost"] .remote-banner-link { color: var(--pending-color); }
 .remote-banner[data-state="lost"] .remote-banner-dot { background: var(--pending-color); animation: remote-pulse 1.4s ease-in-out infinite; }
-.remote-banner-update { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--secondary); }
+.remote-banner-update { display: flex; align-items: center; gap: 10px; min-width: 0; padding-top: 6px; color: var(--secondary); }
 .remote-banner-update .accessibility-button { flex: none; margin: 0; padding: 4px 8px; font-size: 12px; }
 @keyframes remote-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .remote-banner[data-state="lost"] .remote-banner-dot { animation: none; } }

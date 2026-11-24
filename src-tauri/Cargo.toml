@@ -20,7 +20,7 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAp
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSArray", "NSEnumerator", "NSGeometry", "NSLocale", "NSString"] }
 plist = "1"
 png = "0.18"
-tauri = { version = "~2.12.7", features = ["tray-icon"] }
+tauri = { version = "~2.12.7", features = ["protocol-asset", "tray-icon"] }
 tauri-plugin-updater = "2.14.1"
 
 [target.'cfg(unix)'.dependencies]

@@ -226,6 +226,8 @@ pub enum Request {
     DismissKeysWarning { id: u64 },
     /// Opens a shell on a device that this one controls, in Terminal. It exists only between the main window and this device.
     OpenShell { id: String },
+    /// The single-line ssh command of that shell, to copy and paste in any terminal. Same rule as `OpenShell`.
+    ShellCommand { id: String },
     /// Sends one of a few requests to a paired device, for the Devices view.
     RemoteCall { id: String, request: Value },
 }
@@ -331,6 +333,7 @@ impl Request {
             | Self::RevokeShell { .. }
             | Self::DismissKeysWarning { .. }
             | Self::OpenShell { .. }
+            | Self::ShellCommand { .. }
             | Self::RequestActivityAccessibility => Access::LocalOnly,
         }
     }
@@ -411,6 +414,7 @@ impl Request {
             | Self::RevokeShell { .. }
             | Self::DismissKeysWarning { .. }
             | Self::OpenShell { .. }
+            | Self::ShellCommand { .. }
             | Self::RemoteCall { .. } => false,
         }
     }
@@ -489,6 +493,7 @@ impl Request {
             | Self::RevokeShell { .. }
             | Self::DismissKeysWarning { .. }
             | Self::OpenShell { .. }
+            | Self::ShellCommand { .. }
             | Self::RemoteCall { .. } => false,
         }
     }
@@ -503,6 +508,7 @@ impl Request {
                 | Self::GetCachedIcon { .. }
                 | Self::SetPinnedApps { .. }
                 | Self::OpenShell { .. }
+                | Self::ShellCommand { .. }
         )
     }
 
@@ -777,6 +783,21 @@ async fn run(
             .await
             .map_err(|_| "terminalFailed")?
             .map(|()| Value::Null);
+            #[cfg(not(unix))]
+            {
+                let _ = id;
+                Err("unsupported")
+            }
+        }
+        Request::ShellCommand { id } => {
+            #[cfg(unix)]
+            return tauri::async_runtime::spawn_blocking({
+                let app = app.clone();
+                move || app.state::<crate::remote::service::Service>().shell_command(&id)
+            })
+            .await
+            .map_err(|_| "terminalFailed")?
+            .map(Value::String);
             #[cfg(not(unix))]
             {
                 let _ = id;
@@ -1864,6 +1885,7 @@ mod tests {
             json!({"command": "revokeShell", "args": {"id": id}}),
             json!({"command": "dismissKeysWarning", "args": {"id": 1}}),
             json!({"command": "openShell", "args": {"id": id}}),
+            json!({"command": "shellCommand", "args": {"id": id}}),
         ] {
             let parsed = request(value.clone());
             for origin in [NONE, CONTROL, APPLICATIONS, ACTIONS, all] {
@@ -1881,6 +1903,7 @@ mod tests {
         let id = "0123456789abcdef0123456789abcdef";
         let route = Route::Device(id.to_owned());
         assert_eq!(plan(&route, &request(json!({"command": "openShell", "args": {"id": id}}))), Plan::Refuse);
+        assert_eq!(plan(&route, &request(json!({"command": "shellCommand", "args": {"id": id}}))), Plan::Refuse);
         // A grant from such a window is not run here. It goes to the device, which answers `localOnly`.
         let grant = request(json!({"command": "grantShell", "args": {"id": id, "minutes": 5}}));
         assert_eq!(plan(&route, &grant), Plan::Forward(id.to_owned()));

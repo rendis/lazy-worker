@@ -1,6 +1,7 @@
 import { desktop, type ActionRun, type ActionSchedule, type SavedAction } from "./desktop";
 import type { Language, Message } from "./messages";
 import { h, icon } from "./proxy";
+import { fadeText, only, setHidden } from "./motion";
 import { isLinkError } from "./remote";
 import { formatDuration, formatLimit, DURATION_WIDTH } from "./time";
 
@@ -97,7 +98,8 @@ export function mountActionWindows(host: Host) {
     return {
       root,
       set(message: string): void {
-        setText(text, message);
+        // The last text stays while the note closes.
+        if (message !== "") fadeText(text, message);
         root.toggleAttribute("data-open", message !== "");
         root.toggleAttribute("inert", message === "");
       },
@@ -280,15 +282,14 @@ export function mountActionWindows(host: Host) {
   function renderSchedule(): void {
     if (!scheduling) return;
     for (const { id, button } of repeatButtons) button.setAttribute("aria-pressed", String(id === repeat));
-    dateRow.hidden = repeat !== "once";
-    dayRow.hidden = repeat !== "weekly";
-    clockNote.hidden = repeat === "once";
+    setHidden(dateRow, repeat !== "once");
+    setHidden(dayRow, repeat !== "weekly");
+    setHidden(clockNote, repeat === "once");
     const { target } = scheduling;
     setText(clockNote, fill(t("scheduleClockNote"), { device: target.id === null ? t("scheduleClockHere") : target.name }));
     setText(scheduleTitle, fill(t("scheduleTitle"), { action: scheduling.action.name }));
     setText(scheduleSubtitle, target.id === null ? t("scheduleRunsHere") : fill(t("scheduleRunsOn"), { device: target.name }));
-    removeButton.hidden = !scheduling.action.schedule || removing;
-    removeAsk.hidden = !removing;
+    only([removeButton, removeAsk], removing ? [removeAsk] : scheduling.action.schedule ? [removeButton] : []);
     const ready = repeat === "once" ? dateField.value !== "" && timeField.value !== "" : timeField.value !== "";
     scheduleSave.disabled = !ready || scheduleSaving;
   }
@@ -442,14 +443,14 @@ export function mountActionWindows(host: Host) {
     const state = last?.state;
     const failed = state === "failed" || state === "timedOut" || (state === "finished" && last!.exitCode !== 0);
     const kind = !last || state === "running" ? "running" : state === "stopped" ? "stopped" : failed ? "bad" : "ok";
-    for (const [name, node] of Object.entries(statusIcons)) node.hidden = name !== kind;
+    only(Object.values(statusIcons), [statusIcons[kind]]);
     statusLine.dataset.kind = kind;
     const parts: string[] = [];
     if (!last) parts.push(t("runStarting"));
     else if (run.stopping && state === "running") parts.push(t("runStopping"));
     else parts.push(t(failed && state === "finished" ? "runFailed" : stateMessages[last.state]));
     if (last && state !== "running" && last.exitCode !== null) parts.push(fill(t("runCode"), { code: last.exitCode }));
-    setText(statusText, parts.join(" · "));
+    fadeText(statusText, parts.join(" · "));
     setText(durationText, last && state !== "failed" ? formatDuration(last.seconds) : "");
     const text = last?.output ?? "";
     if (output.textContent !== text) {
@@ -457,13 +458,12 @@ export function mountActionWindows(host: Host) {
       output.textContent = text;
       if (follow) output.scrollTop = output.scrollHeight;
     }
-    output.hidden = text === "";
-    outputEmpty.hidden = text !== "";
-    setText(outputEmpty, t(state === "running" || !last ? "runWaitingOutput" : "runNoOutput"));
+    only([output, outputEmpty], [text === "" ? outputEmpty : output]);
+    fadeText(outputEmpty, t(state === "running" || !last ? "runWaitingOutput" : "runNoOutput"));
     const message = run.error ? t(isLinkError(run.error) ? "remoteLost" : run.error === "actionRunNotFound" ? "runGone" : "actionsUnavailable")
       : last?.truncated ? t("runTruncated") : "";
     runNote.set(message);
-    stopButton.hidden = state !== "running";
+    setHidden(stopButton, state !== "running");
     stopButton.disabled = run.stopping || run.busy;
     copyButton.disabled = text === "";
   }
@@ -520,9 +520,9 @@ export function mountActionWindows(host: Host) {
     const text = run?.last?.output ?? "";
     if (text === "") return;
     void navigator.clipboard.writeText(text).then(() => {
-      setText(copyLabel, t("runCopied"));
+      fadeText(copyLabel, t("runCopied"));
       window.clearTimeout(copiedTimer);
-      copiedTimer = window.setTimeout(() => setText(copyLabel, t("runCopyOutput")), copiedFor);
+      copiedTimer = window.setTimeout(() => fadeText(copyLabel, t("runCopyOutput")), copiedFor);
     }).catch(() => {});
   });
   closeButton.addEventListener("click", () => runOverlay.close());

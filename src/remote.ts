@@ -41,7 +41,7 @@ export function isRefusedLink(error: unknown): boolean {
 const localOnly = new Set([
   "setProxyRole", "setProxyPort", "setProxyServer", "saveProxyApps", "saveProxyAllowed", "getProxyPeers", "getProxyLog",
   "requestActivityAccessibility", "createAction", "updateAction", "deleteAction",
-  "grantShell", "revokeShell", "dismissKeysWarning", "openShell",
+  "grantShell", "revokeShell", "dismissKeysWarning", "openShell", "shellCommand",
 ]);
 /** The requests that need the Control permission. Only the ones that a control of this window sends. */
 const needsControl = new Set([

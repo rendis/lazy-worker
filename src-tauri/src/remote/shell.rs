@@ -145,6 +145,16 @@ fn single_quote(value: &OsStr) -> Result<String, &'static str> {
     Ok(format!("'{text}'"))
 }
 
+/// The program and its arguments on one line, each value in single quotes.
+fn command_line(program: &OsStr, args: &[&OsStr]) -> Result<String, &'static str> {
+    let mut line = single_quote(program)?;
+    for arg in args {
+        line.push(' ');
+        line.push_str(&single_quote(arg)?);
+    }
+    Ok(line)
+}
+
 /// The text of the script: it removes itself, then replaces itself with ssh. The file is gone
 /// before ssh starts, so nothing stays on disk whether ssh runs or not.
 pub fn script_text(
@@ -152,15 +162,23 @@ pub fn script_text(
     program: &OsStr,
     args: &[&OsStr],
 ) -> Result<String, &'static str> {
-    let mut line = format!("exec {}", single_quote(program)?);
-    for arg in args {
-        line.push(' ');
-        line.push_str(&single_quote(arg)?);
-    }
     Ok(format!(
-        "#!/bin/sh\nrm -f -- {}\n{line}\n",
-        single_quote(script.as_os_str())?
+        "#!/bin/sh\nrm -f -- {}\nexec {}\n",
+        single_quote(script.as_os_str())?,
+        command_line(program, args)?
     ))
+}
+
+/// The single line that a person can paste in any terminal to open the same shell. It holds paths and
+/// options only: the key stays in its file, and the script's `rm` is not part of it.
+pub fn copy_command(
+    layout: &super::Layout,
+    destination: &super::destination::Destination,
+    peer: &super::identity::DeviceId,
+) -> Result<String, &'static str> {
+    let command = ssh::shell_command(layout, destination, peer)?;
+    let args: Vec<&OsStr> = command.get_args().collect();
+    command_line(command.get_program(), &args)
 }
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -214,12 +232,12 @@ fn sweep(dir: &Path) {
     }
 }
 
-/// Opens the script in Terminal. The shell asks for a terminal, so it cannot run without one.
+/// Opens the script with the app that macOS uses for `.command` files, which is the default terminal
+/// of the user. The shell asks for a terminal, so it cannot run without one.
 #[cfg(target_os = "macos")]
 pub fn open_in_terminal(script: &Path) -> Result<(), &'static str> {
     use std::process::{Command, Stdio};
     let opened = Command::new("/usr/bin/open")
-        .args(["-a", "Terminal"])
         .arg(script)
         .stdin(Stdio::null())
         .status();
@@ -238,7 +256,7 @@ pub fn open_in_terminal(script: &Path) -> Result<(), &'static str> {
     Err("unsupported")
 }
 
-/// Builds the script for one device and opens it in Terminal.
+/// Builds the script for one device and opens it in the default terminal.
 pub fn open(
     layout: &super::Layout,
     destination: &super::destination::Destination,
@@ -304,7 +322,7 @@ exec '/usr/bin/ssh' '-F' '/r s/ssh_config' '-t' '--' 'fe80::1%en0' 'shell'\n"
         let written = fs::read_to_string(&path).unwrap();
         let expected = format!(
             "#!/bin/sh\nrm -f -- '{}'\nexec '/usr/bin/ssh' '-F' '{}/ssh_config' '-o' 'HostKeyAlias=lw-{}' \
-'-o' 'ControlMaster=no' '-t' '-o' 'RequestTTY=force' '-l' 'me' '-p' '2222' '--' 'studio.local' 'shell'\n",
+'-o' 'AddressFamily=inet' '-o' 'ControlMaster=no' '-t' '-o' 'RequestTTY=force' '-l' 'me' '-p' '2222' '--' 'studio.local' 'shell'\n",
             path.display(),
             remote.display(),
             id.as_str()
@@ -323,6 +341,37 @@ exec '/usr/bin/ssh' '-F' '/r s/ssh_config' '-t' '--' 'fe80::1%en0' 'shell'\n"
         let command = ssh::shell_command(&bad, &destination, &id);
         assert!(command.is_err() || write_script(&dir, id.as_str(), &command.unwrap()).is_err());
         assert_eq!(fs::read_dir(&dir).unwrap().count(), before);
+        fs::remove_dir_all(remote).unwrap();
+    }
+
+    #[test]
+    fn the_copied_command_is_one_line_with_the_same_argv_and_no_key_material() {
+        let remote = scratch("shell-copy");
+        let layout = crate::remote::Layout::for_paths(remote.clone(), None);
+        let destination = crate::remote::destination::Destination::parse("me@studio.local:2222").unwrap();
+        let id = DeviceId::parse("0123456789abcdef0123456789abcdef").unwrap();
+        let line = copy_command(&layout, &destination, &id).unwrap();
+        assert_eq!(
+            line,
+            format!(
+                "'/usr/bin/ssh' '-F' '{}/ssh_config' '-o' 'HostKeyAlias=lw-{}' '-o' 'AddressFamily=inet' \
+'-o' 'ControlMaster=no' '-t' '-o' 'RequestTTY=force' '-l' 'me' '-p' '2222' '--' 'studio.local' 'shell'",
+                remote.display(),
+                id.as_str()
+            )
+        );
+        // The script is the same command with its own removal and `exec` in front.
+        let command = ssh::shell_command(&layout, &destination, &id).unwrap();
+        let path = write_script(&remote.join("terminal"), id.as_str(), &command).unwrap();
+        assert!(fs::read_to_string(&path).unwrap().ends_with(&format!("exec {line}\n")));
+        assert!(!line.contains('\n') && !line.contains("rm -f") && !line.contains("exec"));
+        // Paths and options only: no key text, and the key file is never named.
+        for word in ["PRIVATE KEY", "BEGIN", "ssh-ed25519", "ssh-rsa", "id_"] {
+            assert!(!line.contains(word), "{word}");
+        }
+        // A value that could end the quote is refused.
+        let bad = crate::remote::Layout::for_paths(remote.join("it's"), None);
+        assert!(copy_command(&bad, &destination, &id).is_err());
         fs::remove_dir_all(remote).unwrap();
     }
 

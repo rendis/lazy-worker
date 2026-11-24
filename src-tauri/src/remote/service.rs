@@ -555,6 +555,15 @@ impl Service {
         shell::open(&running.layout, &destination, &peer)
     }
 
+    /// The single-line ssh command that opens the same shell, for the person to paste in a terminal.
+    /// It holds paths and options only.
+    pub fn shell_command(&self, id: &str) -> Result<String, &'static str> {
+        let peer = DeviceId::parse(id)?;
+        let running = self.running()?;
+        let destination = self.device(id).ok_or("notPermitted")?.destination()?;
+        shell::copy_command(&running.layout, &destination, &peer)
+    }
+
     pub fn pairing_state(&self) -> devices::Pairing {
         self.running()
             .map_or_else(|_| devices::Pairing::closed(), |running| running.pairing.state())

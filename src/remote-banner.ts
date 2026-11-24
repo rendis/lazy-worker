@@ -1,5 +1,6 @@
 import { desktop, type DeviceKind } from "./desktop";
 import type { Message } from "./messages";
+import { fadeText, setHidden, swap } from "./motion";
 import { PROTOCOL, type Session } from "./remote";
 import { formatClock } from "./time";
 
@@ -15,7 +16,7 @@ export function mountRemoteBanner(host: { translate(key: Message): string; langu
   const updateLine = document.getElementById("remote-banner-update")!;
   const updateText = document.getElementById("remote-banner-update-text")!;
   const updateButton = document.getElementById("remote-update") as HTMLButtonElement;
-  const kinds = banner.querySelectorAll<SVGElement | HTMLElement>("[data-kind]");
+  const kinds = banner.querySelectorAll<HTMLElement>("[data-kind]");
 
   let kind: DeviceKind = "desktop";
   let lost: string | undefined;
@@ -23,9 +24,8 @@ export function mountRemoteBanner(host: { translate(key: Message): string; langu
   let localVersion: string | undefined;
   let update: UpdateState = "idle";
 
-  function set(node: HTMLElement, value: string): void {
-    if (node.textContent !== value) node.textContent = value;
-  }
+  /** A text that changes fades into the new one. */
+  const set = fadeText;
 
   function differs(): boolean {
     return session !== undefined && localVersion !== undefined &&
@@ -36,14 +36,14 @@ export function mountRemoteBanner(host: { translate(key: Message): string; langu
     const t = host.translate;
     banner.hidden = false;
     banner.dataset.state = lost === undefined ? "connected" : "lost";
-    for (const icon of kinds) icon.toggleAttribute("hidden", icon.getAttribute("data-kind") !== kind);
+    swap([...kinds].filter(icon => icon.dataset.kind === kind), [...kinds].filter(icon => icon.dataset.kind !== kind));
     set(text, t("remoteControlling"));
     const refused = lost === "sshDenied" || lost === "sshHostKeyChanged" || lost === "sshHostKeyUnknown" || lost === "notPaired";
     set(link, t(lost === undefined ? "remoteConnected" : refused ? "remoteRefused" : "remoteLost"));
     // The shell is shown as the device told it. It can only be turned on at that device, so it is never a control here.
     // It stays out of the way while the link is lost, because the answer may be out of date.
     const state = lost === undefined ? session?.shell : undefined;
-    shell.hidden = session === undefined || lost !== undefined;
+    setHidden(shell, session === undefined || lost !== undefined);
     const on = state !== undefined && state !== null;
     shell.toggleAttribute("data-on", on);
     set(shellText, on
@@ -54,7 +54,9 @@ export function mountRemoteBanner(host: { translate(key: Message): string; langu
     shell.setAttribute("tabindex", on ? "-1" : "0");
     // A link that is lost hides the version, because it may be out of date.
     const note = lost === undefined && differs();
-    updateLine.hidden = !note;
+    // The line opens and closes over a short time, and keeps its last text while it closes.
+    updateLine.toggleAttribute("data-open", note);
+    updateLine.toggleAttribute("inert", !note);
     if (!note) return;
     const messages: Record<UpdateState, Message> = {
       idle: "remoteVersionDiffers", working: "remoteUpdating", restarting: "remoteUpdateRestarts",
@@ -62,7 +64,7 @@ export function mountRemoteBanner(host: { translate(key: Message): string; langu
     };
     set(updateText, t(messages[update]));
     set(updateButton, t("remoteUpdate"));
-    updateButton.hidden = update === "restarting" || update === "none";
+    setHidden(updateButton, update === "restarting" || update === "none");
     updateButton.setAttribute("aria-disabled", String(update === "working"));
   }
 

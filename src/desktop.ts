@@ -1037,6 +1037,12 @@ export const desktop = {
     if (previewShellOf(id) === null) throw "notPermitted";
     if (previewQuery.has("terminal-fails")) throw "terminalFailed";
   },
+  /** The single-line ssh command that opens the shell of a device, to paste in a terminal. It holds paths and options only. */
+  async shellCommand(id: string): Promise<string> {
+    if (native) return call("shellCommand", { id });
+    if (previewShellOf(id) === null) throw "notPermitted";
+    return "'/usr/bin/ssh' '-F' '/Users/alex/Library/Application Support/lazy-worker/remote/ssh_config' '-o' 'AddressFamily=inet' '-t' '-l' 'studio' '--' 'imac-del-estudio.local' 'shell'";
+  },
   /** The devices on this network that announce an SSH server, other than this one. */
   async discoverDevices(): Promise<DiscoveredDevice[]> {
     if (native) return call("discoverDevices");

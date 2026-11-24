@@ -289,6 +289,12 @@ pub(super) fn tool(program: &str) -> Command {
     command
 }
 
+/// True for a multicast DNS name: a host that ends in `.local`, with or without the final dot.
+fn is_local_name(host: &str) -> bool {
+    let host = host.to_ascii_lowercase();
+    host.ends_with(".local") || host.ends_with(".local.")
+}
+
 fn build(
     layout: &Layout,
     destination: &Destination,
@@ -305,6 +311,11 @@ fn build(
         })
         .arg("-o")
         .arg(format!("HostKeyAlias={}", known_hosts::alias(peer)));
+    // A `.local` name often resolves to an IPv6 link-local address first. The `from=` of the key on the
+    // other device never matches that address, so these names connect over IPv4 only.
+    if is_local_name(destination.host()) {
+        command.arg("-o").arg("AddressFamily=inet");
+    }
     // One socket per peer, so a live master never carries a request meant for another device
     // that took over the address. The name is the validated id, with no `%` token in it. A
     // pairing shares no connection.
@@ -717,6 +728,7 @@ mod tests {
         .map(|s| s.to_string())
         .collect();
         assert_eq!(args(Mode::Remote(RemoteCommand::Shell)), shell);
+        assert!(!shell.iter().any(|arg| arg == "AddressFamily=inet"));
         let command = command(&layout, &destination, &peer(), RemoteCommand::Dispatch).unwrap();
         assert_eq!(command.get_program(), OsStr::new("/usr/bin/ssh"));
         let mut names: Vec<_> = command
@@ -730,6 +742,46 @@ mod tests {
             .find(|(name, _)| *name == "PATH")
             .and_then(|(_, value)| value);
         assert_eq!(path, Some(OsStr::new("/usr/bin:/bin:/usr/sbin:/sbin")));
+    }
+
+    #[test]
+    fn a_local_name_connects_over_ipv4_in_every_profile() {
+        let layout = layout_at("/r s", Some("/tmp/lw-501"));
+        let modes = [
+            Mode::Remote(RemoteCommand::Dispatch),
+            Mode::Remote(RemoteCommand::Pair),
+            Mode::Remote(RemoteCommand::Shell),
+            Mode::ControlExit,
+            Mode::PrintConfig(Profile::Device),
+            Mode::PrintConfig(Profile::Pairing),
+        ];
+        let family = |input: &str, mode| -> Vec<String> {
+            let destination = Destination::parse(input).unwrap();
+            let args: Vec<String> = build(&layout, &destination, &peer(), mode)
+                .unwrap()
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect();
+            args.windows(2)
+                .filter(|pair| pair[0] == "-o" && pair[1].starts_with("AddressFamily"))
+                .map(|pair| pair[1].clone())
+                .collect()
+        };
+        for mode in modes {
+            for host in ["me@studio.local", "me@Studio.LOCAL.", "me@studio.local:2222"] {
+                assert_eq!(family(host, mode), ["AddressFamily=inet"], "{host}");
+            }
+            for host in ["me@100.64.1.2", "me@[fe80::1%en0]", "me@studio.example.com", "me@mylocal", "me@local.example.com"] {
+                assert!(family(host, mode).is_empty(), "{host}");
+            }
+        }
+        // The option comes right after the host key alias, before the socket path.
+        let args: Vec<String> = build(&layout, &Destination::parse("me@studio.local").unwrap(), &peer(), Mode::Remote(RemoteCommand::Dispatch))
+            .unwrap()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(&args[4..7], ["-o", "AddressFamily=inet", "-o"]);
     }
 
     #[test]
