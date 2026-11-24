@@ -82,6 +82,8 @@
 }
 .device-row-text { display: grid; flex: 1; gap: 1px; min-width: 0; }
 .device-row-text strong { font-size: 14.5px; overflow-wrap: anywhere; }
+.action-description { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.action-description[hidden] { display: none; }
 .device-row > .lucide:last-child:not(.device-kind) { flex: none; width: 16px; height: 16px; color: var(--secondary); }
 .device-row .tool-name { flex: 1; }
 .device-row .tool-name .tool-icon { flex: none; }
@@ -207,8 +209,8 @@
 /* A device row asks before it forgets. Its own buttons sit above the toggle that covers the row. */
 .device-head [hidden], .pair-window [hidden] { display: none; }
 .device-head .device-confirm { position: relative; z-index: 2; margin-inline-start: 0; }
-/* The summary of the pairing window changes every second, so it keeps its width. */
-.pairing-state { min-inline-size: 26ch; text-align: end; font-variant-numeric: tabular-nums; }
+/* The countdown of the pairing window changes every second, so its digits keep one width. */
+.pairing-state { font-variant-numeric: tabular-nums; }
 
 /* The Add device and Pair a device windows. */
 .pair-window { grid-template-rows: auto minmax(0, 1fr); width: min(560px, 100%); height: min(560px, 100%); }
@@ -379,7 +381,7 @@ select.field { padding-inline: 4px 2px; }
 .run-empty { margin: 0; padding: 18px 2px; }
 
 /* An action whose last run failed, and that was asked to be flagged, keeps its failure on its row until a run works. */
-.device-row[data-failed] .setting-note { color: var(--pending-color); }
+.device-row[data-failed] .setting-note:not(.action-description) { color: var(--pending-color); }
 .device-row .action-by { white-space: nowrap; }
 
 /* The window that asks before another device may run any command. The warning is plain text: it says its few facts once. */

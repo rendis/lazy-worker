@@ -132,6 +132,8 @@ export type ActionSchedule =
 export type SavedAction = {
   id: string;
   name: string;
+  /** A line for people under the name. A remote device reads it too, because it is not the command. */
+  description?: string | null;
   /** Only the device that holds the action gets its command. */
   command?: string;
   timeoutSeconds: number;
@@ -148,7 +150,7 @@ export type SavedAction = {
 };
 export type ActionRunState = "running" | "finished" | "stopped" | "timedOut" | "failed";
 export type ActionRun = { state: ActionRunState; exitCode: number | null; seconds: number; output: string; truncated: boolean };
-export type ActionDraft = { name: string; command: string; timeoutSeconds: number };
+export type ActionDraft = { name: string; description: string; command: string; timeoutSeconds: number };
 export type RemoteTool = { id: ToolId; running: boolean };
 /** An application of another device. `bundleId` names it, and `version` is part of the name of its cached icon. */
 export type RemoteApp = { bundleId: string; name: string; version: string; open: boolean };
@@ -608,17 +610,17 @@ function previewActions(id: string): SavedAction[] {
     if (id === "this") {
       list = [
         action({
-          id: "xcode", name: "Clear the Xcode cache", command: "rm -rf ~/Library/Developer/Xcode/DerivedData/*",
+          id: "xcode", name: "Clear the Xcode cache", description: "Frees disk space before a big build", command: "rm -rf ~/Library/Developer/Xcode/DerivedData/*",
           schedule: { kind: "weekly", day: 1, time: "09:00" }, scheduledBy: "studio", scheduledByName: "iMac del estudio",
           notifyOnFailure: true, nextRun: previewNextRun({ kind: "weekly", day: 1, time: "09:00" }),
           lastRun: { start: now - 2 * 86400 - 3, end: now - 2 * 86400, exitCode: 1, timedOut: false, ok: false },
         }),
-        action({ id: "downloads", name: "Clean downloads", command: "find ~/Downloads -mtime +30 -delete" }),
+        action({ id: "downloads", name: "Clean downloads", description: "Deletes files older than 30 days from Downloads", command: "find ~/Downloads -mtime +30 -delete" }),
       ];
     } else {
       list = [
         action({
-          id: "backup", name: "Backup", schedule: daily, scheduledBy: "you", nextRun: previewNextRun(daily),
+          id: "backup", name: "Backup", description: "Copies the work folder to the backup disk", schedule: daily, scheduledBy: "you", nextRun: previewNextRun(daily),
           lastRun: { start: now - 8 * 3600 - 12, end: now - 8 * 3600, exitCode: 0, timedOut: false, ok: true },
         }),
         action({ id: "docker", name: "Restart Docker" }),
@@ -838,14 +840,14 @@ export const desktop = {
     previewGate("createAction");
     if (previewActions("this").length >= 64) throw "tooManyActions";
     previewActions("this").push({
-      id: Math.random().toString(16).slice(2, 10), name: draft.name, command: draft.command, timeoutSeconds: draft.timeoutSeconds,
+      id: Math.random().toString(16).slice(2, 10), name: draft.name, description: draft.description.trim() || null, command: draft.command, timeoutSeconds: draft.timeoutSeconds,
       schedule: null, notifyOnFailure: false, scheduledBy: null, scheduledByName: null, lastRun: null, nextRun: null, busy: false,
     });
   },
   async updateAction(id: string, draft: ActionDraft): Promise<void> {
     if (native) return call("updateAction", { id, ...draft });
     previewGate("updateAction");
-    Object.assign(previewAction(null, "updateAction", id), draft);
+    Object.assign(previewAction(null, "updateAction", id), { ...draft, description: draft.description.trim() || null });
   },
   async deleteAction(id: string): Promise<void> {
     if (native) return call("deleteAction", { id });

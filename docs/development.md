@@ -105,7 +105,7 @@ Devices lets one device control another over the system SSH server. [Devices](us
 ### Test on two devices
 
 1. On each device, open **Devices** and select **Turn on remote access**.
-2. On the device to control, select **Open pairing**. On the other one, select **Add device** and enter the code.
+2. On the device to control, select **Pair** under **Add a device**. On the other one, select **Add device** and enter the code.
 3. Select **Open interface** to open the remote window. Turn a tool on, open an application, and run an action.
 4. Check **Open the log** on the controlled device.
 

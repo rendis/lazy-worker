@@ -15,6 +15,7 @@ use std::{
 };
 
 pub const MAX_NAME: usize = 60;
+pub const MAX_DESCRIPTION: usize = 200;
 pub const MAX_COMMAND: usize = 4 * 1024;
 pub const MAX_ACTIONS: usize = 64;
 pub const DEFAULT_TIMEOUT: u32 = 300;
@@ -41,6 +42,9 @@ pub struct Action {
     /// 32 lowercase hexadecimal characters.
     pub id: String,
     pub name: String,
+    /// A line for people, shown under the name. It is not the command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub command: String,
     pub timeout_seconds: u32,
     pub schedule: Option<Schedule>,
@@ -62,8 +66,7 @@ fn is_hex_id(text: &str) -> bool {
     text.len() == 32 && text.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
-/// A name for people: no control or invisible characters, trimmed, and at most `MAX_NAME` characters.
-pub fn clean_name(text: &str) -> String {
+fn clean_text(text: &str, max: usize) -> String {
     let kept: String = text
         .chars()
         .filter(|c| {
@@ -74,7 +77,17 @@ pub fn clean_name(text: &str) -> String {
                 )
         })
         .collect();
-    kept.trim().chars().take(MAX_NAME).collect::<String>().trim().to_owned()
+    kept.trim().chars().take(max).collect::<String>().trim().to_owned()
+}
+
+/// A name for people: no control or invisible characters, trimmed, and at most `MAX_NAME` characters.
+pub fn clean_name(text: &str) -> String {
+    clean_text(text, MAX_NAME)
+}
+
+/// A description: cleaned like a name, at most `MAX_DESCRIPTION` characters. Nothing left means none.
+pub fn clean_description(text: &str) -> Option<String> {
+    Some(clean_text(text, MAX_DESCRIPTION)).filter(|text| !text.is_empty())
 }
 
 pub fn validate_command(command: &str) -> Result<(), &'static str> {
@@ -96,6 +109,11 @@ impl Action {
     pub fn validate(&self) -> Result<(), &'static str> {
         if !is_hex_id(&self.id) || self.name.is_empty() || clean_name(&self.name) != self.name {
             return Err("actionsFileInvalid");
+        }
+        if let Some(description) = &self.description {
+            if clean_description(description).as_ref() != Some(description) {
+                return Err("actionsFileInvalid");
+            }
         }
         validate_command(&self.command).map_err(|_| "actionsFileInvalid")?;
         validate_timeout(self.timeout_seconds).map_err(|_| "actionsFileInvalid")?;
@@ -201,6 +219,7 @@ pub mod testing {
         Action {
             id: id.into(),
             name: name.into(),
+            description: None,
             command: command.into(),
             timeout_seconds: DEFAULT_TIMEOUT,
             schedule: None,
@@ -258,6 +277,32 @@ mod tests {
     }
 
     #[test]
+    fn a_file_without_descriptions_loads_and_a_description_survives() {
+        let dir = scratch("actions-description");
+        let path = dir.join("actions.json");
+        let old = r#"{"actions":[{"id":"0123456789abcdef0123456789abcdef","name":"Backup","command":"echo hi","timeoutSeconds":300,"schedule":null,"notifyOnFailure":false,"scheduledBy":null,"lastRun":null}],"checkedAt":null}"#;
+        write_file(&path, old, 0o600);
+        let store = Store::open(path.clone()).unwrap();
+        assert_eq!(store.get(ID_A).unwrap().description, None);
+        store
+            .change(|data| {
+                data.actions[0].description = Some("Copies the files".into());
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(Store::open(path.clone()).unwrap().get(ID_A).unwrap().description.as_deref(), Some("Copies the files"));
+        // A description that is empty or not clean is refused.
+        for bad in ["", " x"] {
+            let refused = store.change(|data| {
+                data.actions[0].description = Some(bad.into());
+                Ok(())
+            });
+            assert_eq!(refused, Err("actionsFileInvalid"));
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn a_file_that_is_not_valid_is_refused_and_left_as_it_is() {
         let dir = scratch("actions-bad");
         let path = dir.join("actions.json");
@@ -299,6 +344,9 @@ mod tests {
     fn names_and_commands_are_cleaned_and_limited() {
         assert_eq!(clean_name("  Back\u{202E}up\n "), "Backup");
         assert_eq!(clean_name(&"é".repeat(100)).chars().count(), MAX_NAME);
+        assert_eq!(clean_description("  Copies\u{202E} the\nfiles \t"), Some("Copies thefiles".into()));
+        assert_eq!(clean_description(" \n "), None);
+        assert_eq!(clean_description(&"é".repeat(300)).unwrap().chars().count(), MAX_DESCRIPTION);
         assert!(validate_command("echo hi").is_ok());
         assert!(validate_command("   ").is_err());
         assert!(validate_command("a\0b").is_err());

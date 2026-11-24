@@ -118,6 +118,8 @@ pub struct Actions(Arc<Inner>);
 pub struct View {
     pub id: String,
     pub name: String,
+    /// A line for people. A remote device gets it too, because it is not the command.
+    pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
     pub timeout_seconds: u32,
@@ -202,6 +204,7 @@ impl Actions {
         View {
             id: action.id.clone(),
             name: action.name.clone(),
+            description: action.description.clone(),
             command: Some(action.command.clone()),
             timeout_seconds: action.timeout_seconds,
             schedule: action.schedule.clone(),
@@ -229,7 +232,7 @@ impl Actions {
         self.0.store.snapshot().actions.iter().map(|action| self.view(action, now, &busy)).collect()
     }
 
-    pub fn create(&self, name: &str, command: &str, timeout: Option<u32>) -> Result<View, &'static str> {
+    pub fn create(&self, name: &str, description: Option<&str>, command: &str, timeout: Option<u32>) -> Result<View, &'static str> {
         let name = store::clean_name(name);
         let timeout = timeout.unwrap_or(DEFAULT_TIMEOUT);
         if name.is_empty() {
@@ -240,6 +243,7 @@ impl Actions {
         let action = Action {
             id: new_id(),
             name,
+            description: description.and_then(store::clean_description),
             command: command.to_owned(),
             timeout_seconds: timeout,
             schedule: None,
@@ -257,7 +261,7 @@ impl Actions {
         Ok(self.view(&action, unix_now(), &[]))
     }
 
-    pub fn update(&self, id: &str, name: &str, command: &str, timeout: Option<u32>) -> Result<View, &'static str> {
+    pub fn update(&self, id: &str, name: &str, description: Option<&str>, command: &str, timeout: Option<u32>) -> Result<View, &'static str> {
         let name = store::clean_name(name);
         if name.is_empty() {
             return Err("actionInvalid");
@@ -269,6 +273,9 @@ impl Actions {
         let action = self.0.store.change(|data| {
             let action = data.actions.iter_mut().find(|action| action.id == id).ok_or("actionNotFound")?;
             action.name = name;
+            if let Some(description) = description {
+                action.description = store::clean_description(description);
+            }
             action.command = command.to_owned();
             if let Some(timeout) = timeout {
                 action.timeout_seconds = timeout;
@@ -582,11 +589,11 @@ impl Actions {
             Request::CreateAction { .. } | Request::UpdateAction { .. } | Request::DeleteAction { .. } if !writes => {
                 Err("localOnly")
             }
-            Request::CreateAction { name, command, timeout_seconds } => {
-                json(self.create(&name, &command, timeout_seconds)?)
+            Request::CreateAction { name, description, command, timeout_seconds } => {
+                json(self.create(&name, description.as_deref(), &command, timeout_seconds)?)
             }
-            Request::UpdateAction { id, name, command, timeout_seconds } => {
-                json(self.update(&id, &name, &command, timeout_seconds)?)
+            Request::UpdateAction { id, name, description, command, timeout_seconds } => {
+                json(self.update(&id, &name, description.as_deref(), &command, timeout_seconds)?)
             }
             Request::DeleteAction { id } => self.delete(&id).map(|()| Value::Null),
             Request::RunAction { id } => {
@@ -844,6 +851,24 @@ mod tests {
     }
 
     #[test]
+    fn a_description_is_cleaned_kept_on_update_cleared_by_empty_and_read_remotely() {
+        let (actions, _, dir) = open("actions-description", Box::new(Plain));
+        let made = call(&actions, Origin::Local, json!({"command": "createAction", "args": {
+            "name": "Job", "description": "  Copies\nfiles  ", "command": "echo secret-cmd"}})).unwrap();
+        let id = made["id"].as_str().unwrap().to_owned();
+        assert_eq!(made["description"], "Copiesfiles");
+        let update = |args: Value| call(&actions, Origin::Local, json!({"command": "updateAction", "args": args})).unwrap();
+        // A missing description is left alone.
+        assert_eq!(update(json!({"id": id, "name": "Job 2", "command": "echo x"}))["description"], "Copiesfiles");
+        let remote = call(&actions, peer(ID_A), json!({"command": "listActions"})).unwrap();
+        assert_eq!(remote[0]["description"], "Copiesfiles");
+        assert!(remote[0].get("command").is_none());
+        // An empty one clears it.
+        assert!(update(json!({"id": id, "name": "Job 2", "description": " ", "command": "echo x"}))["description"].is_null());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn a_device_never_reads_a_command_and_never_writes_an_action() {
         let (actions, _, dir) = open("actions-redact", Box::new(Plain));
         let id = create(&actions, "Secret job", "curl -H 'Authorization: sk-secret-123' https://x");
@@ -934,20 +959,20 @@ mod tests {
         let listed = &actions.list()[0];
         assert_eq!((listed.name.as_str(), listed.timeout_seconds), ("Backup", DEFAULT_TIMEOUT));
         for (name, command, timeout) in [("", "echo", None), ("a", "  ", None), ("a", "a\0b", None), ("a", "echo", Some(0)), ("a", "echo", Some(3601))] {
-            assert_eq!(actions.create(name, command, timeout).err(), Some("actionInvalid"));
-            assert_eq!(actions.update(&id, name, command, timeout).err(), Some("actionInvalid"));
+            assert_eq!(actions.create(name, None, command, timeout).err(), Some("actionInvalid"));
+            assert_eq!(actions.update(&id, name, None, command, timeout).err(), Some("actionInvalid"));
         }
-        assert_eq!(actions.update("nope", "a", "echo", None).err(), Some("actionNotFound"));
-        let edited = actions.update(&id, "Renamed", "echo again", Some(10)).unwrap();
+        assert_eq!(actions.update("nope", "a", None, "echo", None).err(), Some("actionNotFound"));
+        let edited = actions.update(&id, "Renamed", None, "echo again", Some(10)).unwrap();
         assert_eq!((edited.name.as_str(), edited.timeout_seconds), ("Renamed", 10));
         // Keeps the limit when none is sent.
-        assert_eq!(actions.update(&id, "Renamed", "echo again", None).unwrap().timeout_seconds, 10);
+        assert_eq!(actions.update(&id, "Renamed", None, "echo again", None).unwrap().timeout_seconds, 10);
         actions.delete(&id).unwrap();
         assert_eq!(actions.delete(&id), Err("actionNotFound"));
         for index in 0..MAX_ACTIONS {
-            actions.create(&format!("a{index}"), "echo", None).unwrap();
+            actions.create(&format!("a{index}"), None, "echo", None).unwrap();
         }
-        assert_eq!(actions.create("one more", "echo", None).err(), Some("tooManyActions"));
+        assert_eq!(actions.create("one more", None, "echo", None).err(), Some("tooManyActions"));
         cleanup(dir);
     }
 

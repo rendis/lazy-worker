@@ -120,9 +120,9 @@ If the row says that passwords can still log in, select **Allow passwords again*
 
 Pairing links two devices with a code that works once. Start on the device you want to control.
 
-1. On that device, open **Devices** and select **Open pairing**.
-2. Choose what the new device may do. **Control** starts on. **Applications** and **Actions** start off. Shell is never part of pairing.
-3. Select **Open for 10 minutes**. The device shows a 6-digit code, the user name to enter, and the address to reach it.
+1. On that device, open **Devices**. In **Access**, find **Add a device** and select **Pair**. The row shows how many devices are paired.
+2. Choose what the new device may do. **Control** starts on. **Applications** and **Actions** start off. Shell and files are never part of pairing. You turn them on later, at this device.
+3. Select **Open for 10 minutes**. The row then says **Waiting for a device** with the time left, and the button becomes **Show code**. The device shows a 6-digit code, the user name to enter, and the address to reach it.
 4. On the other device, open **Devices** and select **Add device**.
 5. Choose the device in the list. If it is not there, select **Enter an address**. Use this for a device on a VPN such as Tailscale, for example `studio.local` or `100.64.0.5`. Add `:port` if the port is not 22.
 6. On the same network, a device with an open pairing window shows **Pairing open**, and its user name fills in by itself. Over a VPN or with an address you typed, enter the user name. Then enter the code and select **Pair**.
@@ -163,7 +163,7 @@ With **Applications** allowed, a device shows its installed applications in its 
 
 An action is a named shell command that you save on a device. Each device keeps its own actions. You create, change, and delete an action only at that device. The command runs as your user, with your permissions. Add only commands you trust.
 
-- In the **Actions** tab of **This device**, select **Add action**. Give it a name, a command, and a time limit. The action stops by itself when the time passes.
+- In the **Actions** tab of **This device**, select **Add action**. Give it a name, a command, and a time limit. You can add a short description that shows under the name. The search field looks in names and descriptions. A device that controls this one can read the description, but never the command. The action stops by itself when the time passes.
 - Next to the command, **Test in my terminal** runs the text you typed in your own terminal, the same way the action runs, before you save it. **Copy command** copies the line that does it, to paste in any terminal. Both work only at the device that owns the action.
 - A device with **Actions** allowed can run your actions and stop them. It can also follow the output. It cannot read the command.
 - Select **Schedule** next to an action to schedule it: once, daily, or weekly. The action runs on the device that owns it, while Lazy Worker is open there. If that time passes while the app is closed, Lazy Worker skips it and does not run late.
@@ -244,7 +244,7 @@ The log keeps security events apart from the rest: pairing, removing a device, s
 - **“That device has a different identity than before.”** Stop. Lazy Worker saved the identity of the device when you paired. A different one can mean another device is pretending. Check the address. Check that the device was not reset. Do not continue until you are sure. Then forget the device and pair again.
 - **macOS asks to find devices on the local network.** Allow it. Lazy Worker needs it to list the devices on this network. Without it, use **Enter an address**.
 - **Cannot reach the device.** Check that the device is on and awake. Check that your firewall and your VPN let port 22 through. Lazy Worker accepts connections only from private networks, link-local addresses, and the Tailscale range.
-- **Pairing is not open on that device.** Select **Open pairing** there, and try again within 10 minutes.
+- **Pairing is not open on that device.** Select **Pair** under **Add a device** there, and try again within 10 minutes.
 
 ## Security
 

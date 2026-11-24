@@ -123,6 +123,11 @@ export function mountActionWindows(host: Host) {
     class: "field action-name", type: "text", maxlength: "60", autocomplete: "off", spellcheck: "false", required: true,
   });
   bind(nameField, "actionName", "aria-label");
+  const descriptionField = h("input", {
+    class: "field action-name", type: "text", maxlength: "200", autocomplete: "off", spellcheck: "false",
+  });
+  bind(descriptionField, "actionDescription", "aria-label");
+  bind(descriptionField, "actionDescriptionPlaceholder", "placeholder");
   const commandField = h("textarea", {
     class: "field action-command", rows: "5", autocomplete: "off", autocapitalize: "off", spellcheck: "false", required: true,
   });
@@ -162,6 +167,7 @@ export function mountActionWindows(host: Host) {
     commandField);
   formBody.append(
     row("tag", "actionName", nameField),
+    row("file-text", "actionDescription", descriptionField),
     commandLabel,
     row("timer", "actionTimeLimit", limitField),
     warning, formError.root,
@@ -180,6 +186,7 @@ export function mountActionWindows(host: Host) {
     editing = undefined;
     saving = false;
     nameField.value = "";
+    descriptionField.value = "";
     commandField.value = "";
     formError.set("");
   });
@@ -188,6 +195,7 @@ export function mountActionWindows(host: Host) {
     editing = action;
     setText(formTitle, t(action ? "actionFormEdit" : "actionFormNew"));
     nameField.value = action?.name ?? "";
+    descriptionField.value = action?.description ?? "";
     commandField.value = action?.command ?? "";
     fillLimits(action?.timeoutSeconds ?? defaultLimit);
     formError.set("");
@@ -211,7 +219,7 @@ export function mountActionWindows(host: Host) {
     saving = true;
     formSave.disabled = true;
     const draft = {
-      name: nameField.value.trim(), command: commandField.value.replace(/\0/g, ""), timeoutSeconds: Number(limitField.value),
+      name: nameField.value.trim(), description: descriptionField.value.trim(), command: commandField.value.replace(/\0/g, ""), timeoutSeconds: Number(limitField.value),
     };
     const saved = editing ? desktop.updateAction(editing.id, draft) : desktop.createAction(draft);
     void saved.then(() => {

@@ -15,7 +15,7 @@ import { tools } from "./modules";
 import { h, icon, type Child } from "./proxy";
 import { enterNode, fadeText, only, setHidden } from "./motion";
 import { isLinkError, isRefusal, refusal, type Session } from "./remote";
-import { age, formatClock, formatMoment, formatSession, type AgeUnit } from "./time";
+import { age, formatClock, formatCountdown, formatMoment, formatSession, type AgeUnit } from "./time";
 
 // Every name and text below comes from data that other devices will send, so it is only ever set as text.
 const openKey = "lazy-worker-devices-open";
@@ -677,7 +677,8 @@ export function mountDevices(host: Host) {
 
   /** The actions whose name has `query` in it. The query is already lowercase. */
   function filterActions(actions: readonly SavedAction[], query: string): SavedAction[] {
-    return query === "" ? [...actions] : actions.filter(action => action.name.toLocaleLowerCase().includes(query));
+    return query === "" ? [...actions] : actions.filter(action =>
+      action.name.toLocaleLowerCase().includes(query) || (action.description ?? "").toLocaleLowerCase().includes(query));
   }
 
   /** `2 actions · next 02:00`, `1 action`, or `No actions`. */
@@ -756,6 +757,7 @@ export function mountDevices(host: Host) {
     return action => {
       let latest = action;
       const name = h("strong", {}, action.name);
+      const description = h("span", { class: "setting-note action-description" });
       const summary = h("span", { class: "setting-note" });
       const edit = !device && iconButton(fill(t("editAction"), { action: action.name }), "pencil", "outlined");
       const schedule = iconButton(fill(t("scheduleAction"), { action: action.name }), "calendar-clock", "outlined");
@@ -773,7 +775,7 @@ export function mountDevices(host: Host) {
         edit && edit.root, schedule.root, remove && remove.root, confirm, run.root);
       const root = h("div", { class: "device-row" },
         h("span", { class: "action-icon" }, icon("square-terminal")),
-        h("div", { class: "device-row-text" }, name, summary), controls);
+        h("div", { class: "device-row-text" }, name, description, summary), controls);
       edit && edit.button.addEventListener("click", () => windows.openForm(latest, edit.button));
       schedule.button.addEventListener("click", () => windows.openSchedule(target(), latest, schedule.button));
       run.button.addEventListener("click", () => void startRun(target(), latest, run.button));
@@ -788,6 +790,9 @@ export function mountDevices(host: Host) {
         root,
         update(current) {
           latest = current;
+          const about = current.description ?? "";
+          setHidden(description, about === "");
+          if (about !== "") fadeText(description, about);
           fadeText(summary, actionText(current, device === undefined));
           root.toggleAttribute("data-failed", current.notifyOnFailure && current.lastRun !== null && !current.lastRun.ok);
           const label = fill(t("runAction"), { action: current.name });
@@ -1047,11 +1052,17 @@ export function mountDevices(host: Host) {
       h("div", { class: "device-end" }, screenEnable, screenSettings.root));
     screenEnable.addEventListener("click", () => { void enableScreen(screenEnable); });
     screenSettings.button.addEventListener("click", () => { void openScreenSettings(); });
-    const pairingState = h("span", { class: "setting-note pairing-state" });
-    const pairing = iconButton(t("openPairing"), "lock-keyhole-open", "outlined");
-    const pairingRow = settingRow("lock-keyhole", "pairing", pairingState, pairing.root);
-    pairing.button.setAttribute("aria-haspopup", "dialog");
-    pairing.button.addEventListener("click", () => openPairWindow(pairing.button));
+    const pairingLabel = h("span", { class: "setting-label" }, t("addDeviceTitle"));
+    const pairingState = h("p", { class: "setting-note pairing-state" });
+    const pairingButtonLabel = h("span", {}, t("pairButton"));
+    const pairingButton = h("button", { type: "button", class: "access-action", "aria-haspopup": "dialog" },
+      icon("lock-keyhole-open"), pairingButtonLabel);
+    const pairingTip = h("span", { class: "tip" }, pairingButton);
+    const pairingRow = h("div", { class: "setting-row device-access" },
+      icon("lock-keyhole"),
+      h("div", { class: "access-text" }, pairingLabel, pairingState),
+      h("div", { class: "device-end" }, pairingTip));
+    pairingButton.addEventListener("click", () => openPairWindow(pairingButton));
 
     const socketNote = note("");
     const controllerRows = h("div", { class: "device-rows" });
@@ -1095,7 +1106,7 @@ export function mountDevices(host: Host) {
     });
 
     // The warnings and the note of the socket are alerts, so they stay above the tabs whichever tab shows.
-    const accessBody = tabBody(access.root, screenRow, pairingRow.root, cut);
+    const accessBody = tabBody(access.root, screenRow, pairingRow, cut);
     const tabs = tabset("this", t("tabListThis"), [
       { id: "access", title: "tabAccess", panel: tabColumn(accessBody) },
       { id: "who", title: "tabWho", panel: tabColumn(controllersBody) },
@@ -1159,15 +1170,21 @@ export function mountDevices(host: Host) {
         screenEnable.setAttribute("aria-busy", String(enablingScreen));
         setHidden(screenSettings.root, !(screenOff || screenNoUser));
         syncGuide();
+        const paired = data.controllers.length;
         const pairingText = data.pairing.open && data.pairing.expires !== null
-          ? fill(t("pairingOpenLeft"), { time: formatSession(data.pairing.expires - seconds()) }) : t("pairingClosed");
-        // The countdown changes every second and only sets the text. A change between open and closed fades.
-        if (pairingState.dataset.open === String(data.pairing.open)) setText(pairingState, pairingText);
+          ? fill(t("pairingWaiting"), { time: formatCountdown(data.pairing.expires - seconds()) })
+          : fill(t(paired === 0 ? "pairedNone" : paired === 1 ? "pairedOne" : "pairedMany"), { count: String(paired) });
+        // The countdown changes every second and only sets the text. A change of wording fades.
+        const pairingKind = data.pairing.open ? "open" : `closed:${paired}`;
+        if (pairingState.dataset.kind === pairingKind) setText(pairingState, pairingText);
         else fadeText(pairingState, pairingText);
-        pairingState.dataset.open = String(data.pairing.open);
-        const pairingName = t(data.pairing.open ? "showPairing" : "openPairing");
-        pairing.disable(needsTurnOn ? t("pairNeedsAccess") : undefined, pairingName);
-        setAttribute(pairing.button, "aria-label", needsTurnOn ? t("pairNeedsAccess") : pairingName);
+        pairingState.dataset.kind = pairingKind;
+        const pairingName = t(data.pairing.open ? "showCode" : "pairButton");
+        fadeText(pairingButtonLabel, pairingName);
+        if (pairingButton.disabled !== needsTurnOn) pairingButton.disabled = needsTurnOn;
+        if (needsTurnOn) setTip(pairingTip, t("pairNeedsAccess"));
+        else pairingTip.removeAttribute("data-tip");
+        setAttribute(pairingButton, "aria-label", needsTurnOn ? t("pairNeedsAccess") : pairingName);
         addAction.disable(localActionsError ? t("actionsUnavailable") : undefined, t("addAction"));
         if (logDrawn !== logVersion) {
           logDrawn = logVersion;

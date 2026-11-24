@@ -28,6 +28,12 @@ export function formatSession(seconds: number): string {
 /** Characters to reserve for `formatSession`. It holds a session of up to 99 days. */
 export const SESSION_WIDTH = 9;
 
+/** The time left of a window that lasts minutes, such as pairing: `08:42`. Its longest text has 5 characters (`10:00`). */
+export function formatCountdown(seconds: number): string {
+  const total = Math.max(0, Math.ceil(seconds));
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
 export type AgeUnit = "seconds" | "minutes" | "hours" | "days";
 
 /** The largest whole unit of an elapsed time, so the number stays under three digits for months. */

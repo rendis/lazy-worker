@@ -221,8 +221,9 @@ pub enum Request {
     /// The actions of this device. A remote origin gets them without their commands.
     ListActions,
     /// Writing an action is for the person at this device only.
-    CreateAction { name: String, command: String, timeout_seconds: Option<u32> },
-    UpdateAction { id: String, name: String, command: String, timeout_seconds: Option<u32> },
+    CreateAction { name: String, description: Option<String>, command: String, timeout_seconds: Option<u32> },
+    /// A missing `description` leaves it as it is. An empty one clears it.
+    UpdateAction { id: String, name: String, description: Option<String>, command: String, timeout_seconds: Option<u32> },
     DeleteAction { id: String },
     /// Starts an action and returns the id of the run.
     RunAction { id: String },
