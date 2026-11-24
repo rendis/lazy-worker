@@ -41,7 +41,7 @@ pub fn status() -> RemoteAccess {
             (Some(user), true) => password_login(user),
             _ => PasswordLogin::Unknown,
         },
-        user_allowed: user.as_deref().and_then(user_allowed),
+        user_allowed: user.as_deref().and_then(|user| group_allows(user, GROUP)),
         managed_file: Path::new(DROP_IN).exists(),
         macos_major: macos_major(),
     }
@@ -116,9 +116,10 @@ fn parse_methods(stderr: &str) -> PasswordLogin {
     }
 }
 
-fn user_allowed(user: &str) -> Option<bool> {
+/// Whether the system lets `user` use a service that has this access group. Without the group, it lets everyone.
+pub(super) fn group_allows(user: &str, group: &str) -> Option<bool> {
     let output = Command::new("/usr/sbin/dseditgroup")
-        .args(["-o", "checkmember", "-m", user, "com.apple.access_ssh"])
+        .args(["-o", "checkmember", "-m", user, group])
         .env_clear()
         .stdin(Stdio::null())
         .output()
@@ -131,7 +132,7 @@ fn user_allowed(user: &str) -> Option<bool> {
 
 /// `yes <user> is a member of ...` or `no <user> is NOT a member of ...`. Without the group,
 /// the system lets every user in.
-fn parse_membership(stdout: &str, stderr: &str) -> Option<bool> {
+pub(super) fn parse_membership(stdout: &str, stderr: &str) -> Option<bool> {
     match stdout.split_whitespace().next() {
         Some("yes") => Some(true),
         Some("no") => Some(false),
@@ -175,6 +176,16 @@ fn drop_in_steps() -> String {
     )
 }
 
+/// Adds `user` to the access group when the group exists and the user is not in it. It changes no other user.
+/// The caller has checked the user name with `safe_user`.
+pub(super) fn group_step(user: &str, group: &str) -> String {
+    format!(
+        "if /usr/sbin/dseditgroup -o read {group} > /dev/null 2>&1; then \
+         /usr/sbin/dseditgroup -o checkmember -m {user} {group} > /dev/null 2>&1 \
+         || /usr/sbin/dseditgroup -o edit -a {user} -t user {group} || exit 4; fi"
+    )
+}
+
 /// Keys only, then the user in the access group, then Remote Login itself. Every step can run
 /// again. `systemsetup` is not used because it needs Full Disk Access. The user name is the one
 /// value that comes from outside, and `safe_user` has checked it.
@@ -182,11 +193,7 @@ fn enable_script(user: &str) -> Option<String> {
     if !safe_user(user) {
         return None;
     }
-    let group = format!(
-        "if /usr/sbin/dseditgroup -o read {GROUP} > /dev/null 2>&1; then \
-         /usr/sbin/dseditgroup -o checkmember -m {user} {GROUP} > /dev/null 2>&1 \
-         || /usr/sbin/dseditgroup -o edit -a {user} -t user {GROUP} || exit 4; fi"
-    );
+    let group = group_step(user, GROUP);
     Some(format!(
         "{} [ $status -eq 0 ] || exit $status; {group}; \
          /bin/launchctl enable {SERVICE}; \
@@ -201,7 +208,8 @@ fn allow_script() -> String {
 }
 
 /// Runs a script through the macOS administrator prompt.
-fn run_as_administrator(script: &str, prompt: &str) -> Result<(), &'static str> {
+/// `failed` is the error for any failure that is not a cancelled prompt.
+pub(super) fn run_as_administrator(script: &str, prompt: &str, failed: &'static str) -> Result<(), &'static str> {
     let result = Command::new("/usr/bin/osascript")
         .args([
             "-e",
@@ -210,13 +218,13 @@ fn run_as_administrator(script: &str, prompt: &str) -> Result<(), &'static str> 
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .output()
-        .map_err(|_| "remoteAccessChangeFailed")?;
+        .map_err(|_| failed)?;
     if result.status.success() {
         Ok(())
     } else if String::from_utf8_lossy(&result.stderr).contains("-128") {
         Err("adminCanceled")
     } else {
-        Err("remoteAccessChangeFailed")
+        Err(failed)
     }
 }
 
@@ -243,7 +251,7 @@ pub fn enable_remote_access() -> Result<RemoteAccess, &'static str> {
         .and_then(|user| enable_script(&user))
         .ok_or("remoteAccessChangeFailed")?;
     let prompt = "Lazy Worker needs your permission to turn on remote access to this device, for keys only.";
-    run_as_administrator(&script, prompt)?;
+    run_as_administrator(&script, prompt, "remoteAccessChangeFailed")?;
     // The server needs a moment to listen after it starts.
     let mut status = status();
     for _ in 0..6 {
@@ -259,7 +267,7 @@ pub fn enable_remote_access() -> Result<RemoteAccess, &'static str> {
 /// Removes our file, so the server applies its own settings again.
 pub fn allow_password_login() -> Result<RemoteAccess, &'static str> {
     let prompt = "Lazy Worker needs your permission to allow passwords for SSH log in to this device again.";
-    run_as_administrator(&allow_script(), prompt)?;
+    run_as_administrator(&allow_script(), prompt, "remoteAccessChangeFailed")?;
     Ok(status())
 }
 

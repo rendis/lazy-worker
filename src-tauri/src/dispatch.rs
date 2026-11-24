@@ -193,6 +193,13 @@ pub enum Request {
     AllowPasswordLogin,
     EnableRemoteAccess,
     OpenSharingSettings,
+    /// Whether Screen Sharing is on, and whether it lets this user in. A paired device with Control reads it.
+    GetScreenSharing,
+    /// Turns on Screen Sharing with one administrator prompt. Only the person at this device does it.
+    EnableScreenSharing,
+    OpenScreenSharingSettings,
+    /// Opens the screen of a device that this one controls, in Screen Sharing. Same rule as `OpenShell`.
+    OpenScreen { id: String },
     /// The installed applications of this device, and which are open.
     ListApplications,
     /// The icon of an application of that list, as base64 text of one PNG.
@@ -251,6 +258,7 @@ impl Request {
             | Self::GetFirstRun
             | Self::GetSystemLanguage
             | Self::GetStatuses
+            | Self::GetScreenSharing
             | Self::GetLidStatus
             | Self::GetLoginLaunch
             | Self::GetUpdateStatus
@@ -327,6 +335,9 @@ impl Request {
             | Self::AllowPasswordLogin
             | Self::EnableRemoteAccess
             | Self::OpenSharingSettings
+            | Self::EnableScreenSharing
+            | Self::OpenScreenSharingSettings
+            | Self::OpenScreen { .. }
             | Self::SaveProxyApps { .. }
             | Self::SaveProxyAllowed { .. }
             | Self::SetProxyRole { .. }
@@ -365,6 +376,7 @@ impl Request {
             | Self::GetViewer
             | Self::GetSession
             | Self::GetStatuses
+            | Self::GetScreenSharing
             | Self::GetLidStatus
             | Self::GetLoginLaunch
             | Self::GetUpdateStatus
@@ -415,6 +427,9 @@ impl Request {
             | Self::AllowPasswordLogin
             | Self::EnableRemoteAccess
             | Self::OpenSharingSettings
+            | Self::EnableScreenSharing
+            | Self::OpenScreenSharingSettings
+            | Self::OpenScreen { .. }
             | Self::OpenApplication { .. }
             | Self::CreateAction { .. }
             | Self::UpdateAction { .. }
@@ -498,6 +513,10 @@ impl Request {
             | Self::AllowPasswordLogin
             | Self::EnableRemoteAccess
             | Self::OpenSharingSettings
+            | Self::GetScreenSharing
+            | Self::EnableScreenSharing
+            | Self::OpenScreenSharingSettings
+            | Self::OpenScreen { .. }
             | Self::OpenApplication { .. }
             | Self::CreateAction { .. }
             | Self::UpdateAction { .. }
@@ -530,6 +549,7 @@ impl Request {
                 | Self::GetCachedIcon { .. }
                 | Self::SetPinnedApps { .. }
                 | Self::OpenShell { .. }
+                | Self::OpenScreen { .. }
                 | Self::ShellCommand { .. }
                 | Self::TestActionCommand { .. }
                 | Self::ActionCommandLine { .. }
@@ -542,6 +562,7 @@ impl Request {
         matches!(
             self,
             Self::GetStatuses
+                | Self::GetScreenSharing
                 | Self::SetToolActive { .. }
                 | Self::GetSession
                 | Self::ListApplications
@@ -804,6 +825,50 @@ async fn run(
                 .state::<crate::remote::service::Service>()
                 .dismiss_warning(id)
                 .map(|()| Value::Null);
+            #[cfg(not(unix))]
+            {
+                let _ = id;
+                Err("unsupported")
+            }
+        }
+        Request::GetScreenSharing => {
+            #[cfg(unix)]
+            return json(
+                tauri::async_runtime::spawn_blocking(crate::remote::screen::status)
+                    .await
+                    .map_err(|_| "workerUnavailable")?,
+            );
+            #[cfg(not(unix))]
+            Err("unsupported")
+        }
+        Request::EnableScreenSharing => {
+            #[cfg(unix)]
+            return json(
+                tauri::async_runtime::spawn_blocking(crate::remote::screen::enable)
+                    .await
+                    .map_err(|_| "screenChangeFailed")??,
+            );
+            #[cfg(not(unix))]
+            Err("unsupported")
+        }
+        Request::OpenScreenSharingSettings => {
+            #[cfg(unix)]
+            return tauri::async_runtime::spawn_blocking(crate::remote::screen::open_settings)
+                .await
+                .map_err(|_| "sharingSettingsFailed")?
+                .map(|()| Value::Null);
+            #[cfg(not(unix))]
+            Err("unsupported")
+        }
+        Request::OpenScreen { id } => {
+            #[cfg(unix)]
+            return tauri::async_runtime::spawn_blocking({
+                let app = app.clone();
+                move || app.state::<crate::remote::service::Service>().open_screen(&id)
+            })
+            .await
+            .map_err(|_| "screenOpenFailed")?
+            .map(|()| Value::Null);
             #[cfg(not(unix))]
             {
                 let _ = id;
@@ -1510,6 +1575,9 @@ mod tests {
             json!({"command": "allowPasswordLogin"}),
             json!({"command": "enableRemoteAccess"}),
             json!({"command": "openSharingSettings"}),
+            json!({"command": "enableScreenSharing"}),
+            json!({"command": "openScreenSharingSettings"}),
+            json!({"command": "openScreen", "args": {"id": id}}),
         ] {
             let parsed = request(value);
             for origin in [NONE, CONTROL, ACTIONS, Origin::Remote(Permissions { control: true, applications: true, actions: true, peer: None })] {
@@ -2017,6 +2085,33 @@ mod tests {
             assert!(!parsed.may_be_called_remotely(), "{value}");
             assert!(!parsed.is_read() && !parsed.runs_on_viewer());
         }
+    }
+
+    #[test]
+    fn screen_sharing_is_read_with_control_and_turned_on_only_at_the_device() {
+        let preferences = Preferences::default();
+        let id = "0123456789abcdef0123456789abcdef";
+        let read = request(json!({"command": "getScreenSharing"}));
+        assert_eq!(allowed(CONTROL, &read, &preferences), Ok(()));
+        assert_eq!(allowed(NONE, &read, &preferences), Err("notPermitted"));
+        assert_eq!(allowed(ACTIONS, &read, &preferences), Err("notPermitted"));
+        assert!(read.is_read() && read.may_be_called_remotely() && !read.runs_on_viewer());
+        // The Devices view asks the other device, and a window of a device forwards it.
+        assert_eq!(plan(&Route::Device(id.to_owned()), &read), Plan::Forward(id.to_owned()));
+        for value in [
+            json!({"command": "enableScreenSharing"}),
+            json!({"command": "openScreenSharingSettings"}),
+            json!({"command": "openScreen", "args": {"id": id}}),
+        ] {
+            let parsed = request(value.clone());
+            assert!(!parsed.may_be_called_remotely() && !parsed.is_read(), "{value}");
+        }
+        // Opening a screen is the person at the main window, for a device that this one controls.
+        let open = request(json!({"command": "openScreen", "args": {"id": id}}));
+        assert_eq!(plan(&Route::Device(id.to_owned()), &open), Plan::Refuse);
+        assert_eq!(plan(&Route::Local, &open), Plan::Here);
+        let enable = request(json!({"command": "enableScreenSharing"}));
+        assert_eq!(plan(&Route::Device(id.to_owned()), &enable), Plan::Forward(id.to_owned()));
     }
 
     #[test]

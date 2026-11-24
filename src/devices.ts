@@ -2,7 +2,7 @@ import "./devices.css";
 import {
   desktop, type ActionSchedule, type Controller, type ControllerPermission, type DeviceKind, type DevicesOverview,
   type DiscoveredDevice, type KeysWarning, type ProxyNetwork, type RemoteApp, type RemoteDevice, type RemoteLogEntry, type RemoteTool,
-  type SavedAction, type ShellState, type Statuses,
+  type SavedAction, type ScreenSharing, type ShellState, type Statuses,
 } from "./desktop";
 import { mountActionWindows, type Target } from "./device-actions";
 import { mountShellWindow } from "./device-shell";
@@ -104,6 +104,8 @@ type WarningItem = Omit<KeysWarning, "id"> & { id: string };
 /** What the last read of a device found. The session is read less often than the tools, because it rarely changes. */
 type LiveDevice = {
   tools?: RemoteTool[]; error?: string; permissions?: Session["permissions"]; shell?: ShellState;
+  /** What the last read of its Screen Sharing found, and the code that ended it when it failed. */
+  screen?: ScreenSharing; screenError?: string;
 };
 type Item = { id: string; self: boolean; name: string; kind: DeviceKind; data: DevicesOverview["thisDevice"] | RemoteDevice };
 
@@ -177,12 +179,18 @@ export function mountDevices(host: Host) {
   const appsSearch = document.getElementById("device-apps-search") as HTMLInputElement;
 
   const guideWindow = document.getElementById("remote-guide-window")!;
+  const guideTitle = document.getElementById("remote-guide-title")!;
   const guideBody = document.getElementById("remote-guide-body")!;
   const guideClose = document.getElementById("remote-guide-close") as HTMLButtonElement;
   const guideOpen = document.getElementById("remote-guide-open") as HTMLButtonElement;
 
   let overview: DevicesOverview | undefined;
   let enabling = false;
+  /** What this device found about its own Screen Sharing. Nothing until the first answer. */
+  let localScreen: ScreenSharing | undefined;
+  let enablingScreen = false;
+  /** Which service the guide window explains. */
+  let guideKind: "login" | "screen" = "login";
   let guideTrigger: HTMLElement | undefined;
   let requested = 0;
   /** What waits for a second click: a device id, or `cut` for all access. Only one thing waits at a time. */
@@ -209,6 +217,7 @@ export function mountDevices(host: Host) {
   const polling = new Set<string>();
   let toolTicker: number | undefined;
   const readingSessions = new Set<string>();
+  const readingScreens = new Set<string>();
   let sessionTicker: number | undefined;
   const appsStates = new Map<string, AppsState>();
   const readingApps = new Set<string>();
@@ -967,6 +976,21 @@ export function mountDevices(host: Host) {
       render();
       passwordButtons.cancel.button.focus();
     });
+    const screenInfo = h("span", { class: "tip option-info", tabindex: "0", role: "img" }, icon("info"));
+    const screenLabel = h("span", { class: "setting-label" }, t("screenSharing"), " ", screenInfo);
+    const screenWarn = h("span", { class: "access-icon", "data-kind": "warn" }, icon("triangle-alert"));
+    const screenOk = h("span", { class: "access-icon", "data-kind": "ok" }, icon("check"));
+    const screenMessage = h("span", {});
+    const screenNote = h("p", { class: "setting-note access-note" }, screenWarn, screenOk, screenMessage);
+    const screenEnableLabel = h("span", {}, t("screenSharingEnable"));
+    const screenEnable = h("button", { type: "button", class: "access-action", "data-attention": "" }, icon("power"), screenEnableLabel);
+    const screenSettings = iconButton(t("openSharingSettings"), "square-arrow-out-up-right", "outlined");
+    const screenRow = h("div", { class: "setting-row device-access" },
+      icon("monitor"),
+      h("div", { class: "access-text" }, screenLabel, screenNote),
+      h("div", { class: "device-end" }, screenEnable, screenSettings.root));
+    screenEnable.addEventListener("click", () => { void enableScreen(screenEnable); });
+    screenSettings.button.addEventListener("click", () => { void openScreenSettings(); });
     const pairingState = h("span", { class: "setting-note pairing-state" });
     const pairing = iconButton(t("openPairing"), "lock-keyhole-open", "outlined");
     const pairingRow = settingRow("lock-keyhole", "pairing", pairingState, pairing.root);
@@ -1015,7 +1039,7 @@ export function mountDevices(host: Host) {
     });
 
     // The warnings and the note of the socket are alerts, so they stay above the tabs whichever tab shows.
-    const accessBody = tabBody(access.root, pairingRow.root, cut);
+    const accessBody = tabBody(access.root, screenRow, pairingRow.root, cut);
     const tabs = tabset("this", t("tabListThis"), [
       { id: "access", title: "tabAccess", panel: tabColumn(accessBody) },
       { id: "who", title: "tabWho", panel: tabColumn(controllersBody) },
@@ -1062,10 +1086,23 @@ export function mountDevices(host: Host) {
         if (confirming === "passwords" && !canAllow) confirming = undefined;
         only([passwords.root, passwordConfirm],
           canAllow && confirming === "passwords" ? [passwordConfirm] : canAllow ? [passwords.root] : []);
-        if (guideWindow.hasAttribute("data-open")) {
-          if (off || noUser) renderGuide();
-          else closeGuide(false);
-        }
+        const screen = localScreen;
+        const screenOff = screen !== undefined && !screen.on;
+        const screenNoUser = screen?.on === true && screen.userAllowed === false;
+        // Until the first answer the note says nothing, so it never shows a state that is not known.
+        const screenKey: Message | undefined = !screen ? undefined : screenOff ? "screenNoteOff" : screenNoUser ? "screenNoteUser" : "screenNoteOn";
+        fadeText(screenMessage, screenKey ? t(screenKey) : "");
+        only([screenWarn, screenOk], screenNoUser ? [screenWarn] : screen?.on ? [screenOk] : []);
+        screenNote.toggleAttribute("data-warning", screenNoUser);
+        setTip(screenInfo, t("screenSharingHelp"));
+        setAttribute(screenInfo, "aria-label", t("screenSharingHelp"));
+        fadeText(screenEnableLabel, t(enablingScreen ? "screenSharingEnabling" : "screenSharingEnable"));
+        setHidden(screenEnable, !screenOff);
+        if (screenEnable.disabled !== enablingScreen) screenEnable.disabled = enablingScreen;
+        screenEnable.toggleAttribute("data-attention", !enablingScreen);
+        screenEnable.setAttribute("aria-busy", String(enablingScreen));
+        setHidden(screenSettings.root, !(screenOff || screenNoUser));
+        syncGuide();
         const pairingText = data.pairing.open && data.pairing.expires !== null
           ? fill(t("pairingOpenLeft"), { time: formatSession(data.pairing.expires - seconds()) }) : t("pairingClosed");
         // The countdown changes every second and only sets the text. A change between open and closed fades.
@@ -1219,16 +1256,42 @@ export function mountDevices(host: Host) {
   });
 
   let guideSignature = "";
-  /** The steps for the user to do in Sharing, when Lazy Worker could not turn remote access on by itself. */
-  function renderGuide(): void {
+  /** True while the service of the guide still needs the user in Sharing. */
+  function guideNeeded(): boolean {
+    if (guideKind === "screen") return localScreen !== undefined && (!localScreen.on || localScreen.userAllowed === false);
     const access = overview?.thisDevice.remoteAccess;
-    if (!access) return;
-    const off = access.remoteLogin === "off";
-    const picture = off && access.macosMajor !== null && access.macosMajor >= 13;
-    const steps: Message[] = ["remoteGuideOpen"];
-    if (off) steps.push(access.macosMajor !== null && access.macosMajor <= 12 ? "remoteGuideTick" : "remoteGuideSwitch");
-    steps.push("remoteGuideUser");
-    const signature = JSON.stringify([host.language(), steps, picture]);
+    return access !== undefined && (access.remoteLogin === "off" || access.userAllowed === false);
+  }
+
+  /** Keeps an open guide true to the state, and closes it when the service is ready. */
+  function syncGuide(): void {
+    if (!guideWindow.hasAttribute("data-open")) return;
+    if (guideNeeded()) renderGuide();
+    else closeGuide(false);
+  }
+
+  /** The steps for the user to do in Sharing, when Lazy Worker could not turn a service on by itself. */
+  function renderGuide(): void {
+    let steps: Message[];
+    let picture = false;
+    let title: Message = "remoteGuideTitle";
+    if (guideKind === "screen") {
+      if (!localScreen) return;
+      title = "screenGuideTitle";
+      steps = ["screenGuideOpen"];
+      if (!localScreen.on) steps.push("screenGuideSwitch");
+      steps.push("screenGuideUser");
+    } else {
+      const access = overview?.thisDevice.remoteAccess;
+      if (!access) return;
+      const off = access.remoteLogin === "off";
+      picture = off && access.macosMajor !== null && access.macosMajor >= 13;
+      steps = ["remoteGuideOpen"];
+      if (off) steps.push(access.macosMajor !== null && access.macosMajor <= 12 ? "remoteGuideTick" : "remoteGuideSwitch");
+      steps.push("remoteGuideUser");
+    }
+    setText(guideTitle, t(title));
+    const signature = JSON.stringify([host.language(), guideKind, steps, picture]);
     if (signature === guideSignature) return;
     guideSignature = signature;
     guideBody.replaceChildren(h("div", {},
@@ -1239,8 +1302,9 @@ export function mountDevices(host: Host) {
     if (guideBody.firstElementChild && guideWindow.hasAttribute("data-open")) enterNode(guideBody.firstElementChild as HTMLElement);
   }
 
-  function openGuide(trigger: HTMLElement | undefined): void {
+  function openGuide(trigger: HTMLElement | undefined, kind: "login" | "screen" = "login"): void {
     guideTrigger = trigger;
+    guideKind = kind;
     renderGuide();
     guideWindow.setAttribute("data-open", "");
     guideWindow.inert = false;
@@ -1258,7 +1322,7 @@ export function mountDevices(host: Host) {
   guideWindow.addEventListener("pointerdown", event => {
     if (event.target === guideWindow) closeGuide();
   });
-  guideOpen.addEventListener("click", () => { void openSharing(); });
+  guideOpen.addEventListener("click", () => { void (guideKind === "screen" ? openScreenSettings() : openSharing()); });
 
   async function openSharing(): Promise<void> {
     try {
@@ -1284,6 +1348,41 @@ export function mountDevices(host: Host) {
     enabling = false;
     await refresh();
     if (guide) openGuide(trigger);
+  }
+
+  async function openScreenSettings(): Promise<void> {
+    try {
+      await desktop.openScreenSharingSettings();
+    } catch (error) {
+      host.fail(error);
+    }
+  }
+
+  async function readLocalScreen(): Promise<void> {
+    try {
+      localScreen = await desktop.getScreenSharing();
+    } catch {
+      // The row keeps its last answer, or says nothing before the first one.
+    }
+    render();
+  }
+
+  /** One administrator prompt turns it on. When the system wants the switch in Settings, the guide shows what to do by hand. */
+  async function enableScreen(trigger: HTMLElement): Promise<void> {
+    if (enablingScreen) return;
+    enablingScreen = true;
+    render();
+    let guide = false;
+    try {
+      localScreen = await desktop.enableScreenSharing();
+    } catch (error) {
+      if (error === "screenStillOff" || error === "userStillNotAllowed") guide = true;
+      // A cancelled prompt is the user's own choice, so it shows nothing.
+      else if (error !== "adminCanceled") host.fail(error);
+    }
+    enablingScreen = false;
+    await readLocalScreen();
+    if (guide) openGuide(trigger, "screen");
   }
 
   async function allowPasswords(): Promise<void> {
@@ -1909,6 +2008,26 @@ export function mountDevices(host: Host) {
     render();
   }
 
+  /** Reads whether Screen Sharing is on at a device. A device that did not allow Control is not asked. */
+  async function readScreen(id: string): Promise<void> {
+    if (readingScreens.has(id)) return;
+    const denied = refusal("getScreenSharing", undefined, live.get(id)?.permissions);
+    if (denied) {
+      if (live.get(id)?.screenError !== denied) live.set(id, { ...live.get(id), screen: undefined, screenError: denied });
+      render();
+      return;
+    }
+    readingScreens.add(id);
+    try {
+      live.set(id, { ...live.get(id), screen: await desktop.remoteScreenSharing(id), screenError: undefined });
+    } catch (error) {
+      live.set(id, { ...live.get(id), screenError: typeof error === "string" ? error : "remoteFailed" });
+    } finally {
+      readingScreens.delete(id);
+    }
+    render();
+  }
+
   /** The devices whose row is open, whichever tab shows. Their session is what the tabs and the shell button show. */
   function watchedSessionDevices(): RemoteDevice[] {
     if (deviceList.closest("[hidden]") || !overview) return [];
@@ -1927,9 +2046,9 @@ export function mountDevices(host: Host) {
     sessionTicker ??= window.setInterval(() => {
       const current = watchedSessionDevices();
       if (current.length === 0) watchSessions();
-      else for (const device of current) void readSession(device.id);
+      else for (const device of current) void readSession(device.id).then(() => readScreen(device.id));
     }, sessionPoll);
-    if (starting || now) for (const device of wanted) void readSession(device.id);
+    if (starting || now) for (const device of wanted) void readSession(device.id).then(() => readScreen(device.id));
   }
 
   /** The devices whose tools the tab bar shows now: the view and the device row are open. Every tab says something in its title. */
@@ -2528,7 +2647,16 @@ export function mountDevices(host: Host) {
       h("span", { class: "action-icon" }, icon("square-terminal")),
       h("div", { class: "device-row-text" }, h("strong", {}, t("connectTerminal")), shellNote),
       h("div", { class: "device-end shell-buttons" }, copied, terminal.root, copy.root));
-    const connectBody = tabBody(h("div", { class: "device-rows" }, terminalRow));
+    const screenState = h("span", { class: "setting-note" });
+    const screen = iconButton(t("openScreenTip"), "monitor-up", "outlined");
+    screen.button.addEventListener("click", () => {
+      void desktop.openScreen(latest.id).catch(error => host.fail(error));
+    });
+    const screenRow = h("div", { class: "device-row" },
+      h("span", { class: "action-icon" }, icon("monitor")),
+      h("div", { class: "device-row-text" }, h("strong", {}, t("connectScreen")), screenState),
+      h("div", { class: "device-end shell-buttons" }, screen.root));
+    const connectBody = tabBody(h("div", { class: "device-rows" }, terminalRow, screenRow));
 
     const tabs = tabset(key, fill(t("tabListOther"), { name: device.name }), [
       { id: "tools", title: "tools", panel: tabColumn(toolsBody) },
@@ -2596,6 +2724,19 @@ export function mountDevices(host: Host) {
         fadeText(shellNote, on ? until : t("connectOff"));
         terminal.disable(on ? undefined : t("connectOff"), t("openTerminalTip"));
         copy.disable(on ? undefined : t("connectOff"), t("copyShellCommand"));
+
+        // The device says whether Screen Sharing is on. Only the person at that device turns it on.
+        const screenFound = found?.screen;
+        const screenError = found?.screenError;
+        const screenText = screenError
+          ? (isLinkError(screenError) ? t("remoteLost") : isRefusal(screenError) ? fill(t(screenError), { name: current.name }) : t("screenOpenFailed"))
+          : !screenFound ? t("screenReading")
+          : !screenFound.on ? t("screenOffThere")
+          : screenFound.userAllowed === false ? t("screenNoUserThere") : t("screenOn");
+        const screenReady = !screenError && screenFound?.on === true && screenFound.userAllowed !== false;
+        fadeText(screenState, screenText);
+        screen.disable(screenReady ? undefined : screenText, t("openScreenTip"));
+        setAttribute(screen.button, "aria-label", screenReady ? t("openScreenTip") : screenText);
       },
     };
   }
@@ -2708,6 +2849,7 @@ export function mountDevices(host: Host) {
     }
     render();
     void readLocalActions();
+    void readLocalScreen();
   }
 
   addButton.setAttribute("aria-haspopup", "dialog");

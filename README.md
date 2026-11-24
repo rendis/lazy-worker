@@ -113,6 +113,7 @@ See the [user guide](docs/user-guide.md#devices) for the steps.
 - Lists the applications of another device, and opens them.
 - Runs saved actions on another device, and schedules them once, daily, or weekly.
 - Allows a full shell for a limited time, and only at the device that is shared. Pairing never turns it on.
+- Opens the screen of another device with macOS Screen Sharing. Only the device itself turns it on, and macOS asks for the account password.
 - Keeps a log of what other devices asked, and cuts all access at once.
 
 **Every tool**

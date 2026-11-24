@@ -16,6 +16,7 @@ use super::{
     peers::{clean_name, PeerPermissions, Peers},
     now,
     server::{Handler, Server},
+    screen,
     shell::{self, Watch},
     ssh, Layout,
 };
@@ -568,6 +569,13 @@ impl Service {
         let running = self.running()?;
         let destination = self.device(id).ok_or("notPermitted")?.destination()?;
         shell::open(&running.layout, &destination, &peer)
+    }
+
+    /// Opens the screen of a device that this one controls, in Screen Sharing. macOS asks for the password of the
+    /// account. It starts a program, so call it off the main thread.
+    pub fn open_screen(&self, id: &str) -> Result<(), &'static str> {
+        let destination = self.device(id).ok_or("notPermitted")?.destination()?;
+        screen::open(&destination)
     }
 
     /// The single-line ssh command that opens the same shell, for the person to paste in a terminal.

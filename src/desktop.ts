@@ -166,6 +166,8 @@ export type RemoteAccess = {
   managedFile: boolean;
   macosMajor: number | null;
 };
+/** The state of Screen Sharing on a device. `userAllowed` is `null` when the system gave no answer. */
+export type ScreenSharing = { on: boolean; userAllowed: boolean | null };
 /** Whether this device lets another one pair with it. `expires` is Unix seconds. */
 export type PairingState = { open: boolean; expires: number | null; attemptsLeft: number };
 /** What this device shows while it waits for another one to pair. `account` is the name the other device types. */
@@ -466,6 +468,15 @@ const previewStates: Record<string, RemoteAccess> = {
 const previewAccess: RemoteAccess = { ...(previewStates[previewQuery.get("remote") ?? ""] ?? previewStates.keys) };
 /** `?macos=12` shows the guide of macOS 12, and `?remote-fails` makes turning on fail until the user does it in Sharing. */
 if (previewQuery.has("macos")) previewAccess.macosMajor = Number(previewQuery.get("macos")) || 26;
+
+/** A preview shows Screen Sharing on this device with `?screen=off|nouser`, and on the sample device with `?remote-screen=off|nouser`. */
+const previewScreen: ScreenSharing = {
+  on: previewQuery.get("screen") !== "off", userAllowed: previewQuery.get("screen") === "nouser" ? false : true,
+};
+function previewRemoteScreen(): ScreenSharing {
+  const mode = previewQuery.get("remote-screen");
+  return { on: mode !== "off", userAllowed: mode === "nouser" ? false : true };
+}
 
 /**
  * The device this window controls, or `null` in the panel. A native window must be `remote-<id>` for the id in its address,
@@ -1152,6 +1163,35 @@ export const desktop = {
     if (native) return call("openSharingSettings");
     // A preview acts as if the user turned Remote Login on and allowed themselves there.
     Object.assign(previewAccess, { remoteLogin: "on", userAllowed: true, passwordLogin: previewAccess.passwordLogin === "unknown" ? "allowed" : previewAccess.passwordLogin });
+  },
+  /** Whether Screen Sharing is on at this device. */
+  async getScreenSharing(): Promise<ScreenSharing> {
+    if (native) return call("getScreenSharing");
+    return { ...previewScreen };
+  },
+  /** Whether Screen Sharing is on at another device. The device decides who may read it. */
+  async remoteScreenSharing(id: string): Promise<ScreenSharing> {
+    if (native) return call("remoteCall", { id, request: { command: "getScreenSharing" } });
+    if (!previewDevices().devices.some(device => device.id === id)) throw "notPaired";
+    return previewRemoteScreen();
+  },
+  /** One administrator prompt turns on Screen Sharing. Only the person at this device does it. */
+  async enableScreenSharing(): Promise<ScreenSharing> {
+    if (native) return call("enableScreenSharing");
+    await new Promise(resolve => setTimeout(resolve, 900));
+    if (previewQuery.has("screen-fails") && !previewScreen.on) throw "screenStillOff";
+    Object.assign(previewScreen, { on: true, userAllowed: true });
+    return { ...previewScreen };
+  },
+  async openScreenSharingSettings(): Promise<void> {
+    if (native) return call("openScreenSharingSettings");
+    // A preview acts as if the user turned Screen Sharing on and allowed themselves there.
+    Object.assign(previewScreen, { on: true, userAllowed: true });
+  },
+  /** Opens the screen of a device that this one controls, in Screen Sharing. macOS asks for the password of the account. */
+  async openScreen(id: string): Promise<void> {
+    if (native) return call("openScreen", { id });
+    if (!previewRemoteScreen().on) throw "screenOpenFailed";
   },
   async cutAllAccess(): Promise<void> {
     if (native) return call("cutAllAccess");

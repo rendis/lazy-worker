@@ -99,7 +99,7 @@ Devices lets you control one device from another. It is not a tool, so it has no
 
 Open **Devices** in the sidebar. **This device** comes first. The devices you control from here follow it. One device is open at a time. Select a device to open it.
 
-Each open device has tabs on one line. **This device** has **Access** (remote access, pairing, and **Cut all access**), **Who controls it**, **Actions**, and **Log**. A device that you control has **Tools**, **Applications**, **Actions**, and **Connect**. A small badge after the name of a tab shows its state, for example **1/3** tools on, the number of applications that are open, the number of actions, or a green dot when a way into the device is on. Every tab has the same height. A tab with more rows than fit scrolls inside. **Applications** lists your pinned applications first, then the ones you opened last from here, and a count that opens the rest. **Actions** has a search field. **Connect** lists the ways into the device. Use the arrow keys, **Home**, and **End** to move between tabs. Each device remembers its last tab.
+Each open device has tabs on one line. **This device** has **Access** (remote access, pairing, and **Cut all access**), **Who controls it**, **Actions**, and **Log**. A device that you control has **Tools**, **Applications**, **Actions**, and **Connect**. A small badge after the name of a tab shows its state, for example **1/3** tools on, the number of applications that are open, the number of actions, or a green dot when a way into the device is on. Every tab has the same height. A tab with more rows than fit scrolls inside. **Applications** lists your pinned applications first, then the ones you opened last from here, and a count that opens the rest. **Actions** has a search field. **Connect** lists the ways into the device: a terminal and the screen. Use the arrow keys, **Home**, and **End** to move between tabs. Each device remembers its last tab.
 
 Each device you control shows if it is online. Lazy Worker checks every few seconds while Devices is open, and when you come back to the window. Select **Check this device now** (the circular arrow) to check at once and read its state again.
 
@@ -184,6 +184,19 @@ The other device then shows **Terminal** in its **Connect** tab, with buttons to
 The warning says that, while the shell is on, the other device can leave itself permanent access, for example by adding a key. Turning the shell off does not undo that. Lazy Worker watches `~/.ssh/authorized_keys` while a shell is open. It tells you when that file changes. Check it then.
 
 The shell turns off by itself when the time ends. Select **Turn off shell** to end it sooner. This also ends open sessions.
+
+### Screen sharing
+
+Screen sharing uses the Screen Sharing that macOS already has. Lazy Worker adds no permission of its own for it. macOS asks for the password of the account on the other device and decides who gets in. Any device with **Control** sees if it is on, but only the device itself can turn it on.
+
+To share a screen, do this on the device that is shared:
+
+1. Under **This device**, in **Access**, select **Turn on screen sharing**.
+2. Enter your administrator password when macOS asks. Lazy Worker never sees it.
+
+The row then says **Open to your network, protected by this account's password**. If macOS does not let Lazy Worker turn it on, a guide opens with the steps: select **Open Sharing settings**, turn on **Screen Sharing**, and make sure your user is allowed. macOS may ask for your password there. The guide has no picture yet.
+
+To open the screen of a device you control, open its **Connect** tab and select **Open screen** on the **Screen** row. The button works only while the row says that screen sharing is on. Screen Sharing opens, and macOS asks for the password of the account.
 
 ### The log
 

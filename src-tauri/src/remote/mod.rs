@@ -20,6 +20,7 @@ pub mod pake;
 pub mod pairing;
 pub mod pairing_key;
 pub mod peers;
+pub mod screen;
 pub mod server;
 pub mod service;
 pub mod shell;
