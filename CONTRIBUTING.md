@@ -41,7 +41,7 @@ A new tool touches the same places every time. Use this list, and see [AGENTS.md
 5. **Make its clip.** Build an episode in the [clay workshop](docs/design/clay-workshop/README.md), run `npm run export -- <tool>` there, and add the clip and poster to the tool's help in `src/modules.ts`.
 6. **Document it.** Add a section to the [user guide](docs/user-guide.md) with the clip at its top. Copy a tool card in the [README](README.md), with the poster of the clip, and link it to the new section. List what the tool can do under **What each tool can do** there, one line for each function. A change that adds a function to a tool adds its line too.
 7. **Announce it.** Add the tool to the next release in `src/changelog.ts` with its `tool`, so What’s new links to it. Add its card to the tools step of the setup guide in `index.html` when a new user should meet it there.
-8. **Work from another device.** Every new request runs on the device of the window that sent it. Declare its `access` and `runs_on_viewer` in `src-tauri/src/dispatch.rs`, show its data as text, and keep a control that the device will not take from a remote window off with a reason (`src/remote.ts`).
+8. **Work from another device.** Every new request runs on the device of the window that sent it. Declare its `access`, `is_read`, and `runs_on_viewer` in `src-tauri/src/dispatch.rs`, show its data as text, and keep a control that the device will not take from a remote window off with a reason (`src/remote.ts`). The tool must work when its data comes from another device.
 9. **Record what you learned.** Add one line to [AGENTS.md](AGENTS.md) for each new project rule.
 
 ### Where a tool is registered

@@ -101,6 +101,19 @@ This is the full list for each tool. The [user guide](docs/user-guide.md) shows 
 - Client: shows the command behind each tool. You can copy it, edit it, or restore it.
 - Client: runs commands of your own for other tools, each with a name and an icon. `{server}` stands for the server address.
 
+**Devices**
+
+See the [user guide](docs/user-guide.md#devices) for the steps.
+
+- Turns on remote access with one button. It lets only keys log in over SSH, and nothing is reachable before that.
+- Pairs two devices with a 6-digit code that works once. The code is never sent over the network.
+- Gives each device four permissions: Control, Applications, Actions, and Shell. A new device gets Control only.
+- Opens a window for another device. Every request runs there, and that device checks it.
+- Lists the applications of another device, and opens them.
+- Runs saved actions on another device, and schedules them once, daily, or weekly.
+- Allows a full shell for a limited time, and only at the device that is shared. Pairing never turns it on.
+- Keeps a log of what other devices asked, and cuts all access at once.
+
 **Every tool**
 
 - Starts and stops from the panel or from the menu bar, and keeps running with the panel closed.

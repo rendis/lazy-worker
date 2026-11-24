@@ -39,14 +39,7 @@ const permissions: { id: ControllerPermission; icon: string; label: Message }[] 
   { id: "actions", icon: "play", label: "permActions" },
   { id: "shell", icon: "terminal", label: "permShell" },
 ];
-/** The request names and outcomes that the log shows in words. Any other one shows as it is. */
-const logEvents: Record<string, Message> = {
-  removePeer: "remoteLogEventRemovePeer", cutAll: "remoteLogEventCutAll", actionStart: "remoteLogEventActionStart",
-  actionEnd: "remoteLogEventActionEnd", actionSkipped: "remoteLogEventActionSkipped",
-  shellGranted: "remoteLogEventShellGranted", shellRevoked: "remoteLogEventShellRevoked",
-  shellExpired: "remoteLogEventShellExpired", shellStart: "remoteLogEventShellStart", shellEnd: "remoteLogEventShellEnd",
-  keysChanged: "remoteLogEventKeysChanged",
-};
+/** The outcomes that the log shows in words. Any other one shows as it is. */
 const logOutcomes: Record<string, Message> = {
   ok: "remoteOutcomeOk", notPermitted: "remoteOutcomeNotPermitted", localOnly: "remoteOutcomeLocalOnly",
   notPaired: "remoteOutcomeNotPaired", badRequest: "remoteOutcomeBadRequest", failed: "remoteOutcomeFailed",
@@ -819,13 +812,19 @@ export function mountDevices(host: Host) {
     return Object.prototype.hasOwnProperty.call(messages.en, outcome) ? t(outcome as Message) : outcome;
   }
 
+  /** A request or event name in words. A name that has none shows as it is. */
+  function eventText(name: string): string {
+    const key = `remoteLogEvent${name.charAt(0).toUpperCase()}${name.slice(1)}`;
+    return Object.prototype.hasOwnProperty.call(messages.en, key) ? t(key as Message) : name;
+  }
+
   /** Names and request names come from other devices, so they are only ever set as text. */
   function logItem(entry: RemoteLogEntry): HTMLElement {
-    const event = logEvents[entry.request];
+    const event = eventText(entry.request);
     return h("li", { class: "proxy-log-entry", "data-outcome": entry.outcome === "ok" ? "ok" : "refused" },
       h("time", {}, formatMoment(entry.time, host.language())),
       h("span", { class: "proxy-log-target" }, entry.name ?? "—"),
-      h("span", { class: "proxy-log-target" }, event ? t(event) : entry.request),
+      h("span", { class: "proxy-log-target" }, event),
       h("span", { class: "proxy-log-outcome" }, outcomeText(entry.outcome)));
   }
 

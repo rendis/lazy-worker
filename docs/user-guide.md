@@ -6,6 +6,8 @@
 - [Activity](#activity)
 - [Caffeinate](#caffeinate)
 - [AI](#ai): [Proxy](#proxy)
+- [Devices](#devices)
+- [Security](#security)
 - [Hide while sharing](#hide-while-sharing)
 - [Accessibility](#accessibility)
 - [Updates](#updates)
@@ -90,6 +92,138 @@ On the computer that uses the connection:
 - Select the arrow in a row to see its command. **Edit** changes it, and `{server}` stands for the server address. **Restore** brings back the built-in command. Switching between App and Code also restores it.
 - **Other command** adds a tool of your own. Enter a name and the command that starts it. The command runs as you write it. Write `{server}` where the server address goes. **Delete** asks before it removes the command.
 - The Quick start switch works on the server and on each client. **Start selected** starts a marked server and opens each marked client in the form you chose, App or Code. **Stop selected** stops the server and leaves the clients open.
+
+## Devices
+
+Devices lets you control one device from another. It is not a tool, so it has no power button. Use it to start a tool, open an application, or run a saved action on a device that is not in front of you. Both devices need Lazy Worker. They talk over SSH, the secure connection that macOS already has. Every device decides what the other one may do.
+
+Open **Devices** in the sidebar. **This device** comes first. The devices you control from here follow it.
+
+### Turn on remote access
+
+Do this on each device that others will control.
+
+1. Under **This device**, select **Turn on remote access**.
+2. Enter your administrator password when macOS asks. Lazy Worker never sees it.
+
+This turns on Remote Login for your user and limits it to keys. Nobody can log in with a password. The row then shows the real state, for example **Only paired keys can log in**.
+
+If macOS does not let Lazy Worker turn it on, a guide opens. Follow its steps: select **Open Sharing settings**, turn on **Remote Login**, and make sure your user is allowed. Lazy Worker checks again by itself when you close the window.
+
+If the row says that passwords can still log in, select **Allow passwords again** only when you want that. Lazy Worker removes only its own setting file and asks you to confirm first.
+
+### Pair a device
+
+Pairing links two devices with a code that works once. Start on the device you want to control.
+
+1. On that device, open **Devices** and select **Open pairing**.
+2. Choose what the new device may do. **Control** starts on. **Applications** and **Actions** start off. Shell is never part of pairing.
+3. Select **Open for 10 minutes**. The device shows a 6-digit code, the user name to enter, and the address to reach it.
+4. On the other device, open **Devices** and select **Add device**.
+5. Choose the device in the list. If it is not there, select **Enter an address**. Use this for a device on a VPN such as Tailscale, for example `studio.local` or `100.64.0.5`. Add `:port` if the port is not 22.
+6. Enter the user name and the code, then select **Pair**.
+
+The code is not sent over the network. Three wrong codes close the window, and a code works once. The device shows when the pairing is done. Close the pairing window with **Close pairing** if you change your mind.
+
+### What a device may do
+
+Each device that can control this one has four switches under **Who can control it**. Change them at any time.
+
+- **Control** lets it start and stop tools and change their settings.
+- **Applications** lets it list your applications and open them.
+- **Actions** lets it run, stop, and schedule your saved actions. It never sees their commands.
+- **Shell** lets it open a full terminal on this device. You turn it on only at this device. Pairing never turns it on, and a remote window cannot turn it on.
+
+Some settings stay with the person at the device, even with **Control**. Examples are starting the proxy server, its address lists, and turning on Quick start at launch. The remote window shows these controls as off and says to do them on that device.
+
+### Use the remote window
+
+Select **Open interface** next to a device. A window of Lazy Worker opens for that device. A banner at the top names it.
+
+- Every action in the window runs on that device, and that device checks it.
+- The banner turns amber when the link is down. The window connects again by itself.
+- If the two devices run different versions, the banner offers **Update** for that device.
+- The language and the theme stay yours. They always come from the device in front of you.
+- A control that the device does not allow is off, with the reason. Either the device did not allow it, or only the person at that device can do it.
+
+The Devices view also lists the tools of each device with their state. You can turn a tool on or off there.
+
+### Applications
+
+With **Applications** allowed, a device shows its installed applications under **Applications**. Each shows whether it is open. Pin up to three that you use often. Search the rest. Select **Open** to open an application on that device. A device opens only applications from its own list.
+
+### Actions and schedules
+
+An action is a named shell command that you save on a device. Each device keeps its own actions. You create, change, and delete an action only at that device. The command runs as your user, with your permissions. Add only commands you trust.
+
+- Under **Actions on this device**, select **Add action**. Give it a name, a command, and a time limit. The action stops by itself when the time passes.
+- A device with **Actions** allowed can run your actions and stop them. It can also follow the output. It cannot read the command.
+- Select **Schedule** next to an action to schedule it: once, daily, or weekly. The action runs on the device that owns it, while Lazy Worker is open there. If that time passes while the app is closed, Lazy Worker skips it and does not run late.
+- Turn on **Flag it if it fails** to see a failed run in the row until a run works.
+- Two actions run at the same time at most.
+- When you remove a device, its schedules go with it.
+
+### Full shell
+
+A full shell lets another device run any command on this device, as your user. Only you can allow it, only at this device.
+
+1. Under **Who can control it**, select **Shell** on the row of a device.
+2. Read the warning. Choose **1 hour**, **2 hours**, **Custom** (1 minute to 24 hours), or **Until I turn it off**.
+3. Select **Allow shell**.
+
+The other device then shows **Open terminal**. It opens the shell in Terminal.
+
+The warning says that, while the shell is on, the other device can leave itself permanent access, for example by adding a key. Turning the shell off does not undo that. Lazy Worker watches `~/.ssh/authorized_keys` while a shell is open. It tells you when that file changes. Check it then.
+
+The shell turns off by itself when the time ends. Select **Turn off shell** to end it sooner. This also ends open sessions.
+
+### The log
+
+Select **Open the log** to see what other devices asked of this one. Each line shows the time, the device, the request in words, and the result. The log keeps the last 1000 lines. It shows requests, changes, and refusals. It does not show what was inside a request. It does not list a read that worked.
+
+### Remove a device
+
+- To stop a device from controlling this one, select **Remove access** next to it. The next request from that device is refused, also on a connection that is open.
+- **Cut all access** removes every device at once and closes any open pairing window. Lazy Worker asks you to confirm first.
+- To stop controlling a device, select **Forget this device** on the controller. This removes it only from that device. Your key stays on the other device until you remove the access there too. Lazy Worker reminds you.
+
+### Troubleshooting
+
+- **Remote access is off.** The other device cannot connect. Turn on remote access on the device you want to control. The row says what is wrong.
+- **“<name> no longer accepts this device.”** The other device removed your access, or its pairing data changed. Pair the two devices again.
+- **“That device has a different identity than before.”** Stop. Lazy Worker saved the identity of the device when you paired. A different one can mean another device is pretending. Check the address. Check that the device was not reset. Do not continue until you are sure. Then forget the device and pair again.
+- **macOS asks to find devices on the local network.** Allow it. Lazy Worker needs it to list the devices on this network. Without it, use **Enter an address**.
+- **Cannot reach the device.** Check that the device is on and awake. Check that your firewall and your VPN let port 22 through. Lazy Worker accepts connections only from private networks, link-local addresses, and the Tailscale range.
+- **Pairing is not open on that device.** Select **Open pairing** there, and try again within 10 minutes.
+
+## Security
+
+Devices lets other devices act on yours, so it is built to be safe by default.
+
+### What is safe by default
+
+- Nothing is reachable until you turn on remote access.
+- Lazy Worker sets SSH to accept keys only.
+- A new device gets **Control** only. **Applications** and **Actions** start off. **Shell** is never on at pairing.
+- Lazy Worker checks each request again, on the device that receives it, against the permissions it has at that moment. Removing a device works at once.
+- A device never sends the text of its saved commands to another device.
+- Names and text from another device show as plain text. They cannot run anything.
+- The pairing code is not sent. Three wrong codes close the window.
+
+### What is up to you
+
+- Commands you save as actions, and commands you write for Proxy tools, run as your user. Save only what you trust.
+- Allowing a **Shell** gives the other device the same power as you. Allow it only for a time you choose, and only to a device you trust.
+- **Allow full disk access for remote users** in Sharing is not needed and is safer off. If it is on, a shell can read all files, including Mail and Messages.
+
+### Risks that remain
+
+- A program that runs as your user on the same device can act as you. It can also use the same local socket that remote requests use.
+- The SSH server of macOS stays reachable on your networks while remote access is on. Only keys can log in.
+- If someone takes an unlocked device, that device keeps its permissions on your other devices. Remove it there, and use **Cut all access** if needed.
+- The pairing key in the app is public on purpose. It opens only the pairing step, and only while a pairing window is open. The 6-digit code is the secret.
+- The code check uses the SPAKE2 method. The library that does it has not had an independent audit.
+- A shell can leave permanent access. Lazy Worker warns you, and it cannot undo it.
 
 ## Hide while sharing
 
