@@ -1,7 +1,7 @@
 import "./style.css";
 import {
   Activity, AppWindow, ArrowLeft, ArrowRight, Bell, Bot, Box, Brain, Calendar, CalendarClock, CalendarDays, Check, ChevronDown, ChevronRight, CircleCheck, CircleHelp, CircleMinus, CircleStop, CircleX, Clock, Cloud, Code, Coffee, Contrast, Copy,
-  Cpu, createIcons, Database, Download, ExternalLink, Eye, EyeOff, File as FileIcon, FileImage, FileText, Folder, FolderKey, FolderOpen, FolderPlus, Globe, HardDrive, Hand, Hash, Hourglass, Infinity as InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LoaderCircle, LockKeyhole, LockKeyholeOpen,
+  Cpu, createIcons, Database, Download, ExternalLink, Eye, EyeOff, File as FileIcon, FileImage, FileText, Folder, FolderKey, FolderOpen, FolderPlus, Globe, HardDrive, Hand, Hash, Hourglass, House, Infinity as InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LoaderCircle, LockKeyhole, LockKeyholeOpen,
   Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, MonitorUp, Moon, MousePointer2, Network, Pencil, Pin, PinOff, Play, PlugZap, Plus, Power, Radio, RefreshCw, Repeat, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
   Shield, ShieldCheck, ShieldOff, Sparkles, Square, SquareArrowOutUpRight, SquareTerminal, Sun, Sunrise, Sunset, Tag, Terminal, Timer, Trash2, TriangleAlert, Upload, UserMinus, UserRound, X, Zap,
 } from "lucide";
@@ -44,7 +44,7 @@ function renderIcons(): void {
   createIcons({
     icons: {
       Activity, AppWindow, ArrowLeft, ArrowRight, Bell, Bot, Box, Brain, Calendar, CalendarClock, CalendarDays, Check, ChevronDown, ChevronRight, CircleCheck, CircleHelp, CircleMinus, CircleStop, CircleX, Clock, Cloud, Code, Coffee, Contrast, Copy,
-      Cpu, Database, Download, ExternalLink, Eye, EyeOff, File: FileIcon, FileImage, FileText, Folder, FolderKey, FolderOpen, FolderPlus, Globe, HardDrive, Hand, Hash, Hourglass, Infinity: InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LoaderCircle, LockKeyhole, LockKeyholeOpen,
+      Cpu, Database, Download, ExternalLink, Eye, EyeOff, File: FileIcon, FileImage, FileText, Folder, FolderKey, FolderOpen, FolderPlus, Globe, HardDrive, Hand, Hash, Hourglass, House, Infinity: InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LoaderCircle, LockKeyhole, LockKeyholeOpen,
       Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, MonitorUp, Moon, MousePointer2, Network, Pencil, Pin, PinOff, Play, PlugZap, Plus, Power, Radio, RefreshCw, Repeat, Rocket, RotateCcw, ScrollText, Search, Server,
       Settings, Shield, ShieldCheck, ShieldOff, Sparkles, Square, SquareArrowOutUpRight, SquareTerminal, Sun, Sunrise, Sunset, Tag, Terminal, Timer, Trash2, TriangleAlert, Upload, UserMinus, UserRound, X, Zap,
     },

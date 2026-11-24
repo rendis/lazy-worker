@@ -210,6 +210,8 @@ pub enum Request {
     /// Turns on Screen Sharing with one administrator prompt. Only the person at this device does it.
     EnableScreenSharing,
     OpenScreenSharingSettings,
+    /// Opens Privacy & Security at Full Disk Access, so the person can allow Lazy Worker to read protected folders. Only the person at this device does it.
+    OpenFullDiskAccess,
     /// Opens the screen of a device that this one controls, in Screen Sharing. Same rule as `OpenShell`.
     OpenScreen { id: String },
     /// The installed applications of this device, and which are open.
@@ -389,6 +391,7 @@ impl Request {
             | Self::OpenSharingSettings
             | Self::EnableScreenSharing
             | Self::OpenScreenSharingSettings
+            | Self::OpenFullDiskAccess
             | Self::OpenScreen { .. }
             | Self::SaveProxyApps { .. }
             | Self::SaveProxyAllowed { .. }
@@ -497,6 +500,7 @@ impl Request {
             | Self::OpenSharingSettings
             | Self::EnableScreenSharing
             | Self::OpenScreenSharingSettings
+            | Self::OpenFullDiskAccess
             | Self::OpenScreen { .. }
             | Self::OpenApplication { .. }
             | Self::CreateAction { .. }
@@ -604,6 +608,7 @@ impl Request {
             | Self::GetScreenSharing
             | Self::EnableScreenSharing
             | Self::OpenScreenSharingSettings
+            | Self::OpenFullDiskAccess
             | Self::OpenScreen { .. }
             | Self::OpenApplication { .. }
             | Self::CreateAction { .. }
@@ -950,13 +955,18 @@ async fn run(
             return tauri::async_runtime::spawn_blocking({
                 let app = app.clone();
                 move || {
-                    app.state::<crate::remote::service::Service>()
-                        .grant_files(&id, scope, &folders, mode, minutes)
+                    let service = app.state::<crate::remote::service::Service>();
+                    let view = service.grant_files(&id, scope, &folders, mode, minutes)?;
+                    // macOS asks about Desktop, Documents, and the like on the first read, so the
+                    // person at this device answers now instead of when the other device browses.
+                    let privacy = service.files_privacy(&view);
+                    let mut value = json(view)?;
+                    value["privacy"] = json(privacy)?;
+                    Ok(value)
                 }
             })
             .await
-            .map_err(|_| "workerUnavailable")?
-            .and_then(json);
+            .map_err(|_| "workerUnavailable")?;
             #[cfg(not(unix))]
             {
                 let _ = (id, scope, folders, mode, minutes);
@@ -1140,6 +1150,15 @@ async fn run(
                     .await
                     .map_err(|_| "screenChangeFailed")??,
             );
+            #[cfg(not(unix))]
+            Err("unsupported")
+        }
+        Request::OpenFullDiskAccess => {
+            #[cfg(unix)]
+            return tauri::async_runtime::spawn_blocking(crate::remote::files::open_full_disk_access)
+                .await
+                .map_err(|_| "privacySettingsFailed")?
+                .map(|()| Value::Null);
             #[cfg(not(unix))]
             Err("unsupported")
         }

@@ -42,7 +42,7 @@ const localOnly = new Set([
   "setProxyRole", "setProxyPort", "setProxyServer", "saveProxyApps", "saveProxyAllowed", "getProxyPeers", "getProxyLog",
   "requestActivityAccessibility", "createAction", "updateAction", "deleteAction",
   "grantShell", "revokeShell", "dismissKeysWarning", "openShell", "shellCommand",
-  "enableScreenSharing", "openScreenSharingSettings", "openScreen",
+  "enableScreenSharing", "openScreenSharingSettings", "openFullDiskAccess", "openScreen",
   "grantFiles", "revokeFiles", "pickFiles", "pickFolder", "pickSaveFile", "queueUpload", "queueDownload",
   "getTransfers", "stopTransfer", "clearTransfers",
 ]);

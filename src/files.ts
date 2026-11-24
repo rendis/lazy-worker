@@ -1,13 +1,20 @@
 // The files that devices share: the shapes that cross the app command, how sizes read, and the sample files a browser preview shows.
 
 export type FilesMode = "read" | "readWrite";
-export type FilesScope = "folders" | "disk";
+/** The folders the person chose, the home folder, or the whole disk (`/`). */
+export type FilesScope = "folders" | "home" | "disk";
+/** What reading a place that macOS closes behind a privacy question showed. */
+export type PrivacyTouch = "readable" | "denied" | "pending" | "failed";
+/** A protected place that the app read when the grant was saved. `path` shows `~` for the home folder. */
+export type PrivacyCheck = { path: string; touch: PrivacyTouch };
 /** When a grant ends: seconds since the Unix epoch, or `"untilOff"` while it lasts until the person turns it off. */
 export type FilesUntil = number | "untilOff";
 /** The files that this device shared with a device, as the list of devices that control this one reads it. The folders show with `~`. */
 export type FilesGrant = { scope: FilesScope; folders: string[]; mode: FilesMode; until: FilesUntil };
+/** What saving a grant answers: the grant, and what each protected place inside it showed when the app read it. */
+export type FilesGranted = FilesGrant & { privacy: PrivacyCheck[] };
 export type SharedRoot = { id: string; name: string; display: string };
-/** What the device that is controlled shares with this one. `roots` has one folder with no name for the whole disk. */
+/** What the device that is controlled shares with this one. `roots` has one folder with no name for the home folder or the whole disk. */
 export type FileShare =
   | { on: false }
   | { on: true; scope: FilesScope; mode: FilesMode; until: FilesUntil; roots: SharedRoot[] };
@@ -76,12 +83,13 @@ const sampleRoots: Record<string, { name: string; display: string; tree: SampleF
       archivo: {},
     },
   },
+  home: { name: "", display: "~", tree: { Documents: { "cv.pdf": 210_000 }, Desktop: {}, Downloads: {}, "Lazy Worker": {} } },
   disk: { name: "", display: "/", tree: { Users: { alex: { Documents: { "cv.pdf": 210_000 }, Desktop: {} } }, Applications: {}, tmp: {} } },
 };
 const sampleTimes = new Map<string, number>();
 
 export function previewShareRoots(scope: FilesScope): SharedRoot[] {
-  const ids = scope === "disk" ? ["disk"] : ["work", "proj"];
+  const ids = scope === "disk" ? ["disk"] : scope === "home" ? ["home"] : ["work", "proj"];
   return ids.map(id => ({ id, name: sampleRoots[id].name, display: sampleRoots[id].display }));
 }
 

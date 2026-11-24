@@ -506,7 +506,8 @@ h1:focus { outline: none; }
   opacity: 0;
   transition: opacity .18s ease;
 }
-/* Open content may show a tooltip past its edge. */
+/* Open content may show a tooltip past its edge. Its width never grows the grid, so a long name cannot make the panel scroll sideways. */
+.collapse > * { min-width: 0; }
 .collapse[data-open] > * { overflow: visible; opacity: 1; }
 
 .setting-row {
@@ -744,7 +745,7 @@ h1:focus { outline: none; }
   max-height: 188px;
   margin: 0;
   padding: 0;
-  overflow-y: auto;
+  overflow: hidden auto;
   list-style: none;
 }
 .caffeinate-process-list li {
@@ -1052,7 +1053,7 @@ h1:focus { outline: none; }
   width: 100%;
   min-height: 0;
   max-height: calc(100vh - 24px);
-  overflow-y: auto;
+  overflow: hidden auto;
   padding: 9px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -1417,7 +1418,7 @@ h1:focus { outline: none; }
   min-height: 0;
   margin: 0;
   padding: 0 4px 0 0;
-  overflow-y: auto;
+  overflow: hidden auto;
   border-block: 1px solid var(--hairline);
   list-style: none;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -1557,6 +1558,9 @@ h1:focus { outline: none; }
   .workspace { grid-template-rows: minmax(0, 1fr); }
   /* The scroll bar always keeps its space, so content does not shift when it appears. */
   main { min-height: 0; overflow-y: scroll; padding-inline-end: calc(var(--content-inset) - var(--scrollbar)); }
+  /* A window over the panel hides the scroll bars behind it. The bar keeps its space, so nothing shifts. */
+  .workspace:has(> .log-overlay[data-open]) main::-webkit-scrollbar-thumb { background: transparent; }
+  main { overflow-x: hidden; }
 }
 @media (max-width: 770px) {
   :root { --content-inset: 15px; }
@@ -1708,7 +1712,7 @@ h1:focus { outline: none; }
 
 .settings-version-actions { display: flex; flex: none; gap: 14px; }
 .changelog-window { grid-template-rows: auto minmax(0, 1fr); width: min(560px, 100%); }
-.changelog { min-height: 0; padding: 4px 6px 4px 2px; overflow-y: auto; border-top: 1px solid var(--hairline); }
+.changelog { min-height: 0; padding: 4px 6px 4px 2px; overflow: hidden auto; border-top: 1px solid var(--hairline); }
 .changelog section { padding: 12px 0; border-bottom: 1px solid var(--hairline); }
 .changelog section:last-child { border-bottom: 0; }
 .changelog h3 { display: flex; align-items: baseline; gap: 10px; font-size: 15px; font-weight: 720; }

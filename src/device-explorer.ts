@@ -179,6 +179,11 @@ export function mountFilesExplorer(host: Host) {
   content.append(notShared);
 
   // ---- What the window knows ----
+  /** A chosen folder shows its name. The home folder and the whole disk have none, so they show their own words. */
+  function rootName(root: SharedRoot): string {
+    return root.name || t(root.id === "home" ? "filesScopeHomeRoot" : "filesScopeDisk");
+  }
+
   function current(): SharedRoot | undefined {
     return share?.on ? share.roots.find(root => root.id === rootId) : undefined;
   }
@@ -282,7 +287,7 @@ export function mountFilesExplorer(host: Host) {
       button.addEventListener("click", () => go(to));
       return button;
     };
-    nodes.push(crumb(root.name || t("filesScopeDisk"), "", parts.length === 0));
+    nodes.push(crumb(rootName(root), "", parts.length === 0));
     parts.forEach((part, index) => {
       nodes.push(icon("chevron-right"), crumb(part, parts.slice(0, index + 1).join("/"), index === parts.length - 1));
     });
@@ -296,7 +301,7 @@ export function mountFilesExplorer(host: Host) {
     if (rootList.dataset.signature === signature) return;
     rootList.dataset.signature = signature;
     rootList.replaceChildren(...items.map(root => {
-      const label = root.name || t("filesScopeDisk");
+      const label = rootName(root);
       const button = h("button", {
         type: "button", class: "files-root", "aria-pressed": String(root.id === rootId), "data-tip": root.display,
       }, icon(root.name === "" ? "hard-drive" : "folder"), h("span", { class: "files-root-name" }, label));
@@ -337,7 +342,7 @@ export function mountFilesExplorer(host: Host) {
     nameSort.setAttribute("aria-label", t("filesColName"));
     nameSort.dataset.direction = sortAscending ? "ascending" : "descending";
     const dropText = !current() ? "" : writable()
-      ? fill(t("filesDrop"), { folder: path === "" ? (current()?.name || t("filesScopeDisk")) : pathParts(path).slice(-1)[0] })
+      ? fill(t("filesDrop"), { folder: path === "" ? (current() ? rootName(current()!) : t("filesScopeDisk")) : pathParts(path).slice(-1)[0] })
       : t("filesDropReadOnly");
     const dropSpan = drop.querySelector("span")!;
     if (dropText !== "") fadeText(dropSpan, dropText);

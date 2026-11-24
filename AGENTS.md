@@ -31,6 +31,8 @@
 - Keep proxy logic in `src/proxy.ts` and reach the system only through `desktop`. Give each `desktop` proxy call a browser-preview result.
 - Store a proxy command as a template where `{server}` stands for the server address. Store `null` for an unchanged built-in command. Save a command of the user's own exactly as written, and ask for the server address only when the command names it.
 - Ask before an action that cannot be undone, in the place where the user started it.
+- When a file grant is saved, read each protected folder inside it from the app process, so macOS asks while the person is at the device. A remote read that macOS refuses (`EPERM`) answers `filesPrivacyDenied`.
+- Give a name in a row one line with an ellipsis and a tip with the full name. Give an element inside `.collapse` no width that its content sets, so a long name cannot make the view scroll sideways.
 - A remote origin never starts the proxy server or changes where it listens or what it reaches, and its reads hide stored commands. Check the helper path before any managed `authorized_keys` line, and clean every name from the network through `clean_name`.
 - Treat proxy clients as apps to open, with no running state. Start selected opens the marked ones. Stop selected leaves them open.
 - Reach other devices only through `remote::ssh` with our own `-F` config, a validated `Destination`, and `--` before the host. Never pass user text as ssh options or as the remote command.

@@ -53,11 +53,13 @@ pub enum FilesMode {
     ReadWrite,
 }
 
-/// What a device that has Files reaches: the folders the user chose, or the whole disk.
+/// What a device that has Files reaches: the folders the user chose, the home folder, or the whole
+/// disk. `Disk` is the earlier stored word for `/` and keeps that meaning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FilesScope {
     Folders,
+    Home,
     Disk,
 }
 
@@ -68,7 +70,7 @@ pub enum FilesScope {
 #[cfg_attr(not(unix), allow(dead_code))]
 pub struct FilesGrant {
     pub scope: FilesScope,
-    /// Absolute paths of existing folders. Empty for the whole disk.
+    /// Absolute paths of existing folders. The home folder alone for `Home`, and empty for the whole disk.
     #[serde(default)]
     pub folders: Vec<String>,
     pub mode: FilesMode,

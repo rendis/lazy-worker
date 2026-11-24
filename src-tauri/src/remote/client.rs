@@ -55,7 +55,7 @@ const KNOWN_CODES: &[&str] = &[
     "sshHostKeyChanged", "sshHostKeyUnknown", "sshInputTooLarge", "sshOutputTooLarge",
     "sshTimeout", "sshUnreachable", "unsupported", "updateChanged", "updateCheckFailed",
     "updateFailed", "workerExited", "workerUnavailable",
-    "filesChunkInvalid", "filesDenied", "filesDiskFull", "filesExists", "filesFolderInvalid", "filesIncomplete", "filesIo", "filesIsFolder", "filesNotEmpty", "filesNotFolder", "filesNotFound", "filesNotRegular", "filesOffsetInvalid", "filesOutside", "filesPathInvalid", "filesProtected", "filesRootUnknown", "filesTooLarge", "filesTooMany", "filesTooManyUploads", "filesUploadUnknown",
+    "filesChunkInvalid", "filesDenied", "filesDiskFull", "filesExists", "filesFolderInvalid", "filesIncomplete", "filesIo", "filesIsFolder", "filesNotEmpty", "filesNotFolder", "filesNotFound", "filesNotRegular", "filesOffsetInvalid", "filesOutside", "filesPathInvalid", "filesPrivacyDenied", "filesProtected", "filesRootUnknown", "filesTooLarge", "filesTooMany", "filesTooManyUploads", "filesUploadUnknown",
 ];
 
 /// Errors after which the other side ends the session, so the next request opens a new one.

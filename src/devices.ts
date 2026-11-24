@@ -51,6 +51,8 @@ const settleDelay = 260;
 const ageMessages: Record<Exclude<AgeUnit, "seconds">, Message> = {
   minutes: "minutesAgo", hours: "hoursAgo", days: "daysAgo",
 };
+/** The least width of a name in a controller row, in pixels. Keep it equal to the `min-width` of `.controller-row .device-row-text`. */
+const MIN_NAME_WIDTH = 120;
 /** `hint` says in one sentence what the permission allows. It shows in the pairing window and as the tip of the chip. */
 const permissions: { id: ControllerPermission; icon: string; label: Message; hint?: Message }[] = [
   { id: "control", icon: "layout-grid", label: "permControl", hint: "permControlHint" },
@@ -175,6 +177,10 @@ function oneOpen(stored: Record<string, boolean>): Record<string, boolean> {
 export function mountDevices(host: Host) {
   const t = host.translate;
   const deviceList = document.getElementById("device-list")!;
+  // The heading of the view has a backing only while the list scrolls under it.
+  const heading = document.querySelector<HTMLElement>(".devices-header")!;
+  const scroller = document.querySelector("main")!;
+  scroller.addEventListener("scroll", () => heading.toggleAttribute("data-stuck", scroller.scrollTop > 12), { passive: true });
   const addButton = document.getElementById("add-device") as HTMLButtonElement;
   const addTip = addButton.parentElement!;
 
@@ -300,6 +306,16 @@ export function mountDevices(host: Host) {
 
   function setTip(root: HTMLElement, text: string): void {
     setAttribute(root, "data-tip", text);
+  }
+
+  /** A name on one line. It ends in an ellipsis when it does not fit, and a tip then shows the whole name. */
+  function oneLine(name: HTMLElement): HTMLElement {
+    const root = h("span", { class: "tip name-tip" }, name);
+    root.addEventListener("pointerenter", () => {
+      if (name.scrollWidth > name.clientWidth) root.setAttribute("data-tip", name.textContent ?? "");
+      else root.removeAttribute("data-tip");
+    });
+    return root;
   }
 
   /** Texts of the windows. They are set again when the language changes. */
@@ -605,7 +621,7 @@ export function mountDevices(host: Host) {
     });
 
     return {
-      root: h("div", { class: "device-tabs" }, bar, container),
+      root: h("div", { class: "device-tabs", "data-device": key === "this" ? "this" : "other" }, bar, container),
       selected: () => current,
       /** The small badge after the name of a tab. An empty text hides it. `dot` adds a dot before the text, for a state that is on. */
       summary(id: string, text: string, dot = false): void {
@@ -775,7 +791,7 @@ export function mountDevices(host: Host) {
         edit && edit.root, schedule.root, remove && remove.root, confirm, run.root);
       const root = h("div", { class: "device-row" },
         h("span", { class: "action-icon" }, icon("square-terminal")),
-        h("div", { class: "device-row-text" }, name, description, summary), controls);
+        h("div", { class: "device-row-text" }, oneLine(name), description, summary), controls);
       edit && edit.button.addEventListener("click", () => windows.openForm(latest, edit.button));
       schedule.button.addEventListener("click", () => windows.openSchedule(target(), latest, schedule.button));
       run.button.addEventListener("click", () => void startRun(target(), latest, run.button));
@@ -906,10 +922,13 @@ export function mountDevices(host: Host) {
     });
     let filesChip: HTMLButtonElement | undefined;
     const chips = permissions.map(permission => {
-      const label = h("span", {}, t(permission.label));
+      const label = h("span", { class: "chip-label" }, t(permission.label));
+      // The time that a shell or files end at, as a short suffix. The label and the suffix stay on one line.
+      const suffix = h("span", { class: "chip-suffix" });
       const chip = h("button", {
         type: "button", class: "permission-chip", "aria-pressed": "false", "aria-label": t(permission.label),
-      }, icon(permission.icon), label);
+      }, icon(permission.icon), label, suffix);
+      const wrapper = h("span", { class: "tip" }, chip);
       if (permission.id === "shell") shellChip = chip;
       if (permission.id === "files") filesChip = chip;
       chip.addEventListener("click", () => {
@@ -927,11 +946,10 @@ export function mountDevices(host: Host) {
           fileGrants.open({ id: current.id, name: current.name }, chip);
         }
       });
-      return { permission, chip, label };
+      return { permission, chip, suffix, wrapper };
     });
-    // Each chip says what it allows. The shell has its own window, which says it.
-    const chipBox = h("div", { class: "permission-chips" }, ...chips.map(({ permission, chip }) =>
-      permission.hint ? h("span", { class: "tip", "data-tip": t(permission.hint) }, chip) : chip));
+    // Each chip says what it allows, and with a short chip its name, in its tip. The shell has its own window, which says it.
+    const chipBox = h("div", { class: "permission-chips" }, ...chips.map(({ wrapper }) => wrapper));
     const remove = iconButton(fill(t("removeController"), { device: controller.name }), "user-minus");
     const { accept, cancel } = confirmButtons(t("removeAccess"), () => { void removeController(current); }, () => {
       confirming = undefined;
@@ -949,28 +967,40 @@ export function mountDevices(host: Host) {
       render();
       cancel.button.focus();
     });
-    const root = h("div", { class: "device-row" },
+    const text = h("div", { class: "device-row-text" }, oneLine(h("strong", {}, controller.name)), detail);
+    const root = h("div", { class: "device-row controller-row" },
       kindIcon(controller.kind),
-      h("div", { class: "device-row-text" }, h("strong", {}, controller.name), detail),
+      text,
       chipBox, remove.root, confirm, offConfirm, filesOffConfirm);
+    /** Chips show their words while the row has room for them and the name keeps its least width. Otherwise they show their icons and times. */
+    const fit = (): void => {
+      if (!root.isConnected || root.clientWidth === 0) return;
+      root.removeAttribute("data-compact");
+      // The name column has a least width. When the chips push it down to it, they have no room for their words.
+      if (text.offsetWidth <= MIN_NAME_WIDTH) root.setAttribute("data-compact", "");
+    };
+    new ResizeObserver(fit).observe(root);
     return {
       root,
       update(next) {
         current = next;
         fadeText(detail, next.connected ? t("connectedNow")
           : next.lastAccess === null ? t("noAccessYet") : fill(t("lastAccess"), { age: elapsed(next.lastAccess) }));
-        for (const { permission, chip, label } of chips) {
-          setAttribute(chip, "aria-pressed", String(next.permissions[permission.id] === true));
-          chip.toggleAttribute("data-on", next.permissions[permission.id] === true);
-          if (permission.id === "shell") {
-            fadeText(label, next.shell ? shellChipText(next.shell) : t("permShell"));
-            setAttribute(chip, "aria-label", next.shell ? `${t("permShell")}. ${shellChipText(next.shell)}` : t("permShell"));
-          }
-          if (permission.id === "files") {
-            fadeText(label, next.files ? filesChipText(next.files) : t("permFiles"));
-            setAttribute(chip, "aria-label", next.files ? `${t("permFiles")}. ${filesChipText(next.files)}` : t("permFiles"));
-          }
+        for (const { permission, chip, suffix, wrapper } of chips) {
+          const on = next.permissions[permission.id] === true;
+          setAttribute(chip, "aria-pressed", String(on));
+          chip.toggleAttribute("data-on", on);
+          const name = t(permission.label);
+          const until = permission.id === "shell" ? next.shell?.until : permission.id === "files" ? next.files?.until : undefined;
+          const full = until === undefined ? name
+            : permission.id === "shell" ? shellChipText(next.shell!) : filesChipText(next.files!);
+          fadeText(suffix, until === undefined ? "" : until === "untilOff" ? "∞" : formatClock(until, host.language()));
+          setAttribute(chip, "aria-label", full);
+          setTip(wrapper, permission.hint ? `${full}. ${t(permission.hint)}` : full);
         }
+        fit();
+        // The times fade to their new text, so the width is measured once more after they did.
+        window.setTimeout(fit, 400);
         const removing = confirming === next.id;
         const turningOff = confirming === `shell:${next.id}`;
         const turningFilesOff = confirming === `files:${next.id}`;
@@ -1252,7 +1282,7 @@ export function mountDevices(host: Host) {
     if (!entry.detail) return "";
     if (entry.request === "filesGranted") {
       const [scope, mode] = entry.detail.split(" ");
-      return `${t(scope === "disk" ? "filesScopeDisk" : "filesScopeFolders")} · ${t(mode === "readWrite" ? "filesModeWrite" : "filesModeRead")}`;
+      return `${t(scope === "disk" ? "filesScopeDisk" : scope === "home" ? "filesScopeHome" : "filesScopeFolders")} · ${t(mode === "readWrite" ? "filesModeWrite" : "filesModeRead")}`;
     }
     return entry.size === undefined ? entry.detail : `${entry.detail} · ${formatBytes(entry.size, host.language())}`;
   }
@@ -1625,7 +1655,7 @@ export function mountDevices(host: Host) {
       h("div", {}, h("span", { class: "setting-note found-pairing" }, icon("radio"), t("addPairingOpen"))));
     const root = h("button", { type: "button", class: "device-row found-row" },
       kindIcon("desktop"),
-      h("div", { class: "device-row-text" }, h("strong", {}, device.name), h("span", { class: "setting-note" }, where), open),
+      h("div", { class: "device-row-text" }, oneLine(h("strong", {}, device.name)), h("span", { class: "setting-note" }, where), open),
       icon("chevron-right"));
     root.addEventListener("click", () => choose({
       name: latest.name, host: latest.host, port: latest.port, pairing: latest.pairing,
@@ -2553,7 +2583,7 @@ export function mountDevices(host: Host) {
       const state = h("span", { class: "device-state" });
       const open = appOpenButton();
       const root = h("div", { class: "device-row" },
-        appIcon(device.id, app), h("div", { class: "device-row-text" }, h("strong", {}, app.name)), state, open.root);
+        appIcon(device.id, app), h("div", { class: "device-row-text" }, oneLine(h("strong", {}, app.name))), state, open.root);
       let latest = app;
       open.button.addEventListener("click", () => void openApp(device.id, latest));
       return {
@@ -2618,7 +2648,7 @@ export function mountDevices(host: Host) {
     const pin = h("button", { type: "button", class: "icon-button outlined pin-button" }, icon("pin"));
     const pinTip = h("span", { class: "tip" }, pin);
     const root = h("li", { class: "apps-row" },
-      appIcon(device.id, app), h("div", { class: "device-row-text" }, h("strong", {}, app.name)), state, pinTip, open.root);
+      appIcon(device.id, app), h("div", { class: "device-row-text" }, oneLine(h("strong", {}, app.name))), state, pinTip, open.root);
     let latest = app;
     open.button.addEventListener("click", () => void openApp(device.id, latest));
     pin.addEventListener("click", () => togglePin(device.id, app.bundleId));
@@ -2862,10 +2892,11 @@ export function mountDevices(host: Host) {
     };
   }
 
-  /** `2 shared folders · read and write`, or `Whole disk · read only`. */
+  /** `2 shared folders · read and write`, `Home folder · read only`, or `Whole disk · read only`. */
   function filesSummary(files: FileShare & { on: true }): string {
     const mode = t(files.mode === "read" ? "filesModeReadShort" : "filesModeWriteShort");
     if (files.scope === "disk") return fill(t("filesOnDisk"), { mode });
+    if (files.scope === "home") return fill(t("filesOnHome"), { mode });
     return files.roots.length === 1 ? fill(t("filesOnFolder"), { mode }) : fill(t("filesOnFolders"), { mode, count: files.roots.length });
   }
 
@@ -2895,9 +2926,12 @@ export function mountDevices(host: Host) {
       render();
       cancel.button.focus();
     });
+    const nameTip = oneLine(name);
+    // The tip lies above the row's toggle, so a click on the name goes on to it.
+    nameTip.addEventListener("click", () => head.querySelector<HTMLElement>(".device-toggle")?.click());
     const head = h("div", { class: "device-head" },
       kindIcon(item.kind),
-      h("span", { class: "device-name" }, name, item.self && h("span", { class: "device-badge" }, t("thisDevice"))),
+      h("span", { class: "device-name" }, nameTip, item.self && h("span", { class: "device-badge" }, t("thisDevice"))),
       !item.self && state, !item.self && refreshButton.root, !item.self && open.root, !item.self && forget.root, !item.self && confirm, chevron());
     const content = item.self ? thisDeviceBody() : remoteBody(item.data as RemoteDevice);
     const body = h("div", { class: "collapse" }, content.root);

@@ -1,5 +1,5 @@
 import { desktop } from "./desktop";
-import type { FilesMode, FilesScope } from "./files";
+import type { FilesMode, FilesScope, PrivacyCheck, PrivacyTouch } from "./files";
 import type { Language, Message } from "./messages";
 import { h, icon } from "./proxy";
 import { fadeText } from "./motion";
@@ -39,8 +39,24 @@ const choices: { id: Choice; label: Message; icon: string }[] = [
 ];
 const scopes: { id: FilesScope; label: Message; icon: string }[] = [
   { id: "folders", label: "filesScopeFolders", icon: "folder" },
+  { id: "home", label: "filesScopeHome", icon: "house" },
   { id: "disk", label: "filesScopeDisk", icon: "hard-drive" },
 ];
+/** The places that macOS asks about, by the path that the app sends. Any other path shows as it is. */
+const places: Record<string, Message> = {
+  "~/Desktop": "filesPlaceDesktop",
+  "~/Documents": "filesPlaceDocuments",
+  "~/Downloads": "filesPlaceDownloads",
+  "~/Library/Mobile Documents": "filesPlaceICloud",
+};
+const touches: Record<PrivacyTouch, { icon: string; label: Message }> = {
+  readable: { icon: "circle-check", label: "filesTouchReadable" },
+  denied: { icon: "circle-x", label: "filesTouchDenied" },
+  pending: { icon: "clock", label: "filesTouchPending" },
+  failed: { icon: "triangle-alert", label: "filesTouchFailed" },
+};
+/** How long a save may take before the window says that macOS may ask questions. A quick save never shows it. */
+const PROGRESS_DELAY = 400;
 const modes: { id: FilesMode; label: Message; icon: string }[] = [
   { id: "read", label: "filesModeRead", icon: "eye" },
   { id: "readWrite", label: "filesModeWrite", icon: "pencil" },
@@ -124,6 +140,13 @@ export function mountFilesGrantWindow(host: Host) {
   let saving = false;
   let picking = false;
   let ticker: number | undefined;
+  /** `form` asks, `wait` is macOS asking its questions, and `result` says which places can be read. */
+  let step: "form" | "wait" | "result" = "form";
+  let checks: PrivacyCheck[] = [];
+  /** The scope that was saved, so the result step knows whether to recommend Full Disk Access. */
+  let saved: FilesScope = "folders";
+  /** Ends the answer of an earlier save when the window closed or opened again. */
+  let session = 0;
 
   // Where: the folders that the person picks, or the whole disk.
   const scopeChoice = choice(scopes, "filesScope", id => {
@@ -142,9 +165,10 @@ export function mountFilesGrantWindow(host: Host) {
     h("div", { class: "files-folders-box" }, list, add),
     foldersNoteBox.root, suggestedNote);
 
+  // The home folder and the whole disk open a lot, so each says plainly what it reaches.
   const warning = h("p", { class: "shell-warning files-disk-warning" }, icon("triangle-alert"), h("span"));
   const hidden = bind(h("p", { class: "setting-note files-note" }), "filesAlwaysHidden");
-  const diskBox = collapse(warning, hidden);
+  const wideBox = collapse(warning, hidden);
 
   // Permission: read only, or read and write.
   const modeChoice = choice(modes, "filesMode", id => {
@@ -182,10 +206,24 @@ export function mountFilesGrantWindow(host: Host) {
       hoursField, bind(h("span", { class: "shell-unit" }), "shellHoursUnit"),
       minutesField, bind(h("span", { class: "shell-unit" }), "shellMinutesUnit")));
   const logNote = bind(h("p", { class: "setting-note shell-log-note" }), "filesLogNote");
+  const ahead = bind(h("p", { class: "setting-note shell-log-note" }), "filesPrivacyAhead");
   const cancel = bind(h("button", { type: "button", class: "text-button" }), "cancel");
   const allow = h("button", { type: "submit", class: "access-action" }, icon("folder-key"), bind(h("span"), "filesAllow"));
-  body.append(scopeRow, foldersBox.root, diskBox.root, modeRow, allowsBox.root, durationRow, timeRow, logNote,
+  const formStep = h("div", { class: "files-step" }, scopeRow, foldersBox.root, wideBox.root, modeRow, allowsBox.root, durationRow, timeRow, logNote, ahead,
     h("div", { class: "action-footer" }, h("span", { class: "action-spacer" }), cancel, allow));
+
+  // After the grant is saved, macOS asks about the protected folders. The person is at this device, so the questions come now.
+  const progress = h("p", { class: "files-progress" }, icon("loader-circle"), bind(h("span"), "filesPrivacyAsk"));
+  const progressBox = collapse(progress);
+  const privacyList = h("ul", { class: "files-privacy-list" });
+  const privacySummary = h("p", { class: "setting-note files-note" });
+  const fdaNote = bind(h("p", { class: "setting-note files-note" }), "filesFullDiskTip");
+  const fdaButton = h("button", { type: "button", class: "access-action files-fda" }, icon("shield-check"), bind(h("span"), "filesFullDiskOpen"));
+  const fdaBox = collapse(fdaNote, h("div", { class: "files-fda-row" }, fdaButton));
+  const done = h("button", { type: "button", class: "access-action" }, icon("check"), bind(h("span"), "filesDone"));
+  const privacyStep = h("div", { class: "files-step", hidden: true }, progressBox.root, privacyList, privacySummary, fdaBox.root,
+    h("div", { class: "action-footer" }, h("span", { class: "action-spacer" }), done));
+  body.append(formStep, privacyStep);
 
   /** Puts a number of minutes in the two fields, or empties them. */
   function fields(minutes: number | undefined): void {
@@ -230,14 +268,16 @@ export function mountFilesGrantWindow(host: Host) {
     modeChoice.select(mode);
     durationChoice.select(duration);
     foldersBox.set(scope === "folders");
-    diskBox.set(scope === "disk");
+    wideBox.set(scope !== "folders");
     renderFolders();
     const out = folders.length === 0 && scope === "folders";
     // The last text stays while the note closes.
     if (out) setText(foldersNote, t("filesFoldersNone"));
     foldersNoteBox.set(out);
     add.disabled = folders.length >= MAX_FOLDERS || picking;
-    const warningText = t(mode === "readWrite" ? "filesDiskWarning" : "filesDiskWarningRead");
+    const writing = mode === "readWrite";
+    const warningText = t(scope === "home" ? (writing ? "filesHomeWarning" : "filesHomeWarningRead")
+      : (writing ? "filesDiskWarning" : "filesDiskWarningRead"));
     const warningNode = warning.querySelector("span")!;
     if (warningNode.textContent !== warningText) fadeText(warningNode, warningText);
     allowsBox.set(scope === "folders");
@@ -254,26 +294,60 @@ export function mountFilesGrantWindow(host: Host) {
     endNote.toggleAttribute("data-warning", minutes === undefined);
     const ready = minutes !== undefined && !saving && !out;
     if (allow.disabled !== !ready) allow.disabled = !ready;
-    setText(title, fill(t("filesGrantTitle"), { name: device.name }));
+    setText(title, step === "form" ? fill(t("filesGrantTitle"), { name: device.name }) : t("filesPrivacyTitle"));
+    renderPrivacy();
+  }
+
+  /** The step after saving: the questions of macOS while they are asked, then what each place answered. */
+  function renderPrivacy(): void {
+    formStep.hidden = step !== "form";
+    privacyStep.hidden = step === "form";
+    progressBox.set(step === "wait");
+    const wide = saved !== "folders";
+    fdaBox.set(wide && step !== "form");
+    const closed = checks.filter(check => check.touch !== "readable").length;
+    // The last text stays while the line closes.
+    if (step === "result") fadeText(privacySummary, closed === 0 ? t("filesPrivacyAllOk") : fill(t("filesPrivacyClosed"), { count: closed, total: checks.length }));
+    privacySummary.toggleAttribute("data-warning", step === "result" && closed > 0);
+    const signature = JSON.stringify([checks, host.language()]);
+    if (privacyList.dataset.signature !== signature) {
+      privacyList.dataset.signature = signature;
+      privacyList.replaceChildren(...checks.map(check => {
+        const look = touches[check.touch];
+        const known = places[check.path];
+        return h("li", { class: "files-privacy-row", "data-touch": check.touch },
+          icon(look.icon),
+          h("span", { class: "files-privacy-place" }, known ? t(known) : check.path),
+          h("span", { class: "files-privacy-path" }, known ? check.path : ""),
+          h("span", { class: "files-privacy-state" }, t(look.label)));
+      }));
+      host.refreshIcons();
+    }
   }
 
   function open(next: { id: string; name: string }, from: HTMLElement): void {
     device = next;
     trigger = from;
     saving = false;
+    session += 1;
+    step = "form";
+    checks = [];
     scope = "folders";
     mode = "read";
     duration = "hour";
     folders = [SUGGESTED];
     fields(presets.hour);
     delete list.dataset.signature;
+    delete privacyList.dataset.signature;
     render();
+    // The window always opens at its top, whatever the last one showed.
+    body.scrollTop = 0;
     shell.setAttribute("data-open", "");
     shell.inert = false;
     window.clearInterval(ticker);
     ticker = window.setInterval(render, clockTick);
     host.refreshIcons();
-    allow.focus();
+    allow.focus({ preventScroll: true });
   }
 
   function closeWindow(restoreFocus = true): void {
@@ -284,6 +358,7 @@ export function mountFilesGrantWindow(host: Host) {
     ticker = undefined;
     device = undefined;
     saving = false;
+    session += 1;
     if (restoreFocus && trigger?.isConnected) trigger.focus();
   }
 
@@ -315,18 +390,45 @@ export function mountFilesGrantWindow(host: Host) {
   body.addEventListener("submit", event => {
     event.preventDefault();
     const minutes = chosen();
-    if (!device || saving || minutes === undefined) return;
+    if (!device || saving || minutes === undefined || step !== "form") return;
     saving = true;
     render();
-    void desktop.grantFiles(device.id, scope, scope === "disk" ? [] : folders, mode, minutes).then(() => {
-      closeWindow(false);
+    const mine = ++session;
+    const chosenScope = scope;
+    // Saving the grant also reads the protected places, which holds the answer while macOS asks its questions.
+    const slow = window.setTimeout(() => {
+      if (mine !== session) return;
+      saved = chosenScope;
+      step = "wait";
+      render();
+      body.scrollTop = 0;
+    }, PROGRESS_DELAY);
+    void desktop.grantFiles(device.id, chosenScope, chosenScope === "folders" ? folders : [], mode, minutes).then(granted => {
+      window.clearTimeout(slow);
       host.changed();
-    }, (error: unknown) => {
+      if (mine !== session) return;
       saving = false;
+      if (granted.privacy.length === 0) {
+        closeWindow(false);
+        return;
+      }
+      saved = chosenScope;
+      checks = granted.privacy;
+      step = "result";
+      render();
+      body.scrollTop = 0;
+      done.focus();
+    }, (error: unknown) => {
+      window.clearTimeout(slow);
+      if (mine !== session) return;
+      saving = false;
+      step = "form";
       render();
       host.fail(error);
     });
   });
+  done.addEventListener("click", () => closeWindow());
+  fdaButton.addEventListener("click", () => { void desktop.openFullDiskAccess().catch((error: unknown) => host.fail(error)); });
 
   return {
     open,

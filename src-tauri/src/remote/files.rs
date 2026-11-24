@@ -59,7 +59,8 @@ pub fn tilde(path: &str, home: Option<&Path>) -> String {
     }
 }
 
-/// The folders of a grant as roots. A folder that is gone is left out. The whole disk is `/`.
+/// The folders of a grant as roots. A folder that is gone is left out. The whole disk is `/`, and
+/// the home folder is one root with no name, which the interface calls "Home folder".
 pub fn roots(grant: &FilesGrant) -> Vec<Root> {
     match grant.scope {
         FilesScope::Disk => vec![Root {
@@ -67,13 +68,16 @@ pub fn roots(grant: &FilesGrant) -> Vec<Root> {
             name: String::new(),
             path: PathBuf::from("/"),
         }],
-        FilesScope::Folders => grant
+        FilesScope::Folders | FilesScope::Home => grant
             .folders
             .iter()
             .filter_map(|folder| {
                 let path = fs::canonicalize(folder).ok().filter(|path| path.is_dir())?;
                 let digest = Sha256::digest(path.as_os_str().as_encoded_bytes());
                 let id = digest[..4].iter().map(|byte| format!("{byte:02x}")).collect();
+                if grant.scope == FilesScope::Home {
+                    return Some(Root { id: "home".to_owned(), name: String::new(), path });
+                }
                 let name = path.file_name()?.to_string_lossy().into_owned();
                 Some(Root { id, name, path })
             })
@@ -138,6 +142,9 @@ fn io_code(error: &std::io::Error) -> &'static str {
     match error.kind() {
         std::io::ErrorKind::NotFound => "filesNotFound",
         std::io::ErrorKind::AlreadyExists => "filesExists",
+        // EPERM is how macOS answers a folder that its privacy rules close to this app. EACCES is
+        // an ordinary file permission.
+        _ if error.raw_os_error() == Some(libc::EPERM) => "filesPrivacyDenied",
         std::io::ErrorKind::PermissionDenied => "filesDenied",
         _ => match error.raw_os_error() {
             Some(libc::ENOTEMPTY) => "filesNotEmpty",
@@ -640,6 +647,114 @@ pub fn check_folders(
     Ok(checked)
 }
 
+/// Opens Privacy & Security at Full Disk Access. It changes nothing: the person turns the switch.
+pub fn open_full_disk_access() -> Result<(), &'static str> {
+    let opened = std::process::Command::new("/usr/bin/open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+        .stdin(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
+    if opened { Ok(()) } else { Err("privacySettingsFailed") }
+}
+
+/// How long one location gets to answer. A privacy question that the person has not answered yet
+/// holds the read open, so a slow answer ends as `pending` and the prompt stays on screen.
+const TOUCH_WAIT: Duration = Duration::from_secs(10);
+
+/// What reading one protected location showed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Touch {
+    /// The folder can be read.
+    Readable,
+    /// macOS refused it, or the person answered "Don't Allow".
+    Denied,
+    /// Nobody answered in time.
+    Pending,
+    /// The folder could not be read for another reason.
+    Failed,
+}
+
+/// One protected location and what reading it showed. `path` is shown with `~` for the home folder.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct Checked {
+    pub path: String,
+    pub touch: Touch,
+}
+
+/// The places that macOS closes behind a privacy question the first time an app reads them.
+fn home_protected(home: &Path) -> Vec<PathBuf> {
+    ["Desktop", "Documents", "Downloads", "Library/Mobile Documents"].iter().map(|name| home.join(name)).collect()
+}
+
+/// The disks mounted under `/Volumes`, not counting the one that holds the system.
+pub fn mounted_volumes() -> Vec<PathBuf> {
+    let Ok(read) = fs::read_dir("/Volumes") else { return Vec::new() };
+    let mut volumes: Vec<PathBuf> = read
+        .filter_map(Result::ok)
+        .map(|item| item.path())
+        .filter(|path| fs::canonicalize(path).is_ok_and(|real| real != Path::new("/")))
+        .collect();
+    volumes.sort();
+    volumes
+}
+
+/// The protected locations inside what a grant reaches, in the order they are asked. With chosen
+/// folders these are the folders and the protected places they hold. For the home folder they are
+/// Desktop, Documents, Downloads, and iCloud Drive, and the whole disk adds each mounted volume.
+pub fn privacy_locations(scope: FilesScope, folders: &[String], home: Option<&Path>, volumes: &[PathBuf]) -> Vec<PathBuf> {
+    let protected: Vec<PathBuf> = home.map(home_protected).unwrap_or_default();
+    let mut found: Vec<PathBuf> = Vec::new();
+    match scope {
+        FilesScope::Home => found.extend(protected),
+        FilesScope::Disk => {
+            found.extend(protected);
+            found.extend(volumes.iter().cloned());
+        }
+        FilesScope::Folders => {
+            for folder in folders.iter().map(PathBuf::from) {
+                for place in protected.iter().chain(volumes) {
+                    if place.starts_with(&folder) && *place != folder && !found.contains(place) {
+                        found.push(place.clone());
+                    }
+                }
+                if !found.contains(&folder) {
+                    found.push(folder);
+                }
+            }
+        }
+    }
+    found
+}
+
+/// Reads one folder the way a remote request would, so macOS asks about it now. A folder that is
+/// not there is left out (`None`).
+fn touch_one(path: &Path) -> Option<Touch> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let owned = path.to_path_buf();
+    std::thread::spawn(move || {
+        let _ = sender.send(fs::read_dir(&owned).map(|mut read| drop(read.next())));
+    });
+    match receiver.recv_timeout(TOUCH_WAIT) {
+        Ok(Ok(())) => Some(Touch::Readable),
+        Ok(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Ok(Err(error)) if io_code(&error) == "filesPrivacyDenied" => Some(Touch::Denied),
+        Ok(Err(_)) => Some(Touch::Failed),
+        Err(_) => Some(Touch::Pending),
+    }
+}
+
+/// Reads each location one after the other, so each privacy question comes alone. It blocks for
+/// the answers, so it belongs on a background thread.
+pub fn touch_locations(locations: &[PathBuf], home: Option<&Path>) -> Vec<Checked> {
+    locations
+        .iter()
+        .filter_map(|path| {
+            touch_one(path).map(|touch| Checked { path: tilde(&path.to_string_lossy(), home), touch })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1057,5 +1172,65 @@ mod tests {
         assert_eq!(share_view(Some(&ended), None), json!({"on": false}));
         assert_eq!(share_view(None, None), json!({"on": false}));
         s.done();
+    }
+    #[test]
+    fn stored_grants_keep_their_scope_and_home_is_new() {
+        for (word, scope) in [("folders", FilesScope::Folders), ("disk", FilesScope::Disk), ("home", FilesScope::Home)] {
+            let stored = json!({"scope": word, "folders": [], "mode": "read", "until": "untilOff"});
+            let grant: FilesGrant = serde_json::from_value(stored).unwrap();
+            assert_eq!(grant.scope, scope);
+            assert_eq!(serde_json::to_value(scope).unwrap(), word);
+        }
+        // The old whole-disk grant still reaches `/`, and a home grant is one root without a name.
+        let old = FilesGrant { scope: FilesScope::Disk, folders: vec![], mode: FilesMode::Read, until: ShellUntil::OFF };
+        assert_eq!(roots(&old)[0].path, Path::new("/"));
+        let base = fs::canonicalize(scratch("files-home-root")).unwrap();
+        let home = FilesGrant { scope: FilesScope::Home, folders: vec![base.to_str().unwrap().to_owned()], mode: FilesMode::Read, until: ShellUntil::OFF };
+        let list = roots(&home);
+        assert_eq!((list.len(), list[0].id.as_str(), list[0].name.as_str()), (1, "home", ""));
+        assert_eq!(list[0].path, base);
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn the_protected_locations_follow_the_scope() {
+        let home = Path::new("/Users/alex");
+        let volumes = vec![PathBuf::from("/Volumes/Backup"), PathBuf::from("/Volumes/Nas")];
+        let ask = |scope, folders: &[&str]| {
+            let folders: Vec<String> = folders.iter().map(|folder| (*folder).to_owned()).collect();
+            privacy_locations(scope, &folders, Some(home), &volumes)
+        };
+        let places = ["Desktop", "Documents", "Downloads", "Library/Mobile Documents"].map(|name| home.join(name));
+        assert_eq!(ask(FilesScope::Home, &["/Users/alex"]), places);
+        let mut disk = places.to_vec();
+        disk.extend(volumes.clone());
+        assert_eq!(ask(FilesScope::Disk, &[]), disk);
+        // Chosen folders: the protected places inside them come first, then the folder itself.
+        assert_eq!(ask(FilesScope::Folders, &["/Users/alex"]).len(), 5);
+        assert_eq!(ask(FilesScope::Folders, &["/Users/alex/Documents/Work"]), [PathBuf::from("/Users/alex/Documents/Work")]);
+        assert_eq!(
+            ask(FilesScope::Folders, &["/Volumes", "/Volumes"]),
+            [volumes[0].clone(), volumes[1].clone(), PathBuf::from("/Volumes")]
+        );
+        assert_eq!(ask(FilesScope::Folders, &["/opt/tools"]), [PathBuf::from("/opt/tools")]);
+        assert!(privacy_locations(FilesScope::Home, &[], None, &[]).is_empty());
+    }
+
+    #[test]
+    fn a_folder_that_macos_closes_maps_to_the_privacy_code() {
+        // EPERM is the macOS privacy answer; EACCES is an ordinary permission.
+        let privacy = std::io::Error::from_raw_os_error(libc::EPERM);
+        assert_eq!(privacy.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(io_code(&privacy), "filesPrivacyDenied");
+        assert_eq!(io_code(&std::io::Error::from_raw_os_error(libc::EACCES)), "filesDenied");
+        assert_eq!(io_code(&std::io::ErrorKind::NotFound.into()), "filesNotFound");
+    }
+
+    #[test]
+    fn touching_reports_readable_missing_and_skips_nothing_else() {
+        let base = fs::canonicalize(scratch("files-touch")).unwrap();
+        let checked = touch_locations(&[base.clone(), base.join("missing")], Some(&base));
+        assert_eq!(checked, [Checked { path: "~".to_owned(), touch: Touch::Readable }]);
+        let _ = fs::remove_dir_all(&base);
     }
 }

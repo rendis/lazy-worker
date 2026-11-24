@@ -8,7 +8,7 @@ import type { ToolId } from "./modules";
 import {
   previewAddFile, previewClearTransfers, previewDelete, previewFileSize, previewList, previewMakeFolder, previewQueue,
   previewShareRoots, previewStopTransfer, previewTransfers,
-  type FileListing, type FilesGrant, type FilesMode, type FilesScope, type FileShare, type Transfer,
+  type FileListing, type FilesGrant, type FilesGranted, type PrivacyCheck, type FilesMode, type FilesScope, type FileShare, type Transfer,
 } from "./files";
 import { isLinkError, PROTOCOL, refusal, type Session, type Viewer } from "./remote";
 import claudeIcon from "./assets/apps/claude.svg";
@@ -405,16 +405,16 @@ function previewShellOf(id: string): ShellState {
   return { until: previewQuery.has("shell-forever") ? "untilOff" : Math.floor(end.getTime() / 1000) };
 }
 /**
- * What each controlled sample device shares with this one. `?files-off`, `?files-ro` (read only), and `?files-disk` (the whole disk)
+ * What each controlled sample device shares with this one. `?files-off`, `?files-ro` (read only), `?files-home` (the home folder), and `?files-disk` (the whole disk)
  * change what `studio` shares. Only that device can change it, so a preview never does.
  */
 function previewShareOf(id: string): FileShare {
   if (id !== "studio" || previewQuery.has("files-off")) return { on: false };
-  const disk = previewQuery.has("files-disk");
+  const scope: FilesScope = previewQuery.has("files-disk") ? "disk" : previewQuery.has("files-home") ? "home" : "folders";
   return {
-    on: true, scope: disk ? "disk" : "folders", mode: previewQuery.has("files-ro") ? "read" : "readWrite",
+    on: true, scope, mode: previewQuery.has("files-ro") ? "read" : "readWrite",
     until: previewQuery.has("files-forever") ? "untilOff" : Math.floor(Date.now() / 1000) + 2 * 3600,
-    roots: previewShareRoots(disk ? "disk" : "folders"),
+    roots: previewShareRoots(scope),
   };
 }
 /** A sample device that has not shared files answers a file request as the real one does. */
@@ -424,6 +424,22 @@ function previewFilesGate(id: string, write: boolean): FileShare & { on: true } 
   const share = previewShareOf(id);
   if (!share.on || (write && share.mode !== "readWrite")) throw "notPermitted";
   return share;
+}
+/**
+ * What the app reads when a grant is saved, so macOS asks its questions then. A preview waits as macOS would, and answers with a closed
+ * Downloads and an iCloud Drive that no one answered. `?privacy-none` has nothing protected, and `?privacy-ok` has every place open.
+ */
+async function previewPrivacy(scope: FilesScope, folders: string[]): Promise<PrivacyCheck[]> {
+  if (previewQuery.has("privacy-none")) return [];
+  await new Promise(resolve => setTimeout(resolve, 1400));
+  const all = previewQuery.has("privacy-ok");
+  const home: PrivacyCheck[] = [
+    { path: "~/Desktop", touch: "readable" }, { path: "~/Documents", touch: "readable" },
+    { path: "~/Downloads", touch: all ? "readable" : "denied" }, { path: "~/Library/Mobile Documents", touch: all ? "readable" : "pending" },
+  ];
+  if (scope === "home") return home;
+  if (scope === "disk") return [...home, { path: "/Volumes/Backup", touch: "readable" }];
+  return folders.map(path => ({ path, touch: "readable" as const }));
 }
 /** The changes of the keys file that a preview shows with `?keys-warning`, until they are dismissed. */
 let previewWarnings: KeysWarning[] | undefined;
@@ -452,6 +468,19 @@ const previewDeviceAdditions: RemoteDevice[] = [];
 let previewLog: RemoteLogEntry[] | undefined;
 
 function sampleControllers(now: number): Controller[] {
+  // `?stress` gives the first controller a 60-letter name and every permission, with a shell that ends today and files that last.
+  // `?stress=far` ends both tomorrow, so their times show the date too.
+  if (previewQuery.has("stress")) {
+    const tomorrow = new Date();
+    tomorrow.setHours(26, 0, 0, 0);
+    const far = previewQuery.get("stress") === "far";
+    return [{
+      id: "studio", name: "Estación de trabajo del estudio de diseño del tercer piso 1B", kind: "desktop", lastAccess: now - 5 * 60, connected: true,
+      permissions: { control: true, applications: true, actions: true, shell: true, files: true },
+      shell: { until: far ? Math.floor(tomorrow.getTime() / 1000) : now + 3600 },
+      files: { scope: "folders", folders: ["~/Lazy Worker"], mode: "read", until: far ? Math.floor(tomorrow.getTime() / 1000) : "untilOff" },
+    }];
+  }
   return [
     {
       id: "studio", name: "iMac del estudio", kind: "desktop", lastAccess: now - 5 * 60, connected: true,
@@ -1087,21 +1116,25 @@ export const desktop = {
    * with writing, for `minutes` from 1 to 1440 or until the person turns it off. A leading `~/` is the home folder.
    * Only the person at this device can do it, and only here.
    */
-  async grantFiles(id: string, scope: FilesScope, folders: string[], mode: FilesMode, minutes: number | null): Promise<FilesGrant> {
+  async grantFiles(id: string, scope: FilesScope, folders: string[], mode: FilesMode, minutes: number | null): Promise<FilesGranted> {
     if (native) return call("grantFiles", { id, scope, folders, mode, minutes });
     const controller = previewControllerList().find(item => item.id === id);
     if (!controller) throw "notPaired";
     if (minutes !== null && (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440)) throw "shellDurationInvalid";
     if (scope === "folders" && (folders.length === 0 || folders.length > 16)) throw "filesFolderInvalid";
     controller.files = {
-      scope, folders: scope === "disk" ? [] : [...folders], mode,
+      scope, folders: scope === "disk" ? [] : scope === "home" ? ["~"] : [...folders], mode,
       until: minutes === null ? "untilOff" : Math.floor(Date.now() / 1000) + minutes * 60,
     };
     previewLogList().unshift({
       time: Math.floor(Date.now() / 1000), peer: id, name: controller.name, request: "filesGranted", outcome: "ok",
       detail: `${scope} ${mode}`,
     });
-    return controller.files;
+    return { ...controller.files, privacy: await previewPrivacy(scope, folders) };
+  },
+  /** Opens Privacy & Security at Full Disk Access. It changes nothing: the person turns the switch there. */
+  async openFullDiskAccess(): Promise<void> {
+    if (native) return call("openFullDiskAccess");
   },
   /** Ends the files that a device may reach, and the uploads it has in progress, now. */
   async revokeFiles(id: string): Promise<void> {

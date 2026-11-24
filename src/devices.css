@@ -1,4 +1,13 @@
 /* The Devices view. A device is a row that opens into its details. */
+/* The heading stays at the top of the panel while the devices scroll under it. The offset is measured from the top padding of `main`
+   (33px), so the title keeps 12px above it. A backing fades in only once rows pass under it. */
+.devices-header { position: sticky; z-index: 3; top: -42px; margin-top: -21px; padding-block: 21px 10px; }
+.devices-header::before {
+  content: ""; position: absolute; z-index: -1; inset: 0 calc(var(--scrollbar) - var(--content-inset)) 0 calc(-1 * var(--content-inset));
+  border-bottom: 1px solid var(--hairline); background: var(--panel); opacity: 0; pointer-events: none;
+  transition: opacity var(--selection-duration) ease;
+}
+.devices-header[data-stuck]::before { opacity: .94; }
 .devices-button { margin-top: 5px; }
 .add-device-button {
   display: inline-flex;
@@ -35,7 +44,12 @@
 .device-head .tip { position: relative; z-index: 2; }
 .device-kind.lucide { flex: none; width: 20px; height: 20px; color: var(--secondary); }
 .device-name { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; font-size: 16px; }
-.device-name strong { min-width: 0; overflow-wrap: anywhere; font-weight: 700; }
+.device-name > .name-tip { flex: 0 1 auto; cursor: pointer; }
+.device-name strong { font-weight: 700; }
+/* A name takes one line. A tip shows all of it when it is cut. */
+.name-tip { display: block; min-width: 0; }
+.name-tip[data-tip]::after { right: auto; left: 0; }
+.name-tip > strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .device-badge {
   flex: none;
   padding: 2px 10px;
@@ -81,7 +95,11 @@
   border-bottom: 1px solid var(--hairline);
 }
 .device-row-text { display: grid; flex: 1; gap: 1px; min-width: 0; }
-.device-row-text strong { font-size: 14.5px; overflow-wrap: anywhere; }
+.device-row-text strong { font-size: 14.5px; }
+/* A controller row keeps its height: its status is one line too. Its chips take the width they need first. */
+.controller-row .device-row-text { min-width: 120px; }
+.controller-row[data-compact] .chip-label { display: none; }
+.controller-row .device-row-text > .setting-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .action-description { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .action-description[hidden] { display: none; }
 .device-row > .lucide:last-child:not(.device-kind) { flex: none; width: 16px; height: 16px; color: var(--secondary); }
@@ -95,7 +113,7 @@
 .app-icon img { display: block; width: 100%; height: 100%; }
 .app-icon .lucide { width: 20px; height: 20px; color: var(--secondary); }
 
-.permission-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.permission-chips { display: flex; flex: none; flex-wrap: nowrap; justify-content: flex-end; gap: 6px; }
 .permission-chip {
   appearance: none;
   background: transparent;
@@ -103,14 +121,17 @@
   font-family: inherit;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 11px;
+  gap: 5px;
+  padding: 5px 9px;
   border: 1px solid var(--line);
   border-radius: 8px;
   color: var(--secondary);
   font-size: 13px;
   font-weight: 640;
+  white-space: nowrap;
 }
+.chip-suffix { font-variant-numeric: tabular-nums; }
+.chip-suffix:empty { display: none; }
 .permission-chip:disabled { opacity: .55; cursor: default; }
 .permission-chip:hover:enabled:not([data-on]) { border-color: var(--secondary); color: var(--text); }
 .permission-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
@@ -118,7 +139,7 @@
 .device-confirm .setting-note { margin-inline-end: 6px; color: var(--pending-color); white-space: nowrap; }
 .device-cut-confirm .setting-label { color: var(--pending-color); }
 .permission-chip[data-on] { border-color: transparent; background: var(--choice); color: var(--choice-ink); }
-.permission-chip .lucide { width: 14px; height: 14px; }
+.permission-chip .lucide { flex: none; width: 14px; height: 14px; }
 
 .icon-button.outlined { border: 1px solid var(--line); }
 .round-button {
@@ -200,7 +221,7 @@
 .device-access { align-items: start; }
 .device-access > .lucide { margin-block-start: 2px; }
 .guide-window { grid-template-rows: auto minmax(0, 1fr) auto; }
-.remote-guide { min-height: 0; overflow-y: auto; padding-inline-end: 4px; }
+.remote-guide { min-height: 0; overflow: hidden auto; padding-inline-end: 4px; }
 .guide-steps { margin: 0 0 12px; padding-inline-start: 20px; font-size: 14px; line-height: 1.5; }
 .guide-steps li + li { margin-top: 6px; }
 .guide-image { display: block; max-width: min(100%, 300px); height: auto; margin-inline: auto; border-radius: 10px; }
@@ -215,7 +236,7 @@
 /* The Add device and Pair a device windows. */
 .pair-window { grid-template-rows: auto minmax(0, 1fr); width: min(560px, 100%); height: min(560px, 100%); }
 .pair-window header #add-device-back { margin-inline-start: 0; }
-.pair-body { min-height: 0; overflow-y: auto; padding-inline-end: 4px; }
+.pair-body { min-height: 0; overflow: hidden auto; padding-inline-end: 4px; }
 .pair-form .setting-row { grid-template-columns: 20px minmax(0, 1fr) auto; }
 .pair-form .setting-row > .field:not(.pair-field) { grid-column: 2; width: 100%; }
 .pair-window .collapse .setting-note, .pair-hint { padding: 8px 2px; }
@@ -274,7 +295,7 @@
 .apps-search .lucide { flex: none; width: 16px; height: 16px; color: var(--secondary); }
 .apps-search .field { flex: 1; }
 /* The room under the last row is for its tip, which opens below the button. */
-.apps-list { display: block; min-height: 0; margin: 0; padding: 0 4px 44px 0; overflow-y: auto; border-block: 1px solid var(--hairline); list-style: none; }
+.apps-list { display: block; min-height: 0; margin: 0; padding: 0 4px 44px 0; overflow: hidden auto; border-block: 1px solid var(--hairline); list-style: none; }
 .apps-list:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .apps-row { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 4px 2px; border-bottom: 1px solid var(--hairline); content-visibility: auto; contain-intrinsic-size: auto 49px; }
 .apps-row[hidden] { display: none; }
@@ -293,7 +314,7 @@
 .action-heading { display: grid; gap: 2px; min-width: 0; }
 .action-heading .setting-note { margin: 0; overflow-wrap: anywhere; }
 .action-heading h2 { overflow-wrap: anywhere; }
-.action-body { display: grid; align-content: start; gap: 2px; min-height: 0; overflow-y: auto; padding-inline-end: 4px; }
+.action-body { display: grid; align-content: start; gap: 2px; min-height: 0; overflow: hidden auto; padding-inline-end: 4px; }
 .action-body [hidden] { display: none; }
 .action-body .collapse .setting-note { padding: 8px 2px; }
 .action-field { display: grid; gap: 8px; padding: 10px 2px; border-bottom: 1px solid var(--hairline); }
@@ -431,9 +452,11 @@ select.field { padding-inline: 4px 2px; }
 }
 .copy-confirm[data-show] { opacity: 1; transition-duration: .14s; }
 
-/* The tabs of a device. The bar is the app's segmented choice on one line. Every panel has the same height, so a change of tab
-   only fades. The height holds a header line and five rows of 53px, and a panel that has more scrolls inside. */
-.device-tabs { --tab-panel-height: 316px; padding-block: 10px 0; }
+/* The tabs of a device. The bar is the app's segmented choice on one line. Every panel of a device has the same height, so a change
+   of tab only fades. Another device's panels hold a header line and four rows of 53px, and a panel that has more scrolls inside. */
+.device-tabs { --tab-panel-height: 258px; padding-block: 10px 0; }
+/* This device's Access tab holds four rows of 54px, which is its fullest panel. */
+.device-tabs[data-device="this"] { --tab-panel-height: 224px; }
 .tab-segments { display: grid; width: 100%; margin-block-end: 4px; --segment-count: 2; }
 .tab-segments button { min-height: 34px; padding-inline: 8px; }
 .tab-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -469,7 +492,7 @@ select.field { padding-inline: 4px 2px; }
 .tab-search .field { flex: 1; min-width: 0; }
 .tab-body { position: relative; flex: 1; min-height: 0; }
 /* The scroll bar keeps its place, so the rows do not shift when it appears. */
-.tab-scroll { position: absolute; inset: 0; overflow-y: auto; scrollbar-gutter: stable; transition: opacity var(--selection-duration) ease; }
+.tab-scroll { position: absolute; inset: 0; overflow: hidden auto; scrollbar-gutter: stable; transition: opacity var(--selection-duration) ease; }
 .tab-scroll:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .tab-body[data-empty] > .tab-scroll { opacity: 0; }
 .tab-empty {
@@ -484,8 +507,12 @@ select.field { padding-inline: 4px 2px; }
 
 /* The files that a device shares with this one: the window that grants them, and the window that opens them. */
 .log-detail { margin-inline-start: .7em; color: var(--muted); }
+/* The grant window is wider than the shell window, so its four durations fit side by side in both languages. A text that still
+   does not fit ends in an ellipsis instead of leaving its segment. */
+.files-window { width: min(700px, 100%); }
 .files-choice { display: grid; width: 100%; }
-.files-choice button { padding-inline: 8px; }
+.files-choice button { gap: 4px; padding-inline: 6px; font-size: 12.5px; }
+.files-choice button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .files-folders-box { display: grid; margin-block: 4px 2px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; }
 .files-folders { display: grid; margin: 0; padding: 0; list-style: none; }
 .files-folder { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 42px; padding: 2px 8px 2px 12px; border-bottom: 1px solid var(--hairline); }
@@ -500,6 +527,22 @@ select.field { padding-inline: 4px 2px; }
 .files-disk-warning { display: flex; align-items: flex-start; gap: 10px; color: var(--pending-color); }
 .files-disk-warning .lucide { flex: none; width: 18px; height: 18px; margin-block-start: 2px; }
 .files-allows { min-height: 3em; }
+/* The grant window has two steps that swap: the questions, then what macOS answered. */
+.files-step { display: grid; align-content: start; gap: 2px; min-width: 0; }
+.files-step[hidden] { display: none; }
+.files-step:not([hidden]) { animation: view-enter .18s ease-out; }
+.files-progress { display: flex; align-items: center; gap: 10px; margin: 0; padding: 10px 2px; color: var(--text); font-size: 14px; line-height: 1.45; }
+.files-progress .lucide { flex: none; width: 18px; height: 18px; color: var(--secondary); animation: rescan-spin 1s linear infinite; }
+.files-privacy-list { display: grid; margin: 0; padding: 0; border-top: 1px solid var(--hairline); list-style: none; }
+.files-privacy-list:empty { border-top: 0; }
+.files-privacy-row { display: grid; grid-template-columns: 18px minmax(0, max-content) minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 38px; padding: 4px 2px; border-bottom: 1px solid var(--hairline); font-size: 14px; }
+.files-privacy-row .lucide { width: 18px; height: 18px; color: var(--secondary); }
+.files-privacy-row[data-touch="readable"] .lucide { color: var(--online); }
+.files-privacy-row[data-touch="denied"] .lucide, .files-privacy-row[data-touch="failed"] .lucide { color: var(--pending-color); }
+.files-privacy-place { overflow: hidden; font-weight: 640; text-overflow: ellipsis; white-space: nowrap; }
+.files-privacy-path { overflow: hidden; color: var(--secondary); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.files-privacy-state { color: var(--secondary); font-size: 13px; text-align: end; white-space: nowrap; }
+.files-fda-row { display: flex; padding: 2px 2px 8px; }
 
 .files-explorer-window { grid-template-rows: auto minmax(0, 1fr); width: min(900px, 100%); height: min(540px, 100%); }
 .files-explorer { position: relative; display: grid; min-height: 0; }
@@ -517,7 +560,7 @@ strong.files-crumb { color: var(--text); font-weight: 700; cursor: default; }
 .files-confirm { margin-inline-start: auto; min-width: 0; }
 .files-confirm .files-confirm-text { overflow: hidden; text-overflow: ellipsis; }
 .files-main { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 12px; min-height: 0; }
-.files-roots { display: grid; align-content: start; gap: 6px; min-height: 0; padding-inline-end: 10px; overflow-y: auto; border-inline-end: 1px solid var(--hairline); }
+.files-roots { display: grid; align-content: start; gap: 6px; min-height: 0; padding-inline-end: 10px; overflow: hidden auto; border-inline-end: 1px solid var(--hairline); }
 .files-roots-title { margin: 4px 2px 2px; color: var(--secondary); font-size: 12.5px; font-weight: 700; }
 .files-roots-list { display: grid; gap: 2px; }
 .files-roots-list .files-root-tip { display: block; }
@@ -538,7 +581,7 @@ strong.files-crumb { color: var(--text); font-weight: 700; cursor: default; }
 .files-sort[data-direction="descending"] .lucide { transform: rotate(180deg); }
 .files-new { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--hairline); }
 .files-new .lucide { width: 18px; height: 18px; color: var(--secondary); }
-.files-rows { min-height: 0; margin: 0; padding: 0; overflow-y: auto; scrollbar-gutter: stable; list-style: none; }
+.files-rows { min-height: 0; margin: 0; padding: 0; overflow: hidden auto; scrollbar-gutter: stable; list-style: none; }
 .files-rows:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .files-row { min-height: 38px; border-bottom: 1px solid var(--hairline); cursor: default; user-select: none; transition: background-color var(--selection-duration) ease, color var(--selection-duration) ease; }
 .files-row:hover { background: var(--track); }

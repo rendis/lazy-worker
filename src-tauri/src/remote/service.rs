@@ -30,6 +30,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::{
     collections::HashSet,
+    fs,
     path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -516,6 +517,13 @@ impl Service {
         let protected = self.protected(running);
         let checked = match scope {
             FilesScope::Folders => files::check_folders(folders, running.home.as_deref(), &protected),
+            FilesScope::Home => running
+                .home
+                .as_deref()
+                .and_then(|home| fs::canonicalize(home).ok())
+                .filter(|home| home.is_dir() && !protected.iter().any(|path| home.starts_with(path)))
+                .and_then(|home| home.to_str().map(|home| vec![home.to_owned()]))
+                .ok_or("filesFolderInvalid"),
             FilesScope::Disk => Ok(Vec::new()),
         };
         let folders = match checked {
@@ -533,7 +541,11 @@ impl Service {
             return Err(code);
         }
         running.uploads.cancel_peer(id);
-        let scope_name = if scope == FilesScope::Disk { "disk" } else { "folders" };
+        let scope_name = match scope {
+            FilesScope::Disk => "disk",
+            FilesScope::Home => "home",
+            FilesScope::Folders => "folders",
+        };
         let mode_name = if mode == FilesMode::ReadWrite { "readWrite" } else { "read" };
         let _ = running.log.append(
             &Entry::new(Some(id), Some(&name), "filesGranted", "ok").with_file(&format!("{scope_name} {mode_name}"), None),
@@ -544,6 +556,23 @@ impl Service {
             mode,
             until,
         })
+    }
+
+    /// Reads each protected location that a grant reaches, one after the other, so macOS asks its
+    /// privacy questions now, while the person is at this device. It waits for the answers.
+    pub fn files_privacy(&self, view: &FilesView) -> Vec<files::Checked> {
+        let Ok(running) = self.running() else { return Vec::new() };
+        let home = running.home.as_deref();
+        let folders: Vec<String> = view
+            .folders
+            .iter()
+            .map(|folder| match (folder.strip_prefix("~"), home) {
+                (Some(rest), Some(home)) => format!("{}{rest}", home.display()),
+                _ => folder.clone(),
+            })
+            .collect();
+        let volumes = if view.scope == FilesScope::Folders || view.scope == FilesScope::Disk { files::mounted_volumes() } else { Vec::new() };
+        files::touch_locations(&files::privacy_locations(view.scope, &folders, home, &volumes), home)
     }
 
     /// Ends the files that a device may reach, and the uploads it has in progress, now.
@@ -1012,6 +1041,12 @@ mod tests {
                 ("filesRevoked".into(), "ok".into()), granted("ok"), ("filesExpired".into(), "ok".into()), granted("ok"),
             ]
         );
+        // The home folder is one grant of its own: it shows as `~`, and the files of this app and the SSH keys inside it stay out.
+        let view = service.grant_files(ID_A, FilesScope::Home, &[], FilesMode::Read, None).unwrap();
+        assert_eq!((view.scope, view.folders.as_slice()), (FilesScope::Home, ["~".to_owned()].as_slice()));
+        let reach = service.files_for(ID_A).unwrap();
+        assert!(reach.protected.iter().any(|path| path.ends_with(".ssh")));
+        assert_eq!(files::roots(&reach.grant)[0].id, "home");
         service.stop();
         fs::remove_dir_all(home).unwrap();
         fs::remove_dir_all(short).unwrap();

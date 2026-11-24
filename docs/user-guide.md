@@ -99,7 +99,7 @@ Devices lets you control one device from another. It is not a tool, so it has no
 
 Open **Devices** in the sidebar. **This device** comes first. The devices you control from here follow it. One device is open at a time. Select a device to open it.
 
-Each open device has tabs on one line. **This device** has **Access** (remote access, pairing, and **Cut all access**), **Who controls it**, **Actions**, and **Log**. A device that you control has **Tools**, **Applications**, **Actions**, and **Connect**. A small badge after the name of a tab shows its state, for example **1/3** tools on, the number of applications that are open, the number of actions, or a green dot when a way into the device is on. Every tab has the same height. A tab with more rows than fit scrolls inside. **Applications** lists your pinned applications first, then the ones you opened last from here, and a count that opens the rest. **Actions** has a search field. **Connect** lists the ways into the device: a terminal, the screen, and files. Use the arrow keys, **Home**, and **End** to move between tabs. Each device remembers its last tab.
+Each open device has tabs on one line. **This device** has **Access** (remote access, pairing, and **Cut all access**), **Who controls it**, **Actions**, and **Log**. A device that you control has **Tools**, **Applications**, **Actions**, and **Connect**. A small badge after the name of a tab shows its state, for example **1/3** tools on, the number of applications that are open, the number of actions, or a green dot when a way into the device is on. Every tab of a device has the same height: the tabs of a device that you control hold four rows. A tab with more rows than fit scrolls inside. The title of the view and **Add device** stay at the top while the devices scroll. **Applications** lists your pinned applications first, then the ones you opened last from here, and a count that opens the rest. **Actions** has a search field. **Connect** lists the ways into the device: a terminal, the screen, and files. Use the arrow keys, **Home**, and **End** to move between tabs. Each device remembers its last tab.
 
 Each device you control shows if it is online. Lazy Worker checks every few seconds while Devices is open, and when you come back to the window. Select **Check this device now** (the circular arrow) to check at once and read its state again.
 
@@ -191,16 +191,20 @@ The shell turns off by itself when the time ends. Select **Turn off shell** to e
 Files lets another device open folders on this device and move files in both directions. Everything goes through the same SSH connection as the rest of Devices. It adds no network service and no sharing in System Settings. Only you can allow it, only at this device.
 
 1. In the **Who controls it** tab, select **Files** on the row of a device.
-2. Under **Where**, choose **Only these folders** or **Whole disk**. For folders, use **Add folder…** and pick each folder. **~/Lazy Worker** is offered first. Lazy Worker creates it the first time you share it. You can share up to 16 folders.
+2. Under **Where**, choose **Chosen folders**, **My home folder**, or **Whole disk**. For folders, use **Add folder…** and pick each folder. **~/Lazy Worker** is offered first. Lazy Worker creates it the first time you share it. You can share up to 16 folders. **My home folder** shares your whole home folder, and **Whole disk** shares `/`.
 3. Under **Permission**, choose **Read only** or **Read and write**.
 4. Under **Duration**, choose **1 hour**, **2 hours**, **Custom** (1 minute to 24 hours), or **Until I turn it off**.
 5. Select **Share files**.
 
-**Whole disk** shows a warning: the device will be able to see, copy, and change all your files, including personal documents, mail, and app data. Choose it only for a device you trust. Lazy Worker's own data and your SSH keys are never shared, with either choice.
+**My home folder** and **Whole disk** show a warning. The home folder includes Desktop, Documents, Downloads, and iCloud Drive. The whole disk includes the system and connected drives. macOS still keeps other users' private files closed. Choose them only for a device you trust. Lazy Worker's own data and your SSH keys are never shared, with any choice. A grant that was saved as **Whole disk** before keeps that meaning.
 
-The chip then says **Files · until 17:00**. Select it to stop sharing. Lazy Worker asks first, in the row. Stopping, or the end of the time, takes effect on the next request and ends the transfers in progress. An upload that did not finish leaves no partial file.
+**Answer the macOS questions now.** The first time an app reads Desktop, Documents, Downloads, iCloud Drive, a removable drive, or a network drive, macOS asks you. If the other device were first to read them, nobody would be here to answer. So when you select **Share files**, Lazy Worker reads each of these places inside what you shared, one by one, on this device. The window says that macOS may ask for access to your folders. Answer each question while you are here. Then it lists each place as **Allowed**, **Not allowed**, **No answer yet**, or **Could not read**. A place that is closed stays closed for the other device. Its explorer says "macOS on that device did not allow this folder." Allow it in Privacy & Security, under Files and Folders, on this device.
 
-On the other device, the **Connect** tab shows a **Files** row, for example **2 shared folders · read and write**. Select **Open the files of that device** to open the explorer:
+**Full Disk Access** skips the questions. With **My home folder** and **Whole disk**, the window recommends it. **Open Full Disk Access** opens Privacy & Security at that list. Switch Lazy Worker on there yourself. Lazy Worker changes nothing in Settings.
+
+The chip then says **Files 17:00**, with **∞** instead of a time for **Until I turn it off**. When the row is too narrow, the chips show only their icons and times. Hover a chip for its full text. Select it to stop sharing. Lazy Worker asks first, in the row. Stopping, or the end of the time, takes effect on the next request and ends the transfers in progress. An upload that did not finish leaves no partial file.
+
+On the other device, the **Connect** tab shows a **Files** row, for example **2 shared folders · read and write**, **Home folder · read only**, or **Whole disk · read only**. Select **Open the files of that device** to open the explorer:
 
 - The shared folders are on the left. The path is above the list. Select **Name** to sort. Double-click a folder to open it. Backspace goes up.
 - **Send files here** picks files on your device and sends them to the open folder. You can also drag files from Finder onto the window. A file that has the same name is replaced.
@@ -256,7 +260,7 @@ Devices lets other devices act on yours, so it is built to be safe by default.
 - Lazy Worker sets SSH to accept keys only.
 - A new device gets **Control** only. **Applications** and **Actions** start off. **Files** and **Shell** are never on at pairing.
 - Lazy Worker checks each request again, on the device that receives it, against the permissions it has at that moment. Removing a device works at once.
-- Files are shared only in the folders you choose, for a time. Each path is resolved on this device and must stay inside its shared folder. A link that leaves it, a device file, a socket, and a pipe are refused. Lazy Worker's data and your SSH keys are never shared, also with **Whole disk**.
+- Files are shared only in the folders you choose (or your home folder, or the whole disk), for a time. Each path is resolved on this device and must stay inside its shared folder. A link that leaves it, a device file, a socket, and a pipe are refused. Lazy Worker's data and your SSH keys are never shared, also with **My home folder** and **Whole disk**.
 - A device never sends the text of its saved commands to another device.
 - Names and text from another device show as plain text. They cannot run anything.
 - The pairing code is not sent. Three wrong codes close the window.
@@ -266,7 +270,7 @@ Devices lets other devices act on yours, so it is built to be safe by default.
 
 - Commands you save as actions, and commands you write for Proxy tools, run as your user. Save only what you trust.
 - Allowing a **Shell** gives the other device the same power as you. Allow it only for a time you choose, and only to a device you trust.
-- **Files** with **Read and write** lets the other device change and delete files in the shared folders. **Whole disk** shares everything this account can open. macOS still decides what Lazy Worker may read, so some folders, such as Mail, can ask for permission or stay closed.
+- **Files** with **Read and write** lets the other device change and delete files in the shared folders. **Whole disk** shares everything this account can open. macOS still decides what Lazy Worker may read, so some folders, such as Mail, can ask for permission or stay closed. Lazy Worker asks macOS for Desktop, Documents, Downloads, iCloud Drive, and the drives when you share, while you are at the device.
 - **Allow full disk access for remote users** in Sharing is not needed and is safer off. If it is on, a shell can read all files, including Mail and Messages.
 
 ### Risks that remain
