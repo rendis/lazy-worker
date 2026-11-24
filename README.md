@@ -119,6 +119,7 @@ See the [user guide](docs/user-guide.md#devices) for the steps.
 - Starts and stops from the panel or from the menu bar, and keeps running with the panel closed.
 - Joins Quick start, which starts your selected tools together, by hand or when Lazy Worker opens.
 - Shows a timer for its session and a short help clip.
+- Has a card in Tools with its status, Quick start and power button. Pin a card to keep it at the front.
 
 <br>
 
@@ -128,7 +129,7 @@ See the [user guide](docs/user-guide.md#devices) for the steps.
   <tr>
     <td width="33%" valign="top">
       <h3>1 · Open</h3>
-      <p>Click the wind-up key in your menu bar. The panel lists every tool.</p>
+      <p>Click the wind-up key in your menu bar. The panel shows every tool as a card.</p>
     </td>
     <td width="33%" valign="top">
       <h3>2 · Start</h3>

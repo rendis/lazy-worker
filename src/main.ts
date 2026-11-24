@@ -2,7 +2,7 @@ import "./style.css";
 import {
   Activity, AppWindow, ArrowLeft, ArrowRight, Bell, Bot, Box, Brain, Calendar, CalendarClock, CalendarDays, Check, ChevronDown, ChevronRight, CircleCheck, CircleHelp, CircleStop, CircleX, Clock, Cloud, Code, Coffee, Contrast, Copy,
   Cpu, createIcons, Database, ExternalLink, EyeOff, Globe, Hand, Hash, Hourglass, Infinity as InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LoaderCircle, LockKeyhole, LockKeyholeOpen,
-  Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, Moon, MousePointer2, Network, Pencil, Pin, Play, PlugZap, Plus, Power, RefreshCw, Repeat, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
+  Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, Moon, MousePointer2, Network, Pencil, Pin, PinOff, Play, PlugZap, Plus, Power, RefreshCw, Repeat, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
   Shield, ShieldCheck, Sparkles, Square, SquareArrowOutUpRight, SquareTerminal, Sun, Sunrise, Sunset, Tag, Terminal, Timer, Trash2, TriangleAlert, UserMinus, UserRound, X, Zap,
 } from "lucide";
 import { mountCaffeinateForm } from "./caffeinate-form";
@@ -36,13 +36,16 @@ if (remote) {
   for (const node of document.querySelectorAll<HTMLElement>("[data-local-only]")) node.hidden = true;
 }
 document.documentElement.style.setProperty("--session-width", `${SESSION_WIDTH}ch`);
-const updateToolOrder = mountTools();
+const updateToolOrder = mountTools(pinned => updatePreference("tools", {
+  key: "pinned",
+  apply: current => ({ ...current, pinned }),
+}));
 function renderIcons(): void {
   createIcons({
     icons: {
       Activity, AppWindow, ArrowLeft, ArrowRight, Bell, Bot, Box, Brain, Calendar, CalendarClock, CalendarDays, Check, ChevronDown, ChevronRight, CircleCheck, CircleHelp, CircleStop, CircleX, Clock, Cloud, Code, Coffee, Contrast, Copy,
       Cpu, Database, ExternalLink, EyeOff, Globe, Hand, Hash, Hourglass, Infinity: InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LoaderCircle, LockKeyhole, LockKeyholeOpen,
-      Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, Moon, MousePointer2, Network, Pencil, Pin, Play, PlugZap, Plus, Power, RefreshCw, Repeat, Rocket, RotateCcw, ScrollText, Search, Server,
+      Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, Moon, MousePointer2, Network, Pencil, Pin, PinOff, Play, PlugZap, Plus, Power, RefreshCw, Repeat, Rocket, RotateCcw, ScrollText, Search, Server,
       Settings, Shield, ShieldCheck, Sparkles, Square, SquareArrowOutUpRight, SquareTerminal, Sun, Sunrise, Sunset, Tag, Terminal, Timer, Trash2, TriangleAlert, UserMinus, UserRound, X, Zap,
     },
     attrs: { "aria-hidden": "true", "stroke-width": 1.75 },
@@ -123,7 +126,7 @@ type FeedbackTarget = ToolId | "tools" | "settings" | "devices";
 type FeedbackLine = { message: Message; tool?: ToolId };
 type PreferenceChoice = "duration" | "language" | "theme" | "hideWhileSharing" | "startToolsOnLaunch" | "seenVersion";
 type PreferenceChange = {
-  key: PreferenceChoice | ToolId | "proxySettings";
+  key: PreferenceChoice | ToolId | "proxySettings" | "pinned";
   apply: (current: Preferences) => Preferences;
 };
 /** The notices that report no failure: a saved change, and a request that another device keeps for itself. */
@@ -597,7 +600,7 @@ function renderControls(): void {
   for (const hint of quickStartHints) setAttribute(hint, "data-quick-start-hint", quickStartHint());
   proxy.render(preferences.proxy, preferences.quickStart.proxy, statuses.proxy.mode !== "off", loaded);
   devices.render();
-  updateToolOrder(preferences.quickStart);
+  updateToolOrder(translate, preferences.pinned);
   if (!workerAction?.keepQuickStartLayout) {
     const canStartSelected = !unavailable &&
       (tools.some(({ id }) => preferences.quickStart[id] && canChangeTool(id, true)) || proxy.hasQuickStart());
@@ -809,7 +812,7 @@ async function save(next: Preferences): Promise<void> {
   const before = savedPreferences;
   const differs = (pick: (preferences: Preferences) => unknown) =>
     JSON.stringify(pick(next)) !== JSON.stringify(pick(before));
-  const choice = <Key extends PreferenceChoice | "schedule">(
+  const choice = <Key extends PreferenceChoice | "schedule" | "pinned">(
     key: Key, send: (value: Preferences[Key]) => Promise<void>,
   ): SaveStep => ({
     changed: differs(preferences => preferences[key]),
@@ -835,6 +838,7 @@ async function save(next: Preferences): Promise<void> {
     })),
     choice("startToolsOnLaunch", desktop.saveStartToolsOnLaunch),
     choice("hideWhileSharing", desktop.saveHideWhileSharing),
+    choice("pinned", desktop.savePinnedTools),
     choice("seenVersion", desktop.saveSeenVersion),
     proxyPart("role", desktop.saveProxyRole),
     proxyPart("port", desktop.saveProxyPort),

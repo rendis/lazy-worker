@@ -66,6 +66,8 @@ export type Preferences = {
   proxy: ProxySettings;
   /** What the Mac does with its lid closed while Caffeinate is on. */
   lidAwake: LidMode;
+  /** The tools pinned to the front of Tools, in the order they were pinned. */
+  pinned: ToolId[];
   /** The version whose changes the user has seen. `null` until the setup or What’s new closes. */
   seenVersion: string | null;
 };
@@ -195,6 +197,7 @@ export const defaults: Preferences = {
   startToolsOnLaunch: false,
   hideWhileSharing: true,
   lidAwake: "sleep",
+  pinned: [],
   seenVersion: null,
   caffeinate: {
     mode: "untilStopped",
@@ -883,6 +886,10 @@ export const desktop = {
   async saveHideWhileSharing(enabled: boolean): Promise<void> {
     if (native) return call("setHideWhileSharing", { enabled });
     savePreview(current => ({ ...current, hideWhileSharing: enabled }));
+  },
+  async savePinnedTools(tools: ToolId[]): Promise<void> {
+    if (native) return call("setPinnedTools", { tools });
+    savePreview(current => ({ ...current, pinned: [...tools] }));
   },
   async saveSeenVersion(version: string | null): Promise<void> {
     if (native) return call("setSeenVersion", { version });

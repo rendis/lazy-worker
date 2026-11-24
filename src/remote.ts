@@ -46,7 +46,7 @@ const localOnly = new Set([
 /** The requests that need the Control permission. Only the ones that a control of this window sends. */
 const needsControl = new Set([
   "setToolActive", "setQuickStart", "setDuration", "setSchedule", "saveCaffeinateSettings", "setLidMode",
-  "setStartToolsOnLaunch", "setHideWhileSharing", "setLoginLaunch",
+  "setStartToolsOnLaunch", "setHideWhileSharing", "setLoginLaunch", "setPinnedTools",
 ]);
 
 /** The requests that need the Applications permission. Keep it equal to `Access::Applications` in `dispatch.rs`. */

@@ -165,6 +165,7 @@ pub enum Request {
     SetStartToolsOnLaunch { enabled: bool },
     SetHideWhileSharing { enabled: bool },
     SetSeenVersion { version: Option<String> },
+    SetPinnedTools { tools: Vec<ToolId> },
     SaveCaffeinateSettings { settings: CaffeinateSettings },
     SetProxyRole { role: Role },
     SetProxyPort { port: u16 },
@@ -252,6 +253,7 @@ impl Request {
             | Self::SetSchedule { .. }
             | Self::SetHideWhileSharing { .. }
             | Self::SetSeenVersion { .. }
+            | Self::SetPinnedTools { .. }
             | Self::SaveCaffeinateSettings { .. }
             | Self::SetLoginLaunch { .. }
             | Self::SetLidMode { .. }
@@ -372,6 +374,7 @@ impl Request {
             | Self::SetStartToolsOnLaunch { .. }
             | Self::SetHideWhileSharing { .. }
             | Self::SetSeenVersion { .. }
+            | Self::SetPinnedTools { .. }
             | Self::SaveCaffeinateSettings { .. }
             | Self::SetProxyRole { .. }
             | Self::SetProxyPort { .. }
@@ -449,6 +452,7 @@ impl Request {
             | Self::SetStartToolsOnLaunch { .. }
             | Self::SetHideWhileSharing { .. }
             | Self::SetSeenVersion { .. }
+            | Self::SetPinnedTools { .. }
             | Self::SaveCaffeinateSettings { .. }
             | Self::SetProxyRole { .. }
             | Self::SetProxyPort { .. }
@@ -1111,6 +1115,22 @@ async fn run(
         Request::SetHideWhileSharing { enabled } => {
             update(app, controller, |p| p.hide_while_sharing = enabled)
         }
+        Request::SetPinnedTools { tools } => {
+            // Known tools only (the type), each once, and no more than there are tools.
+            if tools.len() > 3 || tools.iter().enumerate().any(|(at, tool)| tools[..at].contains(tool)) {
+                return Err("saveFailed");
+            }
+            let names = tools
+                .iter()
+                .map(|tool| match tool {
+                    ToolId::Activity => "activity",
+                    ToolId::Caffeinate => "caffeinate",
+                    ToolId::Proxy => "proxy",
+                })
+                .map(String::from)
+                .collect();
+            update(app, controller, |p| p.pinned = names)
+        }
         Request::SetSeenVersion { version } => {
             update(app, controller, |p| p.seen_version = version)
         }
@@ -1474,6 +1494,14 @@ mod tests {
             request(json!({"command": "setSeenVersion", "args": {"version": null}})),
             Request::SetSeenVersion { version: None }
         ));
+        assert!(matches!(
+            request(json!({"command": "setPinnedTools", "args": {"tools": ["proxy", "activity"]}})),
+            Request::SetPinnedTools { ref tools } if tools == &[ToolId::Proxy, ToolId::Activity]
+        ));
+        assert!(serde_json::from_value::<Request>(
+            json!({"command": "setPinnedTools", "args": {"tools": ["nothing"]}})
+        )
+        .is_err());
         assert!(serde_json::from_value::<Request>(
             json!({"command": "savePreferences", "args": {}})
         )
@@ -1784,6 +1812,16 @@ mod tests {
         assert_eq!(allowed(CONTROL, &off, &preferences), Ok(()));
         assert_eq!(allowed(NONE, &off, &preferences), Err("notPermitted"));
         assert!(!on.is_read() && !off.is_read());
+    }
+
+    #[test]
+    fn pinning_tools_is_remote_control_and_not_a_read() {
+        let preferences = Preferences::default();
+        let pin = request(json!({"command": "setPinnedTools", "args": {"tools": ["caffeinate"]}}));
+        assert_eq!(allowed(CONTROL, &pin, &preferences), Ok(()));
+        assert_eq!(allowed(NONE, &pin, &preferences), Err("notPermitted"));
+        assert_eq!(allowed(Origin::Local, &pin, &preferences), Ok(()));
+        assert!(!pin.is_read() && !pin.runs_on_viewer());
     }
 
     #[test]

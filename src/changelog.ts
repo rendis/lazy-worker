@@ -10,6 +10,26 @@ export type Release = { version: string; date: string; changes: readonly Change[
 
 export const releases: readonly Release[] = [
   {
+    version: "0.6.9",
+    date: "2026-11-23",
+    changes: [
+      { en: "Start selected and Stop selected sit beside the Tools title, so the cards stay still when you start or stop a tool.",
+        es: "Iniciar selección y Apagar selección están junto al título Herramientas, así las tarjetas no se mueven al iniciar o detener una herramienta." },
+    ],
+  },
+  {
+    version: "0.6.8",
+    date: "2026-11-23",
+    changes: [
+      { en: "Tools shows each tool as a compact card, three to a row.",
+        es: "Herramientas muestra cada herramienta como una tarjeta compacta, tres por fila." },
+      { en: "Pin a card to keep it at the front. Unpin it and it returns to its place.",
+        es: "Fija una tarjeta para tenerla al principio. Al desfijarla, vuelve a su lugar." },
+      { en: "The proxy card is now called AI Proxy Server and opens its module.",
+        es: "La tarjeta del proxy se llama ahora Servidor proxy de IA y abre su módulo." },
+    ],
+  },
+  {
     version: "0.6.7",
     date: "2026-11-23",
     changes: [
