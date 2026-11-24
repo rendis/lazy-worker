@@ -6,6 +6,7 @@
 //! closes it, and the line goes with it. Nothing is saved before the controller proved the code.
 
 use super::{
+    advert::{self, Advert, Advertiser, Registration},
     authorized_keys::{self, AuthorizedKeys},
     identity::{parse_public_key, DeviceId},
     log::{Entry, Log},
@@ -82,6 +83,9 @@ pub struct Pairing {
     /// Wakes the timer of a window when the window changes.
     changed: Condvar,
     busy: AtomicBool,
+    /// Announces the open window on the local network, and only while it is open.
+    advertiser: Arc<dyn Advertiser>,
+    registration: Mutex<Option<Registration>>,
 }
 
 /// Holds the one session slot. Frees it however the session ends.
@@ -155,6 +159,8 @@ impl Pairing {
             state: Mutex::new(Inner::default()),
             changed: Condvar::new(),
             busy: AtomicBool::new(false),
+            advertiser: Arc::new(advert::System),
+            registration: Mutex::new(None),
         }
     }
 
@@ -171,7 +177,42 @@ impl Pairing {
             host_key_file,
             account: || Some("me".to_owned()),
             length,
+            // A test announces nothing on the network unless it asks for it.
+            advertiser: Arc::new(advert::Silent),
             ..Self::new(peers, log, keys, own)
+        }
+    }
+
+    #[cfg(test)]
+    pub fn with_advertiser(self, advertiser: Arc<dyn Advertiser>) -> Self {
+        Self { advertiser, ..self }
+    }
+
+    /// Makes the announcement match the window: registered while a window is open, gone otherwise.
+    /// Every place that opens or ends a window calls it after the window changed, so the registration
+    /// can never outlive the window. The registration lock is taken before the state lock, and no
+    /// code takes them the other way round.
+    fn sync_advert(&self) {
+        let mut registration = self
+            .registration
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let Ok(window) = self.current() else {
+            // Dropping the registration deregisters the service.
+            registration.take();
+            return;
+        };
+        if registration.is_some() {
+            return;
+        }
+        if let Ok(own) = (self.own)() {
+            *registration = self.advertiser.register(
+                &own.name,
+                &Advert {
+                    account: window.account,
+                    id: own.id.as_str().to_owned(),
+                },
+            );
         }
     }
 
@@ -214,6 +255,7 @@ impl Pairing {
             self.changed.notify_all();
             generation
         };
+        self.sync_advert();
         let timer = Arc::clone(self);
         let spawned = thread::Builder::new()
             .name("remote-pairing-timer".into())
@@ -251,6 +293,7 @@ impl Pairing {
         state.generation += 1;
         drop(state);
         self.changed.notify_all();
+        self.sync_advert();
         let _ = self.remove_line();
     }
 
@@ -270,6 +313,7 @@ impl Pairing {
             state.generation += 1;
         }
         self.changed.notify_all();
+        self.sync_advert();
         self.remove_line()
     }
 
@@ -392,6 +436,7 @@ impl Pairing {
         };
         if exhausted {
             self.changed.notify_all();
+            self.sync_advert();
             let _ = self.remove_line();
         }
         // The name is only a claim until the code is proved, so the log keeps the id alone.
@@ -419,6 +464,7 @@ impl Pairing {
             state.generation += 1;
         }
         self.changed.notify_all();
+        self.sync_advert();
         // A line that stays is harmless: it expires, and the next start removes it.
         let _ = self.remove_line();
         Ok(())

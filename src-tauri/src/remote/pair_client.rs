@@ -312,6 +312,14 @@ mod tests {
     }
 
     fn rig_with(label: &str, length: Duration) -> Rig {
+        rig_full(label, length, Arc::new(crate::remote::advert::Silent))
+    }
+
+    fn rig_full(
+        label: &str,
+        length: Duration,
+        advertiser: Arc<dyn crate::remote::advert::Advertiser>,
+    ) -> Rig {
         let base = scratch(label);
         let home = base.join("home");
         let remote = base.join("remote");
@@ -334,7 +342,7 @@ mod tests {
             Arc::new(move || Ok(target.clone())),
             host_key_file,
             length,
-        ));
+        ).with_advertiser(advertiser));
         Rig {
             store: Store::open(layout.devices_file()).unwrap(),
             host_key: HostKey::new("ssh-ed25519", HOST_KEY.split(' ').nth(1).unwrap()).unwrap(),
@@ -551,6 +559,106 @@ mod tests {
             thread::sleep(Duration::from_millis(20));
         }
         assert_eq!(rig.plain(&code).err(), Some("pairingClosed"));
+    }
+
+    /// Counts the live registrations, and keeps what each one announced.
+    #[derive(Default)]
+    struct Counting {
+        live: Arc<std::sync::atomic::AtomicUsize>,
+        total: std::sync::atomic::AtomicUsize,
+        seen: std::sync::Mutex<Vec<(String, crate::remote::advert::Advert)>>,
+    }
+
+    struct Live(Arc<std::sync::atomic::AtomicUsize>);
+
+    impl Drop for Live {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    impl crate::remote::advert::Advertiser for Counting {
+        fn register(
+            &self,
+            name: &str,
+            advert: &crate::remote::advert::Advert,
+        ) -> Option<crate::remote::advert::Registration> {
+            use std::sync::atomic::Ordering::SeqCst;
+            self.live.fetch_add(1, SeqCst);
+            self.total.fetch_add(1, SeqCst);
+            self.seen.lock().unwrap().push((name.to_owned(), advert.clone()));
+            Some(Box::new(Live(self.live.clone())))
+        }
+    }
+
+    fn counted(label: &str, length: Duration) -> (Rig, Arc<Counting>) {
+        let counting = Arc::new(Counting::default());
+        (rig_full(label, length, counting.clone()), counting)
+    }
+
+    fn live(counting: &Counting) -> usize {
+        counting.live.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[test]
+    fn the_announcement_lives_exactly_as_long_as_the_window_and_holds_no_secret() {
+        let (rig, counting) = counted("advert-close", Duration::from_secs(600));
+        assert_eq!(live(&counting), 0, "nothing is announced while no window is open");
+        let code = rig.open(true, true, true);
+        assert_eq!(live(&counting), 1);
+        {
+            let seen = counting.seen.lock().unwrap();
+            assert_eq!(seen[0].0, "Studio");
+            assert_eq!(seen[0].1.account, "me");
+            assert_eq!(seen[0].1.id, ID_B);
+            let bytes = crate::remote::advert::encode_txt(&seen[0].1).unwrap();
+            assert!(!String::from_utf8_lossy(&bytes).contains(&code));
+        }
+        // A new code in the same window keeps one announcement.
+        rig.open(true, true, true);
+        assert_eq!(live(&counting), 1);
+        rig.pairing.close().unwrap();
+        assert_eq!(live(&counting), 0);
+        // Closing again, with no window, changes nothing.
+        rig.pairing.close().unwrap();
+        assert_eq!(live(&counting), 0);
+        rig.open(true, true, true);
+        assert_eq!(live(&counting), 1);
+    }
+
+    #[test]
+    fn the_announcement_ends_on_success_on_three_wrong_codes_and_on_expiry() {
+        let (rig, counting) = counted("advert-end", Duration::from_secs(600));
+        let code = rig.open(true, true, true);
+        assert_eq!(live(&counting), 1);
+        rig.plain(&code).unwrap();
+        assert_eq!(live(&counting), 0, "success ends it");
+
+        let code = rig.open(true, true, true);
+        let wrong = if code == "000000" { "000001" } else { "000000" };
+        for _ in 0..2 {
+            assert_eq!(rig.plain(wrong).err(), Some("wrongCode"));
+            assert_eq!(live(&counting), 1);
+        }
+        assert_eq!(rig.plain(wrong).err(), Some("wrongCode"));
+        assert_eq!(live(&counting), 0, "the third wrong code ends it");
+
+        let (rig, counting) = counted("advert-expire", Duration::from_millis(150));
+        rig.open(true, true, true);
+        assert_eq!(live(&counting), 1);
+        let start = Instant::now();
+        while live(&counting) != 0 {
+            assert!(start.elapsed() < Duration::from_secs(5), "the timer did not end the announcement");
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!rig.pairing.state().open);
+    }
+
+    #[test]
+    fn a_window_that_cannot_be_announced_still_pairs() {
+        let rig = rig("advert-failed");
+        let code = rig.open(true, true, true);
+        rig.plain(&code).unwrap();
     }
 
     #[test]

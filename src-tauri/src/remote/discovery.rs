@@ -2,10 +2,16 @@
 //!
 //! We ask the system resolver (`mDNSResponder`) through its `dns_sd` API, which is part of
 //! libSystem. We never open our own multicast socket, because that would compete with the system
-//! one, and we never announce a service. What a device announces is text from the network, so
+//! one, and we announce nothing here: the only service this device announces is the one of an open
+//! pairing window, which `advert.rs` registers. We also read that service on other devices, for the
+//! account name. What a device announces is text from the network, so
 //! every name and host is checked before it leaves this module.
 
-use super::{destination::Destination, peers::clean_name};
+use super::{
+    advert::{decode_txt, Advert, SERVICE_TYPE},
+    destination::Destination,
+    peers::clean_name,
+};
 use serde::Serialize;
 use std::time::Duration;
 
@@ -20,6 +26,25 @@ pub struct Found {
     pub name: String,
     pub host: String,
     pub port: u16,
+    /// What the pairing window of that device announces, when it has one open. It is a hint
+    /// from the network: the code is still needed to pair.
+    pub pairing: Option<Pairing>,
+}
+
+/// The account and the id that an open pairing window announced.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Pairing {
+    pub account: String,
+    pub id: String,
+}
+
+/// What a resolve of one service returned.
+#[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
+struct Raw {
+    name: String,
+    host: String,
+    port: u16,
+    txt: Vec<u8>,
 }
 
 /// Builds one entry from text that the network sent, or nothing when any part is not valid.
@@ -33,7 +58,22 @@ fn found_from(name: &str, host: &str, port: u16) -> Option<Found> {
         name: if name.is_empty() { host.clone() } else { name },
         host,
         port,
+        pairing: None,
     })
+}
+
+/// Puts each valid pairing announcement on the device of the same host. An announcement without a
+/// device of that host is dropped, and so is a second one for a host.
+#[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
+fn attach(mut found: Vec<Found>, adverts: Vec<Raw>) -> Vec<Found> {
+    for raw in adverts {
+        let Some(host) = found_from(&raw.name, &raw.host, raw.port.max(1)).map(|item| item.host) else { continue };
+        let Some(Advert { account, id }) = decode_txt(&raw.txt) else { continue };
+        for item in found.iter_mut().filter(|item| item.host == host && item.pairing.is_none()) {
+            item.pairing = Some(Pairing { account: account.clone(), id: id.clone() });
+        }
+    }
+    found
 }
 
 /// Drops this device and repeats, then sorts by name. One device answers once for each network
@@ -59,7 +99,15 @@ fn finish(found: Vec<Found>, own_host: Option<&str>) -> Vec<Found> {
 #[cfg(target_os = "macos")]
 pub fn discover() -> Result<Vec<Found>, &'static str> {
     let own = crate::proxy::network().hostname;
-    Ok(finish(dns_sd::browse(TIMEOUT)?, own.as_deref()))
+    // Both searches run at the same time, so the wait stays one `TIMEOUT`. A failed search for
+    // pairing windows only means that no account is filled in.
+    let pairing = std::thread::spawn(|| dns_sd::browse(SERVICE_TYPE, TIMEOUT));
+    let servers: Vec<Found> = dns_sd::browse("_ssh._tcp", TIMEOUT)?
+        .into_iter()
+        .filter_map(|raw| found_from(&raw.name, &raw.host, raw.port))
+        .collect();
+    let adverts = pairing.join().ok().and_then(Result::ok).unwrap_or_default();
+    Ok(attach(finish(servers, own.as_deref()), adverts))
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -78,7 +126,7 @@ pub fn discover() -> Result<Vec<Found>, &'static str> {
 /// - A callback only copies text out. A string that is not UTF-8 is skipped.
 #[cfg(target_os = "macos")]
 mod dns_sd {
-    use super::{found_from, Found, MAX_FOUND};
+    use super::{Raw, MAX_FOUND};
     use std::{
         cell::RefCell,
         ffi::{c_char, c_int, c_uint, c_void, CStr, CString},
@@ -163,8 +211,8 @@ mod dns_sd {
         interface: u32,
     }
 
-    /// An answer to a resolve: the host, and the port in host byte order.
-    type Resolved = (String, u16);
+    /// An answer to a resolve: the host, the port in host byte order, and the TXT record.
+    type Resolved = (String, u16, Vec<u8>);
 
     struct Resolving {
         service: Option<Service>,
@@ -197,7 +245,7 @@ mod dns_sd {
 
     extern "C" fn on_resolve(
         _: Ref, _flags: Flags, _interface: u32, error: ErrorCode, _full: *const c_char,
-        host: *const c_char, port: u16, _txt_len: u16, _txt: *const u8, context: *mut c_void,
+        host: *const c_char, port: u16, txt_len: u16, txt: *const u8, context: *mut c_void,
     ) {
         if error != NO_ERROR {
             return;
@@ -205,15 +253,21 @@ mod dns_sd {
         let Some(host) = text(host) else { return };
         // SAFETY: `context` is the `RefCell` inside the `Rc` of a `Resolving`, which outlives its ref.
         let answer = unsafe { &*(context as *const RefCell<Option<Resolved>>) };
+        let txt = if txt.is_null() {
+            Vec::new()
+        } else {
+            // SAFETY: the system passes `txt_len` bytes that live during the callback.
+            unsafe { std::slice::from_raw_parts(txt, usize::from(txt_len)) }.to_vec()
+        };
         // The port arrives in network byte order.
-        *answer.borrow_mut() = Some((host.to_owned(), u16::from_be(port)));
+        *answer.borrow_mut() = Some((host.to_owned(), u16::from_be(port), txt));
     }
 
-    /// Browses `_ssh._tcp` in `local.` and resolves each result until the deadline.
-    pub fn browse(timeout: Duration) -> Result<Vec<Found>, &'static str> {
+    /// Browses `regtype` in `local.` and resolves each result until the deadline.
+    pub fn browse(regtype: &str, timeout: Duration) -> Result<Vec<Raw>, &'static str> {
         let deadline = Instant::now() + timeout;
         let instances: RefCell<Vec<Instance>> = RefCell::new(Vec::new());
-        let regtype = CString::new("_ssh._tcp").map_err(|_| "discoveryFailed")?;
+        let regtype = CString::new(regtype).map_err(|_| "discoveryFailed")?;
         let domain = CString::new("local.").map_err(|_| "discoveryFailed")?;
         let mut reference: Ref = ptr::null_mut();
         // SAFETY: both strings live through the call, and the context is `instances`, which
@@ -229,7 +283,7 @@ mod dns_sd {
         }
         let browser = Service(reference);
         let mut resolving: Vec<Resolving> = Vec::new();
-        let mut done: Vec<Found> = Vec::new();
+        let mut done: Vec<Raw> = Vec::new();
         let mut started = 0;
 
         loop {
@@ -296,8 +350,8 @@ mod dns_sd {
                 let entry = &resolving[*index];
                 let alive = entry.service.as_ref().is_some_and(Service::process);
                 let answer = entry.answer.borrow_mut().take();
-                if let Some((host, port)) = &answer {
-                    done.extend(found_from(&entry.name, host, *port));
+                if let Some((host, port, txt)) = &answer {
+                    done.push(Raw { name: entry.name.clone(), host: host.clone(), port: *port, txt: txt.clone() });
                 }
                 // One answer is enough. Dropping the service deallocates its ref.
                 if answer.is_some() || !alive {
@@ -314,7 +368,40 @@ mod tests {
     use super::*;
 
     fn found(name: &str, host: &str, port: u16) -> Found {
-        Found { name: name.into(), host: host.into(), port }
+        Found { name: name.into(), host: host.into(), port, pairing: None }
+    }
+
+    const ID: &str = "0123456789abcdef0123456789abcdef";
+
+    fn raw(host: &str, txt: Vec<u8>) -> Raw {
+        Raw { name: "Studio".into(), host: host.into(), port: 22, txt }
+    }
+
+    fn txt(account: &str) -> Vec<u8> {
+        crate::remote::advert::encode_txt(&Advert { account: account.into(), id: ID.into() }).unwrap()
+    }
+
+    #[test]
+    fn an_announcement_is_matched_to_the_device_of_the_same_host() {
+        let list = vec![found("A", "a.local", 22), found("B", "b.local", 22)];
+        let out = attach(list, vec![raw("B.local.", txt("rey")), raw("c.local", txt("zed"))]);
+        assert_eq!(out[0].pairing, None);
+        assert_eq!(out[1].pairing, Some(Pairing { account: "rey".into(), id: ID.into() }));
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn a_bad_record_or_host_attaches_nothing_and_the_first_good_record_wins() {
+        let list = vec![found("A", "a.local", 22)];
+        let bad = vec![
+            raw("a.local", b"junk".to_vec()),
+            raw("a.local", txt("rey")[..5].to_vec()),
+            raw("-oProxyCommand=x", txt("rey")),
+            raw("", txt("rey")),
+        ];
+        assert_eq!(attach(list.clone(), bad)[0].pairing, None);
+        let two = attach(list, vec![raw("a.local", txt("first")), raw("a.local", txt("second"))]);
+        assert_eq!(two[0].pairing.as_ref().unwrap().account, "first");
     }
 
     #[test]

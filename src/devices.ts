@@ -1088,7 +1088,12 @@ export function mountDevices(host: Host) {
   let scanning = false;
   let scanError: Message | undefined;
   let scanSequence = 0;
-  let selected: { name: string; host: string; port: number } | undefined;
+  type Chosen = { name: string; host: string; port: number; pairing: DiscoveredDevice["pairing"] };
+  let selected: Chosen | undefined;
+  let step: "choose" | "pair" = "choose";
+  /** The search that repeats while the list shows, so a pairing window that opens later is found. */
+  let rescanTimer: number | undefined;
+  const rescanEvery = 3000;
   let pairBusy = false;
   let pairLocked = false;
   let pairErrorKey: Message | undefined;
@@ -1124,11 +1129,16 @@ export function mountDevices(host: Host) {
     class: "field pair-field", type: "text", autocomplete: "username", autocapitalize: "off", spellcheck: "false", maxlength: "32",
   });
   const accountInfo = h("span", { class: "tip option-info", tabindex: "0", role: "img" }, icon("info"));
+  // The account that an open pairing window announced is shown as text, with a lock, and cannot be changed.
+  const accountFixedName = h("span", { class: "pair-account-name" });
+  const accountFixed = h("span", { class: "tip pair-account-fixed", tabindex: "0", hidden: true },
+    accountFixedName, icon("lock-keyhole"));
+  bind(accountFixed, "addAccountShown", "data-tip");
   bind(accountInfo, "addAccountHelp", "data-tip");
   bind(accountInfo, "addAccountHelp", "aria-label");
   bind(accountField, "addAccountPlaceholder", "placeholder");
   bind(accountField, "addAccount", "aria-label");
-  const account = overlayRow("user-round", "addAccount", "label", accountField);
+  const account = overlayRow("user-round", "addAccount", "label", accountField, accountFixed);
   account.text.append(" ", accountInfo);
   const accountError = note("", true);
   const codeField = h("input", {
@@ -1159,13 +1169,27 @@ export function mountDevices(host: Host) {
   };
 
   function foundRow(device: Found): Row<Found> {
+    let latest = device;
     const where = device.port === 22 ? device.host : `${device.host}:${device.port}`;
+    // The line opens and closes when the device opens or closes its pairing window, so the row keeps its element.
+    const open = h("div", { class: "collapse", inert: true },
+      h("div", {}, h("span", { class: "setting-note found-pairing" }, icon("radio"), t("addPairingOpen"))));
     const root = h("button", { type: "button", class: "device-row found-row" },
       kindIcon("desktop"),
-      h("div", { class: "device-row-text" }, h("strong", {}, device.name), h("span", { class: "setting-note" }, where)),
+      h("div", { class: "device-row-text" }, h("strong", {}, device.name), h("span", { class: "setting-note" }, where), open),
       icon("chevron-right"));
-    root.addEventListener("click", () => choose({ name: device.name, host: device.host, port: device.port }));
-    return { root, update: () => undefined };
+    root.addEventListener("click", () => choose({
+      name: latest.name, host: latest.host, port: latest.port, pairing: latest.pairing,
+    }));
+    return {
+      root,
+      update(next) {
+        latest = next;
+        const announced = next.pairing !== null;
+        open.toggleAttribute("data-open", announced);
+        open.toggleAttribute("inert", !announced);
+      },
+    };
   }
 
   function settleIcons(): void {
@@ -1186,10 +1210,14 @@ export function mountDevices(host: Host) {
     settleIcons();
   }
 
-  async function scan(): Promise<void> {
+  /** Searches the network. A quiet search is the repeat of the list: it shows no progress, and it keeps the list when it fails. */
+  async function scan(quiet = false): Promise<void> {
+    window.clearTimeout(rescanTimer);
     const current = ++scanSequence;
-    scanning = true;
-    renderFound();
+    if (!quiet) {
+      scanning = true;
+      renderFound();
+    }
     try {
       const result = await desktop.discoverDevices();
       if (current !== scanSequence) return;
@@ -1197,11 +1225,17 @@ export function mountDevices(host: Host) {
       scanError = undefined;
     } catch {
       if (current !== scanSequence) return;
-      found = [];
-      scanError = "discoveryFailed";
+      if (!quiet) {
+        found = [];
+        scanError = "discoveryFailed";
+      }
     }
     scanning = false;
     renderFound();
+    // Repeat while the list shows, so a window that opens after this one is found.
+    rescanTimer = window.setTimeout(() => {
+      if (addOverlay.isOpen() && step === "choose") void scan(true);
+    }, rescanEvery);
   }
 
   /** A name or an address, with an optional port. The app checks it again before it connects. */
@@ -1254,21 +1288,36 @@ export function mountDevices(host: Host) {
     if (pairButton.disabled !== !ready) pairButton.disabled = !ready;
     pairButton.setAttribute("aria-busy", String(pairBusy));
     for (const field of [accountField, codeField]) field.readOnly = pairBusy;
+    const fixed = selected?.pairing?.account;
+    if (fixed !== undefined) {
+      setText(accountFixedName, fixed);
+      setAttribute(accountFixed, "aria-label", `${t("addAccount")}: ${fixed}. ${t("addAccountShown")}`);
+    }
+    accountField.hidden = fixed !== undefined;
+    accountFixed.hidden = fixed === undefined;
+    accountInfo.hidden = fixed !== undefined;
     setText(summaryName, selected?.name ?? "");
     setText(summaryWhere, selected ? (selected.port === 22 ? selected.host : `${selected.host}:${selected.port}`) : "");
   }
 
-  function showStep(step: "choose" | "pair"): void {
-    only([chooseStep, pairStep], [step === "choose" ? chooseStep : pairStep]);
-    setHidden(addBack, step === "choose");
+  function showStep(next: "choose" | "pair"): void {
+    step = next;
+    only([chooseStep, pairStep], [next === "choose" ? chooseStep : pairStep]);
+    setHidden(addBack, next === "choose");
     renderPairForm();
   }
 
-  function choose(device: { name: string; host: string; port: number }): void {
+  function choose(device: Chosen): void {
+    // An answer of the search that is still running must not change the list under this step.
+    scanSequence += 1;
+    scanning = false;
+    window.clearTimeout(rescanTimer);
     selected = device;
     pairLocked = false;
     pairErrorKey = undefined;
     codeField.value = "";
+    // The account of an open pairing window fills the field. Without one, the field is empty and the user types it.
+    accountField.value = device.pairing?.account ?? "";
     showStep("pair");
     (accountField.value ? codeField : accountField).focus();
   }
@@ -1279,12 +1328,15 @@ export function mountDevices(host: Host) {
     selected = undefined;
     codeField.value = "";
     pairErrorKey = undefined;
+    accountField.value = "";
     showStep("choose");
     addressField.focus();
+    void scan(true);
   }
 
   const addOverlay = overlay(addWindow, addClose, () => {
     scanSequence += 1;
+    window.clearTimeout(rescanTimer);
     scanning = false;
     addAttempt += 1;
     pairBusy = false;
@@ -1340,7 +1392,7 @@ export function mountDevices(host: Host) {
   addressForm.addEventListener("submit", event => {
     event.preventDefault();
     const parsed = parseAddress(addressField.value);
-    if (parsed && parsed !== "invalid") choose({ name: parsed.host, host: parsed.host, port: parsed.port ?? 22 });
+    if (parsed && parsed !== "invalid") choose({ name: parsed.host, host: parsed.host, port: parsed.port ?? 22, pairing: null });
   });
   pairStep.addEventListener("submit", event => {
     event.preventDefault();

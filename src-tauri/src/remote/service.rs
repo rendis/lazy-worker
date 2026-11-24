@@ -564,6 +564,18 @@ impl Service {
         shell::copy_command(&running.layout, &destination, &peer)
     }
 
+    /// Runs the text of an action in the default terminal of the user, the way an action runs, so the
+    /// command can be tried before it is saved. It writes a file and starts a program, so call it
+    /// off the main thread. Only the person at this device sends it.
+    pub fn test_action(&self, command: &str) -> Result<(), &'static str> {
+        let running = self.running()?;
+        shell::test_in_terminal(
+            &running.layout.remote_dir().join("terminal"),
+            &crate::actions::login_shell(),
+            command,
+        )
+    }
+
     pub fn pairing_state(&self) -> devices::Pairing {
         self.running()
             .map_or_else(|_| devices::Pairing::closed(), |running| running.pairing.state())

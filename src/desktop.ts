@@ -171,7 +171,11 @@ export type PairingState = { open: boolean; expires: number | null; attemptsLeft
 /** What this device shows while it waits for another one to pair. `account` is the name the other device types. */
 export type OpenedPairing = { code: string; account: string; expires: number };
 /** A device that announced an SSH server on this network. */
-export type DiscoveredDevice = { name: string; host: string; port: number };
+export type DiscoveredDevice = {
+  name: string; host: string; port: number;
+  /** What its open pairing window announced on this network. It is a hint: the code is still needed to pair. */
+  pairing: { account: string; id: string } | null;
+};
 export type PairingPermissions = Pick<Controller["permissions"], "control" | "applications" | "actions">;
 export type DevicesOverview = {
   thisDevice: {
@@ -1047,10 +1051,26 @@ export const desktop = {
   async discoverDevices(): Promise<DiscoveredDevice[]> {
     if (native) return call("discoverDevices");
     await new Promise(resolve => setTimeout(resolve, 1400));
+    // The studio has a pairing window open. The living room one does not, so its account is typed.
     return [
-      { name: "iMac del estudio", host: "imac-del-estudio.local", port: 22 },
-      { name: "Mac mini de la sala", host: "mac-mini-de-la-sala.local", port: 22 },
+      {
+        name: "iMac del estudio", host: "imac-del-estudio.local", port: 22,
+        pairing: { account: "estudio", id: "0123456789abcdef0123456789abcdef" },
+      },
+      { name: "Mac mini de la sala", host: "mac-mini-de-la-sala.local", port: 22, pairing: null },
     ];
+  },
+  /** Runs the text of an action form in Terminal, the way an action runs, before it is saved. Only this device does it. */
+  async testActionCommand(command: string): Promise<void> {
+    if (native) return call("testActionCommand", { command });
+    if (previewQuery.has("terminal-fails")) throw "terminalFailed";
+    if (command.trim() === "") throw "actionInvalid";
+  },
+  /** The line that runs the text of an action form in any terminal. Rust writes it, so the quoting is tested once. */
+  async actionCommandLine(command: string): Promise<string> {
+    if (native) return call("actionCommandLine", { command });
+    if (command.trim() === "") throw "actionInvalid";
+    return `'/bin/zsh' -l -c '${command.replace(/'/g, "'\\''")}'`;
   },
   /** Opens a window of ten minutes and returns the code to show. The permissions are those this device grants. */
   async openPairing(permissions: PairingPermissions): Promise<OpenedPairing> {

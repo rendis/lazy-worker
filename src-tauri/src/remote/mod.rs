@@ -4,6 +4,7 @@
 //! the keys we pinned. Text from outside never becomes an SSH option or a remote command.
 
 pub mod access;
+pub mod advert;
 pub mod authorized_keys;
 pub mod client;
 pub mod controlled;

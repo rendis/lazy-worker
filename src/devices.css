@@ -231,6 +231,16 @@
 .found-row:hover { background: var(--glass); }
 .found-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .pair-field { width: 250px; }
+.found-pairing { display: inline-flex; align-items: center; gap: 6px; color: var(--online); font-weight: 600; }
+.found-pairing .lucide { width: 13px; height: 13px; }
+.pair-account-fixed {
+  display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; width: 250px; min-height: 36px;
+  padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--secondary); font-weight: 600;
+}
+.pair-account-fixed[hidden] { display: none; }
+.pair-account-fixed .lucide { flex: none; width: 15px; height: 15px; }
+.pair-account-name { overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
+.pair-field[hidden], .option-info[hidden] { display: none; }
 .pair-code-field { width: 9.5ch; height: 40px; font-size: 22px; font-weight: 650; letter-spacing: .12em; text-align: center; }
 .icon-button[aria-busy="true"] .lucide { animation: rescan-spin 1s linear infinite; }
 @keyframes rescan-spin { to { transform: rotate(360deg); } }
@@ -292,8 +302,9 @@
 .action-body [hidden] { display: none; }
 .action-body .collapse .setting-note { padding: 8px 2px; }
 .action-field { display: grid; gap: 8px; padding: 10px 2px; border-bottom: 1px solid var(--hairline); }
-.action-field > .setting-label { display: flex; align-items: center; gap: 12px; }
-.action-field > .setting-label .lucide { width: 18px; height: 18px; color: var(--secondary); }
+.action-field-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.action-field-head > .setting-label { display: flex; align-items: center; gap: 12px; }
+.action-field-head > .setting-label .lucide { width: 18px; height: 18px; color: var(--secondary); }
 .action-name { width: 300px; max-width: 100%; }
 .action-command {
   width: 100%;

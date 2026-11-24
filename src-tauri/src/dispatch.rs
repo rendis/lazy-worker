@@ -228,6 +228,11 @@ pub enum Request {
     OpenShell { id: String },
     /// The single-line ssh command of that shell, to copy and paste in any terminal. Same rule as `OpenShell`.
     ShellCommand { id: String },
+    /// Runs the command text of an action form in Terminal, the way an action runs, before it is saved.
+    /// Only the person at this device sends it, from the main window.
+    TestActionCommand { command: String },
+    /// The line that runs that command in any terminal, to copy. Same rule as `TestActionCommand`.
+    ActionCommandLine { command: String },
     /// Sends one of a few requests to a paired device, for the Devices view.
     RemoteCall { id: String, request: Value },
 }
@@ -334,6 +339,8 @@ impl Request {
             | Self::DismissKeysWarning { .. }
             | Self::OpenShell { .. }
             | Self::ShellCommand { .. }
+            | Self::TestActionCommand { .. }
+            | Self::ActionCommandLine { .. }
             | Self::RequestActivityAccessibility => Access::LocalOnly,
         }
     }
@@ -415,6 +422,8 @@ impl Request {
             | Self::DismissKeysWarning { .. }
             | Self::OpenShell { .. }
             | Self::ShellCommand { .. }
+            | Self::TestActionCommand { .. }
+            | Self::ActionCommandLine { .. }
             | Self::RemoteCall { .. } => false,
         }
     }
@@ -494,6 +503,8 @@ impl Request {
             | Self::DismissKeysWarning { .. }
             | Self::OpenShell { .. }
             | Self::ShellCommand { .. }
+            | Self::TestActionCommand { .. }
+            | Self::ActionCommandLine { .. }
             | Self::RemoteCall { .. } => false,
         }
     }
@@ -509,6 +520,8 @@ impl Request {
                 | Self::SetPinnedApps { .. }
                 | Self::OpenShell { .. }
                 | Self::ShellCommand { .. }
+                | Self::TestActionCommand { .. }
+                | Self::ActionCommandLine { .. }
         )
     }
 
@@ -801,6 +814,30 @@ async fn run(
             #[cfg(not(unix))]
             {
                 let _ = id;
+                Err("unsupported")
+            }
+        }
+        Request::TestActionCommand { command } => {
+            #[cfg(unix)]
+            return tauri::async_runtime::spawn_blocking({
+                let app = app.clone();
+                move || app.state::<crate::remote::service::Service>().test_action(&command)
+            })
+            .await
+            .map_err(|_| "terminalFailed")?
+            .map(|()| Value::Null);
+            #[cfg(not(unix))]
+            {
+                let _ = command;
+                Err("unsupported")
+            }
+        }
+        Request::ActionCommandLine { command } => {
+            #[cfg(unix)]
+            return crate::remote::shell::action_line(&crate::actions::login_shell(), &command).map(Value::String);
+            #[cfg(not(unix))]
+            {
+                let _ = command;
                 Err("unsupported")
             }
         }
@@ -1886,6 +1923,8 @@ mod tests {
             json!({"command": "dismissKeysWarning", "args": {"id": 1}}),
             json!({"command": "openShell", "args": {"id": id}}),
             json!({"command": "shellCommand", "args": {"id": id}}),
+            json!({"command": "testActionCommand", "args": {"command": "echo hi"}}),
+            json!({"command": "actionCommandLine", "args": {"command": "echo hi"}}),
         ] {
             let parsed = request(value.clone());
             for origin in [NONE, CONTROL, APPLICATIONS, ACTIONS, all] {
@@ -1904,6 +1943,14 @@ mod tests {
         let route = Route::Device(id.to_owned());
         assert_eq!(plan(&route, &request(json!({"command": "openShell", "args": {"id": id}}))), Plan::Refuse);
         assert_eq!(plan(&route, &request(json!({"command": "shellCommand", "args": {"id": id}}))), Plan::Refuse);
+        // Testing an action command runs on the Mac of the person at the main window, so a window of a device never sends it.
+        for value in [
+            json!({"command": "testActionCommand", "args": {"command": "ls"}}),
+            json!({"command": "actionCommandLine", "args": {"command": "ls"}}),
+        ] {
+            assert_eq!(plan(&route, &request(value.clone())), Plan::Refuse);
+            assert_eq!(plan(&Route::Local, &request(value)), Plan::Here);
+        }
         // A grant from such a window is not run here. It goes to the device, which answers `localOnly`.
         let grant = request(json!({"command": "grantShell", "args": {"id": id, "minutes": 5}}));
         assert_eq!(plan(&route, &grant), Plan::Forward(id.to_owned()));

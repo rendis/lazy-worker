@@ -181,6 +181,60 @@ pub fn copy_command(
     command_line(command.get_program(), &args)
 }
 
+/// `command` as one word inside single quotes. A quote becomes `'\''`, so the shell reads the text
+/// back exactly. Any other character, a newline included, is safe inside single quotes.
+pub fn quote_text(command: &str) -> String {
+    format!("'{}'", command.replace('\'', "'\\''"))
+}
+
+/// The line that runs an action's command the way an action runs: the login shell of the user, with
+/// `-l`, and the command as the one argument of `-c`. The command is the text the user typed.
+/// It is local, never from a remote origin.
+pub fn action_line(shell: &Path, command: &str) -> Result<String, &'static str> {
+    crate::actions::validate_command(command)?;
+    Ok(format!("{} -l -c {}", single_quote(shell.as_os_str())?, quote_text(command)))
+}
+
+/// The script that tests a command in a terminal: it removes itself, runs the line, and waits for a
+/// key, so the output can be read before the window closes. It does not `exec` the shell, because
+/// it must print after the command ends.
+pub fn test_script_text(script: &Path, shell: &Path, command: &str) -> Result<String, &'static str> {
+    Ok(format!(
+        "#!/bin/bash\nrm -f -- {}\n{}\nstatus=$?\nprintf '\\n[exit code %s] Press any key to close ' \"$status\"\nIFS= read -r -s -n 1 _\n",
+        single_quote(script.as_os_str())?,
+        action_line(shell, command)?
+    ))
+}
+
+/// Writes the test script in `dir`, a private directory, as a new file with mode 0700.
+pub fn write_test_script(dir: &Path, shell: &Path, command: &str) -> Result<PathBuf, &'static str> {
+    ensure_private_dir(dir)?;
+    sweep(dir);
+    let path = dir.join(format!(
+        "test-{}-{}.command",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    let text = test_script_text(&path, shell, command)?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o700)
+        .open(&path)
+        .map_err(|_| "remoteIo")?;
+    file.write_all(text.as_bytes()).map_err(|_| {
+        let _ = fs::remove_file(&path);
+        "remoteIo"
+    })?;
+    Ok(path)
+}
+
+/// Opens a test of `command` in the default terminal of the user.
+pub fn test_in_terminal(dir: &Path, shell: &Path, command: &str) -> Result<(), &'static str> {
+    let script = write_test_script(dir, shell, command)?;
+    open_in_terminal(&script)
+}
+
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
 /// Writes the script in `dir`, a private directory, as a new file with mode 0700. Old scripts that
@@ -219,7 +273,7 @@ fn sweep(dir: &Path) {
         let name = entry.file_name();
         let ours = name
             .to_str()
-            .is_some_and(|name| name.starts_with("shell-") && name.ends_with(".command"));
+            .is_some_and(|name| (name.starts_with("shell-") || name.starts_with("test-")) && name.ends_with(".command"));
         let old = entry
             .metadata()
             .and_then(|meta| meta.modified())
@@ -281,6 +335,81 @@ mod tests {
         let owned = args(list);
         let borrowed: Vec<&OsStr> = owned.iter().map(|arg| arg.as_os_str()).collect();
         script_text(Path::new(script), OsStr::new(program), &borrowed)
+    }
+
+    const TRICKY: [&str; 8] = [
+        "echo hi",
+        "echo 'it''s'",
+        "echo \"$HOME\" `id` $(id)",
+        "a\nb\n'c'\n",
+        "'",
+        "''",
+        "printf '%s' \"a\\\"b\" ; echo $? && ls | wc",
+        "é ü ñ 日本 \\ \t",
+    ];
+
+    #[test]
+    fn a_command_is_quoted_so_the_shell_reads_it_back_exactly() {
+        assert_eq!(quote_text("echo hi"), "'echo hi'");
+        assert_eq!(quote_text("it's"), "'it'\\''s'");
+        assert_eq!(quote_text("'"), "''\\'''");
+        for command in TRICKY {
+            let out = std::process::Command::new("/bin/sh")
+                .arg("-c")
+                .arg(format!("printf %s {}", quote_text(command)))
+                .output()
+                .unwrap();
+            assert_eq!(String::from_utf8(out.stdout).unwrap(), command, "{command:?}");
+        }
+    }
+
+    #[test]
+    fn the_line_runs_the_login_shell_with_the_command_as_one_argument() {
+        let shell = Path::new("/bin/zsh");
+        assert_eq!(action_line(shell, "echo 'a'").unwrap(), "'/bin/zsh' -l -c 'echo '\\''a'\\'''");
+        assert_eq!(action_line(shell, "echo $HOME").unwrap(), "'/bin/zsh' -l -c 'echo $HOME'");
+        // The same limits as the store.
+        assert_eq!(action_line(shell, ""), Err("actionInvalid"));
+        assert_eq!(action_line(shell, "  \n"), Err("actionInvalid"));
+        assert_eq!(action_line(shell, "a\0b"), Err("actionInvalid"));
+        assert!(action_line(shell, &"a".repeat(4 * 1024)).is_ok());
+        assert_eq!(action_line(shell, &"a".repeat(4 * 1024 + 1)), Err("actionInvalid"));
+        // A shell path that could break the quote is refused.
+        assert_eq!(action_line(Path::new("/bin/z'sh"), "ls"), Err("scriptValueInvalid"));
+    }
+
+    #[test]
+    fn the_test_script_removes_itself_runs_the_line_and_waits_for_a_key() {
+        let text = test_script_text(Path::new("/s/test-1.command"), Path::new("/bin/zsh"), "echo 'x' \"$y\"\n").unwrap();
+        assert_eq!(
+            text,
+            "#!/bin/bash\nrm -f -- '/s/test-1.command'\n'/bin/zsh' -l -c 'echo '\\''x'\\'' \"$y\"\n'\n\
+status=$?\nprintf '\\n[exit code %s] Press any key to close ' \"$status\"\nIFS= read -r -s -n 1 _\n"
+        );
+        assert_eq!(test_script_text(Path::new("/s/x.command"), Path::new("/bin/zsh"), "a\0"), Err("actionInvalid"));
+    }
+
+    #[test]
+    fn the_test_script_is_private_new_and_runs_every_command_exactly() {
+        let remote = scratch("test-script");
+        let dir = remote.join("terminal");
+        for (index, command) in TRICKY.iter().enumerate() {
+            let path = write_test_script(&dir, Path::new("/bin/sh"), &format!("printf %s {}", quote_text(command))).unwrap();
+            let meta = fs::metadata(&path).unwrap();
+            assert_eq!(meta.mode() & 0o777, 0o700);
+            assert_eq!(fs::metadata(&dir).unwrap().mode() & 0o777, 0o700);
+            // The text is the script that Terminal would run, with the key wait left out.
+            let text = fs::read_to_string(&path).unwrap();
+            assert!(text.starts_with("#!/bin/bash\nrm -f -- '"), "{index}");
+            let line = text.lines().nth(2).unwrap_or_default();
+            assert!(line.starts_with("'/bin/sh' -l -c "), "{index}");
+            let _ = fs::remove_file(&path);
+        }
+        // Two scripts never share a path, and a script is never replaced.
+        let first = write_test_script(&dir, Path::new("/bin/sh"), "ls").unwrap();
+        let second = write_test_script(&dir, Path::new("/bin/sh"), "ls").unwrap();
+        assert_ne!(first, second);
+        assert_eq!(write_test_script(&dir, Path::new("/bin/z'sh"), "ls"), Err("scriptValueInvalid"));
     }
 
     #[test]

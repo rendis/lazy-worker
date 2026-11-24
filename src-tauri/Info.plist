@@ -9,6 +9,7 @@
     <key>NSBonjourServices</key>
     <array>
         <string>_ssh._tcp</string>
+        <string>_lazyworker-pair._tcp</string>
     </array>
 </dict>
 </plist>

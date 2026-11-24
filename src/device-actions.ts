@@ -135,8 +135,31 @@ export function mountActionWindows(host: Host) {
   const formCancel = h("button", { type: "button", class: "text-button" });
   bind(formCancel, "cancel");
   const formSave = h("button", { type: "submit", class: "access-action" }, icon("check"), bind(h("span"), "save"));
-  const commandLabel = h("label", { class: "action-field" },
-    h("span", { class: "setting-label" }, icon("square-terminal"), bind(h("span"), "actionCommand")), commandField);
+  // Only the person at this device tries a command, and only on this device: another device's window never shows these.
+  function tipButton(name: string, key: Message) {
+    const button = h("button", { type: "button", class: "icon-button outlined" }, icon(name));
+    const root = h("span", { class: "tip", "data-tip": t(key) }, button);
+    const apply = (): void => {
+      root.setAttribute("data-tip", t(key));
+      button.setAttribute("aria-label", t(key));
+    };
+    apply();
+    labelled.push(apply);
+    return { root, button };
+  }
+  const testButton = tipButton("terminal", "actionTestInTerminal");
+  const copyCommandButton = tipButton("copy", "actionCopyCommand");
+  const commandCopied = h("span", { class: "copy-confirm", role: "status" });
+  let commandCopiedTimer: number | undefined;
+  commandField.id = "action-command-field";
+  const commandTools = desktop.remote === null
+    ? h("div", { class: "device-end shell-buttons" }, commandCopied, testButton.root, copyCommandButton.root)
+    : undefined;
+  const commandLabel = h("div", { class: "action-field" },
+    h("div", { class: "action-field-head" },
+      h("label", { class: "setting-label", for: "action-command-field" }, icon("square-terminal"), bind(h("span"), "actionCommand")),
+      commandTools),
+    commandField);
   formBody.append(
     row("tag", "actionName", nameField),
     commandLabel,
@@ -204,6 +227,28 @@ export function mountActionWindows(host: Host) {
   formCancel.addEventListener("click", () => formOverlay.close());
   nameField.addEventListener("input", () => { if (formProblem() === undefined) formError.set(""); });
   commandField.addEventListener("input", () => { if (formProblem() === undefined) formError.set(""); });
+
+  /** The command as typed, or nothing with the reason in the form's note. */
+  function commandToTry(): string | undefined {
+    const problem = commandField.value.trim() === "" ? "actionCommandRequired"
+      : new TextEncoder().encode(commandField.value).length > maxCommandBytes ? "actionCommandTooLong" : undefined;
+    if (problem) formError.set(t(problem));
+    return problem ? undefined : commandField.value.replace(/\0/g, "");
+  }
+  testButton.button.addEventListener("click", () => {
+    const command = commandToTry();
+    if (command !== undefined) void desktop.testActionCommand(command).catch((error: unknown) => host.fail(error));
+  });
+  copyCommandButton.button.addEventListener("click", () => {
+    const command = commandToTry();
+    if (command === undefined) return;
+    void desktop.actionCommandLine(command).then(text => navigator.clipboard.writeText(text)).then(() => {
+      setText(commandCopied, t("actionCommandCopied"));
+      commandCopied.setAttribute("data-show", "");
+      window.clearTimeout(commandCopiedTimer);
+      commandCopiedTimer = window.setTimeout(() => commandCopied.removeAttribute("data-show"), copiedFor);
+    }).catch((error: unknown) => host.fail(error));
+  });
 
   // ---- The schedule of an action, on this device or on another one ----
   const scheduleWindow = document.getElementById("action-schedule-window")!;

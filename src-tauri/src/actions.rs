@@ -26,6 +26,16 @@ use std::{
 use store::{Action, LastRun, Store, DEFAULT_TIMEOUT, LOCAL, MAX_ACTIONS};
 use tauri::{AppHandle, Manager};
 
+/// The login shell that an action runs in, from the user database.
+pub fn login_shell() -> PathBuf {
+    Runner::system().shell
+}
+
+/// Checks the command text of an action: not empty, no NUL byte, at most 4 KiB.
+pub fn validate_command(command: &str) -> Result<(), &'static str> {
+    store::validate_command(command)
+}
+
 /// At most this many runs at the same time on a device.
 pub const MAX_RUNNING: usize = 2;
 /// The finished runs that a device keeps in memory.

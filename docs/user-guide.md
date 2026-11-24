@@ -121,7 +121,7 @@ Pairing links two devices with a code that works once. Start on the device you w
 3. Select **Open for 10 minutes**. The device shows a 6-digit code, the user name to enter, and the address to reach it.
 4. On the other device, open **Devices** and select **Add device**.
 5. Choose the device in the list. If it is not there, select **Enter an address**. Use this for a device on a VPN such as Tailscale, for example `studio.local` or `100.64.0.5`. Add `:port` if the port is not 22.
-6. Enter the user name and the code, then select **Pair**.
+6. On the same network, a device with an open pairing window shows **Pairing open**, and its user name fills in by itself. Over a VPN or with an address you typed, enter the user name. Then enter the code and select **Pair**.
 
 The code is not sent over the network. Three wrong codes close the window, and a code works once. The device shows when the pairing is done. Close the pairing window with **Close pairing** if you change your mind.
 
@@ -159,6 +159,7 @@ With **Applications** allowed, a device shows its installed applications under *
 An action is a named shell command that you save on a device. Each device keeps its own actions. You create, change, and delete an action only at that device. The command runs as your user, with your permissions. Add only commands you trust.
 
 - Under **Actions on this device**, select **Add action**. Give it a name, a command, and a time limit. The action stops by itself when the time passes.
+- Next to the command, **Test in my terminal** runs the text you typed in your own terminal, the same way the action runs, before you save it. **Copy command** copies the line that does it, to paste in any terminal. Both work only at the device that owns the action.
 - A device with **Actions** allowed can run your actions and stop them. It can also follow the output. It cannot read the command.
 - Select **Schedule** next to an action to schedule it: once, daily, or weekly. The action runs on the device that owns it, while Lazy Worker is open there. If that time passes while the app is closed, Lazy Worker skips it and does not run late.
 - Turn on **Flag it if it fails** to see a failed run in the row until a run works.
@@ -214,6 +215,7 @@ Devices lets other devices act on yours, so it is built to be safe by default.
 - A device never sends the text of its saved commands to another device.
 - Names and text from another device show as plain text. They cannot run anything.
 - The pairing code is not sent. Three wrong codes close the window.
+- While a pairing window is open, and only then, the device announces its user name and device id on your local network, so the other device can fill in the user name. The announcement never holds the code. The 6-digit code that SPAKE2 checks is still needed to pair, so a forged announcement cannot pair a device. At most it fills in a wrong user name.
 
 ### What is up to you
 
