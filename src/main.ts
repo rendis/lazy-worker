@@ -52,7 +52,7 @@ renderIcons();
 
 const caffeinate = mountCaffeinateForm();
 const progress = mountOperationProgress(element("operation-progress"));
-const banner = mountRemoteBanner({ translate: key => translate(key) });
+const banner = mountRemoteBanner({ translate: key => translate(key), language: preferredLanguage });
 if (remote) {
   let wasLost = false;
   desktop.onLink(error => {

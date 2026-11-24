@@ -14,17 +14,31 @@ use super::{
     pake::{Own, OwnDevice},
     pairing::{Opened, Pairing},
     peers::{clean_name, PeerPermissions, Peers},
+    now,
     server::{Handler, Server},
+    shell::{self, Watch},
     ssh, Layout,
 };
 use crate::{
     apps,
-    devices::{self, Controller, Remote, Socket},
+    devices::{self, Controller, KeysWarning, Remote, ShellGrant, ShellUntil, Socket},
     dispatch::{self, Origin, Request},
 };
 use serde::Serialize;
 use serde_json::Value;
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
+
+/// How often the grants are checked against the wall clock, and so how late a shell can outlive its end.
+const TICK: Duration = Duration::from_secs(2);
+/// The longest grant that can be asked for, in minutes: one day.
+pub const MAX_SHELL_MINUTES: u32 = 1440;
 use tauri::{AppHandle, Manager};
 
 /// Runs a remote request through the dispatcher that the webview uses.
@@ -33,6 +47,18 @@ struct Dispatcher(AppHandle);
 impl Handler for Dispatcher {
     fn handle(&self, origin: Origin, request: Request) -> Result<Value, &'static str> {
         tauri::async_runtime::block_on(dispatch::handle(&self.0, origin, request))
+    }
+
+    fn shell_started(&self, peer: &str) {
+        if let Some(service) = self.0.try_state::<Service>() {
+            service.shell_started(peer);
+        }
+    }
+
+    fn shell_ended(&self, peer: &str) {
+        if let Some(service) = self.0.try_state::<Service>() {
+            service.shell_ended(peer);
+        }
     }
 }
 
@@ -50,6 +76,10 @@ struct Running {
     /// The icons of the applications of those devices.
     icons: Result<Icons, &'static str>,
     server: Result<Server, &'static str>,
+    /// The open shell sessions and the changes of `~/.ssh/authorized_keys` seen during them.
+    watch: Watch,
+    /// The time of the last comparison of that file during a session.
+    last_keys_check: AtomicU64,
 }
 
 /// What forgetting a device leaves undone: our key stays in its `authorized_keys`, and only that
@@ -105,7 +135,19 @@ impl Service {
         let home = app.path().home_dir().ok();
         let helper = std::env::current_exe().and_then(std::fs::canonicalize).ok();
         let layout = Layout::open(config_dir, &std::env::temp_dir());
-        Self(layout.and_then(|layout| Self::open(&layout, home, helper, Dispatcher(app.clone()))))
+        let service =
+            Self(layout.and_then(|layout| Self::open(&layout, home, helper, Dispatcher(app.clone()))));
+        // The wall clock ends the grants. A sleep of the Mac only delays the next tick.
+        if service.0.is_ok() {
+            let handle = app.clone();
+            let _ = std::thread::Builder::new().name("shell-timer".into()).spawn(move || loop {
+                std::thread::sleep(TICK);
+                if let Some(service) = handle.try_state::<Service>() {
+                    service.tick(now());
+                }
+            });
+        }
+        service
     }
 
     fn open(
@@ -120,6 +162,15 @@ impl Service {
             (Some(home), Some(helper)) => AuthorizedKeys::new(home, helper),
             _ => Err("helperPathInvalid"),
         };
+        // A grant that ended while the app was not running is revoked before anything else. The
+        // lines are rendered again right after, so they lose `pty` with it.
+        for id in peers.shell_expired(now()) {
+            if let Some(peer) = peers.get(&id) {
+                if peers.set_shell(&id, None).is_ok() {
+                    let _ = log.append(&Entry::new(Some(&id), Some(&peer.name), "shellExpired", "ok"));
+                }
+            }
+        }
         // After a move of the app, the lines must name the new program.
         if let Ok(keys) = &keys {
             if !peers.list().is_empty() {
@@ -159,6 +210,8 @@ impl Service {
             clients: Clients::new(SshTransport::new(layout.clone())),
             icons: Icons::open(layout.icons_dir()),
             server,
+            watch: Watch::default(),
+            last_keys_check: AtomicU64::new(now()),
         })
     }
 
@@ -320,6 +373,132 @@ impl Service {
         outcome
     }
 
+    /// Grants a full shell to a device for `minutes` (1 to 1440), or until it is turned off. The
+    /// line of the device gets `pty` first in memory and then on disk, and a line that cannot be
+    /// written leaves the grant as it was.
+    pub fn grant_shell(&self, id: &str, minutes: Option<u32>) -> Result<ShellGrant, &'static str> {
+        DeviceId::parse(id)?;
+        if minutes.is_some_and(|minutes| !(1..=MAX_SHELL_MINUTES).contains(&minutes)) {
+            return Err("shellDurationInvalid");
+        }
+        let running = self.running()?;
+        let name = running.peers.get(id).ok_or("notPaired")?.name;
+        let until = minutes.map_or(ShellUntil::OFF, |minutes| {
+            ShellUntil::At(now() + u64::from(minutes) * 60)
+        });
+        let previous = running.peers.set_shell(id, Some(until))?;
+        let outcome = self.rewrite_line(running, id);
+        if let Err(code) = outcome {
+            let _ = running.peers.set_shell(id, previous);
+            let _ = running.log.append(&Entry::new(Some(id), Some(&name), "shellGranted", code));
+            return Err(code);
+        }
+        let _ = running.log.append(&Entry::new(Some(id), Some(&name), "shellGranted", "ok"));
+        Ok(ShellGrant { until })
+    }
+
+    /// Ends the shell of a device now.
+    pub fn revoke_shell(&self, id: &str) -> Result<(), &'static str> {
+        DeviceId::parse(id)?;
+        self.end_shell(self.running()?, id, "shellRevoked")
+    }
+
+    /// The shell that a device has now, as it is told in `GetSession`.
+    pub fn shell_of(&self, id: &str) -> Option<ShellGrant> {
+        let peer = self.running().ok()?.peers.get(id)?;
+        peer.shell_until
+            .filter(|until| until.active(now()))
+            .map(|until| ShellGrant { until })
+    }
+
+    /// Writes the line of a peer again, with `pty` or without it as its grant says.
+    fn rewrite_line(&self, running: &Running, id: &str) -> Result<(), &'static str> {
+        let peer = running.peers.get(id).ok_or("notPaired")?;
+        running
+            .keys
+            .as_ref()
+            .map_err(|code| *code)
+            .and_then(|keys| keys.install(&peer, &running.peers.networks()))
+    }
+
+    /// Takes the grant away, ends the open shell sessions, and writes the line without `pty`. The
+    /// access ends first, in memory and on the open connections. Does nothing when there is no grant.
+    fn end_shell(&self, running: &Running, id: &str, event: &str) -> Result<(), &'static str> {
+        let name = running.peers.get(id).ok_or("notPaired")?.name;
+        if running.peers.set_shell(id, None)?.is_none() {
+            return Ok(());
+        }
+        if let Ok(server) = &running.server {
+            server.close_shell(id);
+        }
+        let outcome = self.rewrite_line(running, id);
+        let _ = running.log.append(&Entry::new(
+            Some(id),
+            Some(&name),
+            event,
+            outcome.err().unwrap_or("ok"),
+        ));
+        outcome
+    }
+
+    /// Ends the grants whose time has come, and compares `authorized_keys` once a minute while a
+    /// shell is open. The timer calls it with the wall clock.
+    pub fn tick(&self, at: u64) {
+        let Ok(running) = self.running() else { return };
+        for id in running.peers.shell_expired(at) {
+            let _ = self.end_shell(running, &id, "shellExpired");
+        }
+        let last = running.last_keys_check.load(Ordering::Relaxed);
+        if running.watch.active() && at.saturating_sub(last) >= shell::CHECK_EVERY.as_secs() {
+            running.last_keys_check.store(at, Ordering::Relaxed);
+            self.compare_keys(running, |digest| running.watch.check(digest, at));
+        }
+    }
+
+    /// The hash of the lines of `authorized_keys` that are not ours, and nothing when it cannot be read.
+    fn digest(running: &Running) -> Option<String> {
+        running.keys.as_ref().ok()?.foreign_digest().ok()
+    }
+
+    /// Runs a comparison and records each warning in the log.
+    fn compare_keys(&self, running: &Running, compare: impl FnOnce(Option<&str>) -> Vec<(String, String)>) {
+        let digest = Self::digest(running);
+        for (peer, name) in compare(digest.as_deref()) {
+            let _ = running.log.append(&Entry::new(Some(&peer), Some(&name), "keysChanged", "ok"));
+        }
+    }
+
+    fn shell_started(&self, id: &str) {
+        let Ok(running) = self.running() else { return };
+        let Some(peer) = running.peers.get(id) else { return };
+        running.last_keys_check.store(now(), Ordering::Relaxed);
+        self.compare_keys(running, |digest| running.watch.started(id, &peer.name, digest, now()));
+    }
+
+    fn shell_ended(&self, id: &str) {
+        let Ok(running) = self.running() else { return };
+        self.compare_keys(running, |digest| running.watch.ended(id, digest, now()));
+    }
+
+    /// The changes of `authorized_keys` that the user has not dismissed.
+    pub fn warnings(&self) -> Vec<KeysWarning> {
+        self.running().map(|running| running.watch.warnings()).unwrap_or_default()
+    }
+
+    pub fn dismiss_warning(&self, id: u64) -> Result<(), &'static str> {
+        self.running()?.watch.dismiss(id);
+        Ok(())
+    }
+
+    /// Opens a shell on a device that this one controls, in Terminal. The device decides whether it is
+    /// granted. It writes a file and starts a program, so call it off the main thread.
+    pub fn open_shell(&self, id: &str) -> Result<(), &'static str> {
+        let peer = DeviceId::parse(id)?;
+        let running = self.running()?;
+        let destination = self.device(id).ok_or("notPermitted")?.destination()?;
+        shell::open(&running.layout, &destination, &peer)
+    }
+
     pub fn pairing_state(&self) -> devices::Pairing {
         self.running()
             .map_or_else(|_| devices::Pairing::closed(), |running| running.pairing.state())
@@ -467,6 +646,7 @@ mod tests {
         peers::testing::{peer, ID_A, ID_B},
         testing::scratch,
     };
+    use crate::remote::peers::Peers;
     use std::{
         fs,
         io::{BufRead, BufReader, Write},
@@ -615,5 +795,253 @@ mod tests {
         ] {
             assert_eq!(decode_icon(&bad), Err("appIconFailed"), "{bad}");
         }
+    }
+
+    struct Fixture {
+        home: PathBuf,
+        short: PathBuf,
+        layout: Layout,
+        service: Service,
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            self.service.stop();
+            let _ = fs::remove_dir_all(&self.home);
+            let _ = fs::remove_dir_all(&self.short);
+        }
+    }
+
+    /// A service with one paired device and its line, in short directories because of the socket path.
+    fn fixture(label: &str) -> Fixture {
+        let home = scratch(label);
+        let short = PathBuf::from(format!("/tmp/lw-svc-{label}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&short);
+        fs::create_dir(&short).unwrap();
+        fs::set_permissions(&short, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+        let layout = Layout::for_paths(short.clone(), None);
+        let service = Service::for_test(&layout, home.clone(), Deny);
+        let running = service.running().unwrap();
+        running.peers.insert(peer(ID_A, "Studio")).unwrap();
+        running.keys.as_ref().unwrap().install(&running.peers.get(ID_A).unwrap(), &[]).unwrap();
+        Fixture { home, short, layout, service }
+    }
+
+    fn line_of(fixture: &Fixture, id: &str) -> String {
+        fs::read_to_string(fixture.home.join(".ssh/authorized_keys"))
+            .unwrap()
+            .lines()
+            .find(|line| line.ends_with(&format!("lazy-worker:{id}")))
+            .unwrap()
+            .to_owned()
+    }
+
+    fn requests(fixture: &Fixture) -> Vec<(String, String)> {
+        fixture.service.log().unwrap().into_iter().map(|entry| (entry.request, entry.outcome)).collect()
+    }
+
+    /// A raw shell connection, as the helper makes one. Returns it with the first answer line.
+    fn shell_connection(fixture: &Fixture, id: &str) -> (UnixStream, BufReader<UnixStream>, String) {
+        let stream = UnixStream::connect(fixture.layout.socket_file()).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut writer = stream.try_clone().unwrap();
+        let mut reader = BufReader::new(stream);
+        writeln!(writer, "{{\"hello\":{{\"peer\":\"{id}\",\"shell\":true}}}}").unwrap();
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        (writer, reader, line)
+    }
+
+    fn ended(reader: &mut BufReader<UnixStream>) -> bool {
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap_or(0) == 0
+    }
+
+    const FROM: &str = "from=\"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,100.64.0.0/10,fc00::/7,fe80::/10\"";
+
+    #[test]
+    fn a_grant_and_its_end_rewrite_the_line_with_and_without_pty_and_are_logged() {
+        let fixture = fixture("svc-shell-line");
+        let service = &fixture.service;
+        let command = format!(
+            "command=\"\\\"/Applications/Lazy Worker.app/Contents/MacOS/lazy-worker\\\" remote --peer {ID_A}\" {} lazy-worker:{ID_A}",
+            crate::remote::peers::testing::KEY
+        );
+        assert_eq!(line_of(&fixture, ID_A), format!("restrict,{FROM},{command}"));
+        let grant = service.grant_shell(ID_A, Some(60)).unwrap();
+        assert!(matches!(grant.until, ShellUntil::At(end) if end > now() + 3500 && end <= now() + 3600));
+        assert_eq!(line_of(&fixture, ID_A), format!("restrict,pty,{FROM},{command}"));
+        assert!(service.controllers()[0].permissions.shell && service.controllers()[0].shell == Some(grant));
+        assert_eq!(service.shell_of(ID_A), Some(grant));
+        service.revoke_shell(ID_A).unwrap();
+        assert_eq!(line_of(&fixture, ID_A), format!("restrict,{FROM},{command}"));
+        assert!(service.shell_of(ID_A).is_none() && !service.controllers()[0].permissions.shell);
+        // Until turned off has no end time.
+        assert_eq!(service.grant_shell(ID_A, None).unwrap().until, ShellUntil::OFF);
+        assert!(line_of(&fixture, ID_A).starts_with("restrict,pty,"));
+        service.revoke_shell(ID_A).unwrap();
+        // Ending it again changes nothing and logs nothing.
+        let before = requests(&fixture).len();
+        service.revoke_shell(ID_A).unwrap();
+        assert_eq!(requests(&fixture).len(), before);
+        let mut events: Vec<_> = requests(&fixture);
+        events.reverse();
+        let ok = |name: &str| (name.to_owned(), "ok".to_owned());
+        assert_eq!(events, [ok("shellGranted"), ok("shellRevoked"), ok("shellGranted"), ok("shellRevoked")]);
+        // Bad durations, unknown ids, and another device are refused.
+        for minutes in [0, 1441, u32::MAX] {
+            assert_eq!(service.grant_shell(ID_A, Some(minutes)), Err("shellDurationInvalid"));
+        }
+        assert_eq!(service.grant_shell(ID_B, Some(5)), Err("notPaired"));
+        assert_eq!(service.grant_shell("short", Some(5)), Err("deviceIdInvalid"));
+        assert_eq!(service.grant_shell(ID_A, Some(1440)).map(|_| ()), Ok(()));
+        // Pairing the device again never keeps a grant.
+        let running = service.running().unwrap();
+        running.peers.insert(peer(ID_A, "Studio")).unwrap();
+        assert!(service.shell_of(ID_A).is_none());
+    }
+
+    #[test]
+    fn a_line_that_cannot_be_written_leaves_no_grant() {
+        let fixture = fixture("svc-shell-fail");
+        let file = fixture.home.join(".ssh/authorized_keys");
+        let moved = fixture.home.join("elsewhere");
+        fs::rename(&file, &moved).unwrap();
+        std::os::unix::fs::symlink(&moved, &file).unwrap();
+        assert_eq!(fixture.service.grant_shell(ID_A, Some(5)).map(|_| ()), Err("authorizedKeysUnsafe"));
+        assert!(fixture.service.shell_of(ID_A).is_none());
+        assert!(!fixture.service.controllers()[0].permissions.shell);
+        assert_eq!(requests(&fixture), [("shellGranted".to_owned(), "authorizedKeysUnsafe".to_owned())]);
+    }
+
+    #[test]
+    fn the_server_answers_a_shell_only_while_granted_and_ends_it_on_revoke_expiry_cut_and_remove() {
+        let fixture = fixture("svc-shell-ends");
+        let service = &fixture.service;
+        let (_writer, mut reader, line) = shell_connection(&fixture, ID_A);
+        assert_eq!(line, "{\"error\":\"notPermitted\"}\n");
+        assert!(ended(&mut reader));
+
+        // Revoke.
+        service.grant_shell(ID_A, None).unwrap();
+        let (_writer, mut reader, line) = shell_connection(&fixture, ID_A);
+        assert_eq!(line, "{\"ok\":\"shell\"}\n");
+        service.revoke_shell(ID_A).unwrap();
+        assert!(ended(&mut reader), "revoke");
+
+        // Expiry, by the wall clock.
+        service.grant_shell(ID_A, Some(1)).unwrap();
+        let (_writer, mut reader, line) = shell_connection(&fixture, ID_A);
+        assert_eq!(line, "{\"ok\":\"shell\"}\n");
+        service.tick(now() + 30);
+        assert!(service.shell_of(ID_A).is_some(), "not yet");
+        service.tick(now() + 61);
+        assert!(ended(&mut reader), "expiry");
+        assert!(!line_of(&fixture, ID_A).contains("pty"));
+        assert!(service.shell_of(ID_A).is_none());
+        // A shell cannot start again from the grant that ended.
+        let (_writer, mut reader, line) = shell_connection(&fixture, ID_A);
+        assert_eq!(line, "{\"error\":\"notPermitted\"}\n");
+        assert!(ended(&mut reader));
+
+        // Cut all.
+        service.grant_shell(ID_A, None).unwrap();
+        let (_writer, mut reader, _) = shell_connection(&fixture, ID_A);
+        service.cut_all().unwrap();
+        assert!(ended(&mut reader), "cut all");
+
+        // Remove the device.
+        let running = service.running().unwrap();
+        running.peers.insert(peer(ID_A, "Studio")).unwrap();
+        service.grant_shell(ID_A, None).unwrap();
+        let (_writer, mut reader, _) = shell_connection(&fixture, ID_A);
+        service.remove_peer(ID_A).unwrap();
+        assert!(ended(&mut reader), "remove");
+
+        let names: Vec<String> = requests(&fixture).into_iter().map(|(name, _)| name).collect();
+        for expected in ["shellGranted", "shellRevoked", "shellExpired", "shellStart"] {
+            assert!(names.iter().any(|name| name == expected), "{expected} in {names:?}");
+        }
+        assert_eq!(names.iter().filter(|name| *name == "shellStart").count(), 6);
+    }
+
+    #[test]
+    fn a_grant_found_expired_at_start_is_revoked_before_the_line_is_used() {
+        let home = scratch("svc-shell-start");
+        let short = PathBuf::from(format!("/tmp/lw-svc-start-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&short);
+        fs::create_dir(&short).unwrap();
+        fs::set_permissions(&short, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+        let layout = Layout::for_paths(short.clone(), None);
+        // The state of an earlier run: a grant that ended, one that has not, and the lines with `pty`.
+        {
+            let peers = Peers::open(layout.peers_file()).unwrap();
+            peers.insert(peer(ID_A, "Studio")).unwrap();
+            peers.insert(peer(ID_B, "Mini")).unwrap();
+            peers.set_shell(ID_A, Some(ShellUntil::At(now() - 5))).unwrap();
+            peers.set_shell(ID_B, Some(ShellUntil::At(now() + 3600))).unwrap();
+            let keys = AuthorizedKeys::new(home.clone(), PathBuf::from("/Applications/Lazy Worker.app/Contents/MacOS/lazy-worker")).unwrap();
+            for id in [ID_A, ID_B] {
+                let mut stale = peers.get(id).unwrap();
+                stale.permissions.shell = true;
+                keys.install(&stale, &[]).unwrap();
+            }
+            assert!(fs::read_to_string(home.join(".ssh/authorized_keys")).unwrap().matches("restrict,pty,").count() == 2);
+        }
+        let service = Service::for_test(&layout, home.clone(), Deny);
+        let keys = fs::read_to_string(home.join(".ssh/authorized_keys")).unwrap();
+        let line = |id: &str| keys.lines().find(|line| line.ends_with(&format!("lazy-worker:{id}"))).unwrap().to_owned();
+        assert!(!line(ID_A).contains("pty"), "the ended grant lost pty");
+        assert!(line(ID_B).starts_with("restrict,pty,"), "the grant that lasts keeps it");
+        assert!(service.shell_of(ID_A).is_none() && service.shell_of(ID_B).is_some());
+        let log = service.log().unwrap();
+        assert_eq!((log[0].request.as_str(), log[0].peer.as_deref(), log[0].outcome.as_str()), ("shellExpired", Some(ID_A), "ok"));
+        assert_eq!(log.len(), 1);
+        // The peers file does not keep it either.
+        let stored = Peers::open(layout.peers_file()).unwrap();
+        assert!(stored.get(ID_A).unwrap().shell_until.is_none());
+        service.stop();
+        fs::remove_dir_all(home).unwrap();
+        fs::remove_dir_all(short).unwrap();
+    }
+
+    #[test]
+    fn a_change_to_the_keys_during_a_shell_raises_a_warning_that_can_be_dismissed() {
+        let fixture = fixture("svc-shell-keys");
+        let service = &fixture.service;
+        let file = fixture.home.join(".ssh/authorized_keys");
+        let mut text = fs::read_to_string(&file).unwrap();
+        text.insert_str(0, "ssh-ed25519 AAAAuser user@host\n");
+        fs::write(&file, &text).unwrap();
+        service.grant_shell(ID_A, None).unwrap();
+        service.shell_started(ID_A);
+        let start = now() + 1000;
+        // Our own lines change as the grant is turned on and off: no warning.
+        service.revoke_shell(ID_A).unwrap();
+        service.grant_shell(ID_A, None).unwrap();
+        service.tick(start + 61);
+        assert!(service.warnings().is_empty());
+        // A key that the shell added is a warning, once, with the device's name.
+        fs::write(&file, format!("{text}ssh-ed25519 AAAAattacker evil\n")).unwrap();
+        service.tick(start + 100);
+        assert!(service.warnings().is_empty(), "the check runs once a minute");
+        service.tick(start + 130);
+        let warnings = service.warnings();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!((warnings[0].peer.as_str(), warnings[0].name.as_str()), (ID_A, "Studio"));
+        service.tick(start + 200);
+        assert_eq!(service.warnings().len(), 1);
+        assert!(requests(&fixture).contains(&("keysChanged".to_owned(), "ok".to_owned())));
+        // Another change at the end of the session is a second warning.
+        fs::write(&file, format!("{text}ssh-ed25519 AAAAattacker evil\nssh-ed25519 AAAAmore x\n")).unwrap();
+        service.shell_ended(ID_A);
+        assert_eq!(service.warnings().len(), 2);
+        let id = service.warnings()[0].id;
+        service.dismiss_warning(id).unwrap();
+        assert_eq!(service.warnings().len(), 1);
+        // With no shell open, nothing is compared.
+        fs::write(&file, text).unwrap();
+        service.tick(start + 400);
+        assert_eq!(service.warnings().len(), 1);
     }
 }

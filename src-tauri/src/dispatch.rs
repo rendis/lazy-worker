@@ -217,6 +217,14 @@ pub enum Request {
     SetPinnedApps { id: String, bundle_ids: Vec<String> },
     /// Opens the window that controls a paired device.
     OpenRemoteWindow { id: String },
+    /// Grants a full shell to a device that controls this one, for `minutes` (1 to 1440) or until it is turned off.
+    /// Only the person at this device may grant it, and pairing never does.
+    GrantShell { id: String, minutes: Option<u32> },
+    RevokeShell { id: String },
+    /// Hides a note that `~/.ssh/authorized_keys` changed during a shell.
+    DismissKeysWarning { id: u64 },
+    /// Opens a shell on a device that this one controls, in Terminal. It exists only between the main window and this device.
+    OpenShell { id: String },
     /// Sends one of a few requests to a paired device, for the Devices view.
     RemoteCall { id: String, request: Value },
 }
@@ -316,6 +324,11 @@ impl Request {
             | Self::SetPinnedApps { .. }
             | Self::OpenRemoteWindow { .. }
             | Self::RemoteCall { .. }
+            // A shell can run any command as the user. Only the person at this device turns it on.
+            | Self::GrantShell { .. }
+            | Self::RevokeShell { .. }
+            | Self::DismissKeysWarning { .. }
+            | Self::OpenShell { .. }
             | Self::RequestActivityAccessibility => Access::LocalOnly,
         }
     }
@@ -391,6 +404,10 @@ impl Request {
             | Self::ClearSchedule { .. }
             | Self::SetPinnedApps { .. }
             | Self::OpenRemoteWindow { .. }
+            | Self::GrantShell { .. }
+            | Self::RevokeShell { .. }
+            | Self::DismissKeysWarning { .. }
+            | Self::OpenShell { .. }
             | Self::RemoteCall { .. } => false,
         }
     }
@@ -464,6 +481,10 @@ impl Request {
             | Self::ClearSchedule { .. }
             | Self::SetPinnedApps { .. }
             | Self::OpenRemoteWindow { .. }
+            | Self::GrantShell { .. }
+            | Self::RevokeShell { .. }
+            | Self::DismissKeysWarning { .. }
+            | Self::OpenShell { .. }
             | Self::RemoteCall { .. } => false,
         }
     }
@@ -477,6 +498,7 @@ impl Request {
                 | Self::RemoteCall { .. }
                 | Self::GetCachedIcon { .. }
                 | Self::SetPinnedApps { .. }
+                | Self::OpenShell { .. }
         )
     }
 
@@ -706,6 +728,57 @@ async fn run(
                 Err("unsupported")
             }
         }
+        Request::GrantShell { id, minutes } => {
+            #[cfg(unix)]
+            return json(app.state::<crate::remote::service::Service>().grant_shell(&id, minutes)?);
+            #[cfg(not(unix))]
+            {
+                let _ = (id, minutes);
+                Err("unsupported")
+            }
+        }
+        Request::RevokeShell { id } => {
+            #[cfg(unix)]
+            return tauri::async_runtime::spawn_blocking({
+                let app = app.clone();
+                move || app.state::<crate::remote::service::Service>().revoke_shell(&id)
+            })
+            .await
+            .map_err(|_| "workerUnavailable")?
+            .map(|()| Value::Null);
+            #[cfg(not(unix))]
+            {
+                let _ = id;
+                Err("unsupported")
+            }
+        }
+        Request::DismissKeysWarning { id } => {
+            #[cfg(unix)]
+            return app
+                .state::<crate::remote::service::Service>()
+                .dismiss_warning(id)
+                .map(|()| Value::Null);
+            #[cfg(not(unix))]
+            {
+                let _ = id;
+                Err("unsupported")
+            }
+        }
+        Request::OpenShell { id } => {
+            #[cfg(unix)]
+            return tauri::async_runtime::spawn_blocking({
+                let app = app.clone();
+                move || app.state::<crate::remote::service::Service>().open_shell(&id)
+            })
+            .await
+            .map_err(|_| "terminalFailed")?
+            .map(|()| Value::Null);
+            #[cfg(not(unix))]
+            {
+                let _ = id;
+                Err("unsupported")
+            }
+        }
         Request::RemoteCall { id, request } => {
             let parsed: Request =
                 serde_json::from_value(request.clone()).map_err(|_| "badRequest")?;
@@ -812,6 +885,7 @@ async fn run(
                     socket: service.socket(),
                     pairing: service.pairing_state(),
                     devices: service.remote_devices(),
+                    warnings: service.warnings(),
                 }
             };
             #[cfg(not(unix))]
@@ -820,6 +894,7 @@ async fn run(
                 socket: devices::Socket::unavailable("unsupported"),
                 pairing: devices::Pairing::closed(),
                 devices: Vec::new(),
+                warnings: Vec::new(),
             };
             json(
                 tauri::async_runtime::spawn_blocking(move || {
@@ -1108,6 +1183,10 @@ async fn session(app: &AppHandle, origin: Origin) -> Result<Value, &'static str>
         },
         Origin::Remote(permissions) => permissions,
     };
+    // The shell of the caller, as the device that answers granted it. This device has no shell on itself.
+    let shell = origin
+        .peer()
+        .and_then(|peer| app.state::<crate::remote::service::Service>().shell_of(peer));
     let (own, version) = (
         app.state::<crate::remote::service::Service>().own_device(),
         app.package_info().version.to_string(),
@@ -1122,6 +1201,7 @@ async fn session(app: &AppHandle, origin: Origin) -> Result<Value, &'static str>
             "applications": permissions.applications,
             "actions": permissions.actions,
         },
+        "shell": shell,
         "version": version,
         "protocol": PROTOCOL,
     }))
@@ -1727,5 +1807,43 @@ mod tests {
         for bad in ["", "short", &id.to_uppercase(), &format!("{id}0"), "../0123456789abcdef0123456789abcd"] {
             assert!(PeerId::parse(bad).is_none(), "{bad}");
         }
+    }
+
+    #[test]
+    fn no_shell_request_is_accepted_from_any_remote_origin() {
+        let preferences = Preferences::default();
+        let id = "0123456789abcdef0123456789abcdef";
+        let all = Origin::Remote(Permissions { control: true, applications: true, actions: true, peer: PeerId::parse(id) });
+        for value in [
+            json!({"command": "grantShell", "args": {"id": id, "minutes": 60}}),
+            json!({"command": "grantShell", "args": {"id": id, "minutes": null}}),
+            json!({"command": "revokeShell", "args": {"id": id}}),
+            json!({"command": "dismissKeysWarning", "args": {"id": 1}}),
+            json!({"command": "openShell", "args": {"id": id}}),
+        ] {
+            let parsed = request(value.clone());
+            for origin in [NONE, CONTROL, APPLICATIONS, ACTIONS, all] {
+                assert_eq!(allowed(origin, &parsed, &preferences), Err("localOnly"), "{value}");
+            }
+            assert_eq!(allowed(Origin::Local, &parsed, &preferences), Ok(()));
+            // The Devices view cannot send one through `RemoteCall` to another device either.
+            assert!(!parsed.may_be_called_remotely(), "{value}");
+            assert!(!parsed.is_read() && !parsed.runs_on_viewer());
+        }
+    }
+
+    #[test]
+    fn a_window_that_controls_a_device_cannot_open_a_shell_and_a_grant_goes_to_that_device_to_be_refused() {
+        let id = "0123456789abcdef0123456789abcdef";
+        let route = Route::Device(id.to_owned());
+        assert_eq!(plan(&route, &request(json!({"command": "openShell", "args": {"id": id}}))), Plan::Refuse);
+        // A grant from such a window is not run here. It goes to the device, which answers `localOnly`.
+        let grant = request(json!({"command": "grantShell", "args": {"id": id, "minutes": 5}}));
+        assert_eq!(plan(&route, &grant), Plan::Forward(id.to_owned()));
+        assert_eq!(plan(&Route::Local, &grant), Plan::Here);
+        assert_eq!(plan(&Route::Local, &request(json!({"command": "openShell", "args": {"id": id}}))), Plan::Here);
+        // A label that is not a controlled device gets nothing.
+        assert_eq!(Route::of_window("remote-0123", |_| true), Err("notPermitted"));
+        assert_eq!(Route::of_window("other", |_| true), Err("notPermitted"));
     }
 }

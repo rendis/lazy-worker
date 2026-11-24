@@ -28,6 +28,8 @@ const SSH: &str = "/usr/bin/ssh";
 pub enum RemoteCommand {
     Dispatch,
     Pair,
+    /// An interactive shell. The target honours it only while the user there has granted it.
+    Shell,
 }
 
 impl RemoteCommand {
@@ -35,6 +37,7 @@ impl RemoteCommand {
         match self {
             Self::Dispatch => "dispatch",
             Self::Pair => "pair",
+            Self::Shell => "shell",
         }
     }
 }
@@ -63,7 +66,9 @@ impl Mode {
         match self {
             Self::Remote(RemoteCommand::Pair) => Profile::Pairing,
             Self::PrintConfig(profile) => profile,
-            Self::Remote(RemoteCommand::Dispatch) | Self::ControlExit => Profile::Device,
+            Self::Remote(RemoteCommand::Dispatch | RemoteCommand::Shell) | Self::ControlExit => {
+                Profile::Device
+            }
         }
     }
 }
@@ -303,13 +308,19 @@ fn build(
     // One socket per peer, so a live master never carries a request meant for another device
     // that took over the address. The name is the validated id, with no `%` token in it. A
     // pairing shares no connection.
-    if let (Profile::Device, Some(directory)) = (profile, layout.control_dir()) {
+    // A shell never shares a connection. The line of the key is checked when a connection is made,
+    // so a shared one could carry a terminal that a grant no longer allows.
+    let shell = matches!(mode, Mode::Remote(RemoteCommand::Shell));
+    if let (Profile::Device, Some(directory), false) = (profile, layout.control_dir(), shell) {
         command.arg("-o").arg(format!(
             "ControlPath={}",
             quote(directory, &format!("/{}", peer.as_str()))?
         ));
     }
     match mode {
+        Mode::Remote(RemoteCommand::Shell) => {
+            command.args(["-o", "ControlMaster=no", "-t", "-o", "RequestTTY=force"]);
+        }
         Mode::Remote(_) => {}
         Mode::ControlExit => {
             command.args(["-O", "exit"]);
@@ -339,6 +350,15 @@ pub fn command(
     remote: RemoteCommand,
 ) -> Result<Command, &'static str> {
     build(layout, destination, peer, Mode::Remote(remote))
+}
+
+/// The command that opens an interactive shell on the destination, with a terminal and no shared connection.
+pub fn shell_command(
+    layout: &Layout,
+    destination: &Destination,
+    peer: &DeviceId,
+) -> Result<Command, &'static str> {
+    build(layout, destination, peer, Mode::Remote(RemoteCommand::Shell))
 }
 
 /// Closes the multiplexing master of a destination, for example when its device is removed.
@@ -674,6 +694,29 @@ mod tests {
         .map(|s| s.to_string())
         .collect();
         assert_eq!(args(Mode::Remote(RemoteCommand::Pair)), pairing);
+        // A shell asks for a terminal, never shares a connection, and has no socket path.
+        let shell: Vec<String> = [
+            "-F",
+            "/r s/ssh_config",
+            "-o",
+            &format!("HostKeyAlias=lw-{}", "ab".repeat(16)),
+            "-o",
+            "ControlMaster=no",
+            "-t",
+            "-o",
+            "RequestTTY=force",
+            "-l",
+            "me",
+            "-p",
+            "2222",
+            "--",
+            "fe80::1%en0",
+            "shell",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(args(Mode::Remote(RemoteCommand::Shell)), shell);
         let command = command(&layout, &destination, &peer(), RemoteCommand::Dispatch).unwrap();
         assert_eq!(command.get_program(), OsStr::new("/usr/bin/ssh"));
         let mut names: Vec<_> = command

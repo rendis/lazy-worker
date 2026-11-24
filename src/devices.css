@@ -369,3 +369,26 @@ select.field { padding-inline: 4px 2px; }
 /* An action whose last run failed, and that was asked to be flagged, keeps its failure on its row until a run works. */
 .device-row[data-failed] .setting-note { color: var(--pending-color); }
 .device-row .action-by { white-space: nowrap; }
+
+/* The window that asks before another device may run any command. The warning is plain text: it says its few facts once. */
+.shell-window { width: min(600px, 100%); }
+.shell-warning { margin: 0; padding: 2px 2px 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.shell-duration-row { display: grid; gap: 8px; padding: 10px 2px 12px; border-bottom: 1px solid var(--hairline); }
+.shell-duration-row > .setting-label { display: flex; align-items: center; gap: 12px; }
+.shell-duration-row > .setting-label .lucide { width: 18px; height: 18px; color: var(--secondary); }
+.shell-duration { display: grid; width: 100%; }
+.shell-duration button { padding-inline: 8px; }
+.shell-time-row { grid-template-columns: 20px minmax(0, 1fr) auto; }
+.shell-time-text { display: grid; gap: 2px; min-width: 0; }
+.shell-end { min-height: 1.4em; font-variant-numeric: tabular-nums; }
+.shell-end[data-warning] { color: var(--pending-color); }
+.shell-time-fields { gap: 6px; }
+.shell-field { width: 3.4em; min-width: 0; padding-inline: 4px; text-align: center; font-variant-numeric: tabular-nums; }
+.shell-field:disabled { opacity: .55; }
+.shell-unit { margin-inline-end: 6px; color: var(--secondary); font-size: 13px; }
+.shell-log-note { margin: 0; padding: 8px 2px; }
+
+/* A change to the keys file during a shell stays on top of Who can control it until it is dismissed. */
+.keys-warning > .lucide { color: var(--pending-color); }
+.keys-warning .setting-note { color: var(--pending-color); overflow-wrap: anywhere; }
+

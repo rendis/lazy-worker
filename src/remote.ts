@@ -1,7 +1,7 @@
 // What a window that controls another device needs to know without asking it.
 // The device decides every request itself. These rules only let the interface say why a control is off.
 
-import type { DeviceKind } from "./desktop";
+import type { DeviceKind, ShellState } from "./desktop";
 
 /** The version of the request set that two devices speak. It must equal `PROTOCOL` in `dispatch.rs`. */
 export const PROTOCOL = 1;
@@ -10,6 +10,8 @@ export type Session = {
   device: { id: string; name: string; kind: DeviceKind };
   /** What this device may do on the other one. */
   permissions: { control: boolean; applications: boolean; actions: boolean };
+  /** The full shell that the device granted this one, or `null` while it is off. Only that device can turn it on. */
+  shell: ShellState;
   version: string;
   protocol: number;
 };
@@ -39,6 +41,7 @@ export function isRefusedLink(error: unknown): boolean {
 const localOnly = new Set([
   "setProxyRole", "setProxyPort", "setProxyServer", "saveProxyApps", "saveProxyAllowed", "getProxyPeers", "getProxyLog",
   "requestActivityAccessibility", "createAction", "updateAction", "deleteAction",
+  "grantShell", "revokeShell", "dismissKeysWarning", "openShell",
 ]);
 /** The requests that need the Control permission. Only the ones that a control of this window sends. */
 const needsControl = new Set([

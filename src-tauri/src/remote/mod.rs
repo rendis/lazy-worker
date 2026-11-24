@@ -21,6 +21,7 @@ pub mod pairing_key;
 pub mod peers;
 pub mod server;
 pub mod service;
+pub mod shell;
 pub mod ssh;
 pub mod window;
 pub mod wire;

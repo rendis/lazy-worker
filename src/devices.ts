@@ -1,10 +1,11 @@
 import "./devices.css";
 import {
   desktop, type ActionSchedule, type Controller, type ControllerPermission, type DeviceKind, type DevicesOverview,
-  type DiscoveredDevice, type ProxyNetwork, type RemoteApp, type RemoteDevice, type RemoteLogEntry, type RemoteTool, type SavedAction,
-  type Statuses,
+  type DiscoveredDevice, type KeysWarning, type ProxyNetwork, type RemoteApp, type RemoteDevice, type RemoteLogEntry, type RemoteTool,
+  type SavedAction, type ShellState, type Statuses,
 } from "./desktop";
 import { mountActionWindows, type Target } from "./device-actions";
+import { mountShellWindow } from "./device-shell";
 import guideImage13 from "./assets/guide/remote-login-13.png";
 import { messages, type Language, type Message } from "./messages";
 import { tools } from "./modules";
@@ -24,6 +25,8 @@ const openSettle = 1000;
 const closeDelay = 300;
 /** How often the tools of an open device are read, in milliseconds. */
 const toolPoll = 2000;
+/** How often the session of an open device is read again, in milliseconds. It tells whether the shell is on. */
+const sessionPoll = 10000;
 /** How often the actions of an open device are read, in milliseconds. */
 const actionPoll = 5000;
 const settleDelay = 260;
@@ -40,6 +43,9 @@ const permissions: { id: ControllerPermission; icon: string; label: Message }[] 
 const logEvents: Record<string, Message> = {
   removePeer: "remoteLogEventRemovePeer", cutAll: "remoteLogEventCutAll", actionStart: "remoteLogEventActionStart",
   actionEnd: "remoteLogEventActionEnd", actionSkipped: "remoteLogEventActionSkipped",
+  shellGranted: "remoteLogEventShellGranted", shellRevoked: "remoteLogEventShellRevoked",
+  shellExpired: "remoteLogEventShellExpired", shellStart: "remoteLogEventShellStart", shellEnd: "remoteLogEventShellEnd",
+  keysChanged: "remoteLogEventKeysChanged",
 };
 const logOutcomes: Record<string, Message> = {
   ok: "remoteOutcomeOk", notPermitted: "remoteOutcomeNotPermitted", localOnly: "remoteOutcomeLocalOnly",
@@ -84,6 +90,11 @@ type ActionsState = {
   actions?: SavedAction[];
   /** The code that ended the last read. */
   error?: string;
+};
+type WarningItem = Omit<KeysWarning, "id"> & { id: string };
+/** What the last read of a device found. The session is read less often than the tools, because it rarely changes. */
+type LiveDevice = {
+  tools: RemoteTool[]; error?: string; permissions?: Session["permissions"]; shell?: ShellState; sessionAt?: number;
 };
 type Item = { id: string; self: boolean; name: string; kind: DeviceKind; data: DevicesOverview["thisDevice"] | RemoteDevice };
 
@@ -146,7 +157,7 @@ export function mountDevices(host: Host) {
   let sequence = 0;
   let shownLanguage: Language | undefined;
   /** What the last read of each device's tools found. `error` is the code that ended the last read, if one did. */
-  const live = new Map<string, { tools: RemoteTool[]; error?: string; permissions?: Session["permissions"] }>();
+  const live = new Map<string, LiveDevice>();
   const polling = new Set<string>();
   let toolTicker: number | undefined;
   const appsStates = new Map<string, AppsState>();
@@ -215,6 +226,14 @@ export function mountDevices(host: Host) {
     refreshIcons: () => host.refreshIcons(),
     fail: error => host.fail(error),
     changed: () => void refreshActions(),
+  });
+
+  const shells = mountShellWindow({
+    translate: key => host.translate(key),
+    language: () => host.language(),
+    refreshIcons: () => host.refreshIcons(),
+    fail: error => host.fail(error),
+    changed: () => void refresh(),
   });
 
   /** An icon-only button with its name as a tip. The wrapper carries the tip, so a disabled button can still give a reason. */
@@ -514,25 +533,54 @@ export function mountDevices(host: Host) {
     return { accept, cancel };
   }
 
+  /** Ends the shell of a device now. */
+  async function revokeShell(controller: Controller): Promise<void> {
+    confirming = undefined;
+    try {
+      await desktop.revokeShell(controller.id);
+    } catch (error) {
+      host.fail(error);
+    }
+    await refresh();
+  }
+
+  /** `until 17:00` for a shell that has an end, and `until off` for one that does not. */
+  function shellChipText(shell: NonNullable<ShellState>): string {
+    return shell.until === "untilOff" ? t("permShellUntilOff")
+      : fill(t("permShellUntil"), { time: formatClock(shell.until, host.language()) });
+  }
+
   function controllerRow(controller: Controller): Row<Controller> {
     let current = controller;
     const detail = h("span", { class: "setting-note" });
-    const chips = permissions.map(permission => {
-      const locked = permission.id === "shell";
-      const chip = h("button", {
-        type: "button", class: "permission-chip", "aria-pressed": "false", disabled: locked,
-        "aria-label": locked ? `${t(permission.label)}. ${t("permShellLocked")}` : t(permission.label),
-      }, icon(permission.icon), h("span", {}, t(permission.label)));
-      if (!locked) {
-        chip.addEventListener("click", () => {
-          void setPermission(current, permission.id, chip.getAttribute("aria-pressed") !== "true");
-        });
-      }
-      // The wrapper holds the tip, so the disabled shell chip can still say why it is off.
-      const root = locked ? h("span", { class: "tip", "data-tip": t("permShellLocked") }, chip) : chip;
-      return { permission, chip, root };
+    const shellConfirm = confirmButtons(t("shellTurnOff"), () => { void revokeShell(current); }, () => {
+      confirming = undefined;
+      render();
+      shellChip?.focus();
     });
-    const chipBox = h("div", { class: "permission-chips" }, ...chips.map(({ root }) => root));
+    let shellChip: HTMLButtonElement | undefined;
+    const chips = permissions.map(permission => {
+      const label = h("span", {}, t(permission.label));
+      const chip = h("button", {
+        type: "button", class: "permission-chip", "aria-pressed": "false", "aria-label": t(permission.label),
+      }, icon(permission.icon), label);
+      if (permission.id === "shell") shellChip = chip;
+      chip.addEventListener("click", () => {
+        const on = chip.getAttribute("aria-pressed") === "true";
+        if (permission.id !== "shell") {
+          void setPermission(current, permission.id, !on);
+        } else if (on) {
+          // Turning the shell off asks first, in the row.
+          confirming = `shell:${current.id}`;
+          render();
+          shellConfirm.cancel.button.focus();
+        } else {
+          shells.open({ id: current.id, name: current.name }, chip);
+        }
+      });
+      return { permission, chip, label };
+    });
+    const chipBox = h("div", { class: "permission-chips" }, ...chips.map(({ chip }) => chip));
     const remove = iconButton(fill(t("removeController"), { device: controller.name }), "user-minus");
     const { accept, cancel } = confirmButtons(t("removeAccess"), () => { void removeController(current); }, () => {
       confirming = undefined;
@@ -541,6 +589,8 @@ export function mountDevices(host: Host) {
     });
     const confirm = h("div", { class: "device-confirm", hidden: true },
       h("span", { class: "setting-note" }, t("removeConfirm")), accept.root, cancel.root);
+    const offConfirm = h("div", { class: "device-confirm", hidden: true },
+      h("span", { class: "setting-note" }, t("shellOffConfirm")), shellConfirm.accept.root, shellConfirm.cancel.root);
     remove.button.addEventListener("click", () => {
       confirming = current.id;
       render();
@@ -549,21 +599,45 @@ export function mountDevices(host: Host) {
     const root = h("div", { class: "device-row" },
       kindIcon(controller.kind),
       h("div", { class: "device-row-text" }, h("strong", {}, controller.name), detail),
-      chipBox, remove.root, confirm);
+      chipBox, remove.root, confirm, offConfirm);
     return {
       root,
       update(next) {
         current = next;
         setText(detail, next.connected ? t("connectedNow")
           : next.lastAccess === null ? t("noAccessYet") : fill(t("lastAccess"), { age: elapsed(next.lastAccess) }));
-        for (const { permission, chip } of chips) {
+        for (const { permission, chip, label } of chips) {
           setAttribute(chip, "aria-pressed", String(next.permissions[permission.id] === true));
           chip.toggleAttribute("data-on", next.permissions[permission.id] === true);
+          if (permission.id === "shell") {
+            setText(label, next.shell ? shellChipText(next.shell) : t("permShell"));
+            setAttribute(chip, "aria-label", next.shell ? `${t("permShell")}. ${shellChipText(next.shell)}` : t("permShell"));
+          }
         }
-        const asking = confirming === next.id;
-        chipBox.hidden = asking;
-        remove.root.hidden = asking;
-        confirm.hidden = !asking;
+        const removing = confirming === next.id;
+        const turningOff = confirming === `shell:${next.id}`;
+        chipBox.hidden = removing || turningOff;
+        remove.root.hidden = removing || turningOff;
+        confirm.hidden = !removing;
+        offConfirm.hidden = !turningOff;
+      },
+    };
+  }
+
+  /** A change to the keys file that a shell may have made. It stays until the person dismisses it. */
+  function warningRow(warning: WarningItem): Row<WarningItem> {
+    let current = warning;
+    const dismiss = iconButton(t("keysDismiss"), "x");
+    dismiss.button.addEventListener("click", () => {
+      void desktop.dismissKeysWarning(Number(current.id)).catch(error => host.fail(error)).then(() => refresh());
+    });
+    const text = h("span", { class: "setting-note" });
+    return {
+      root: h("div", { class: "device-row keys-warning", role: "alert" },
+        icon("triangle-alert"), h("div", { class: "device-row-text" }, text), dismiss.root),
+      update(next) {
+        current = next;
+        setText(text, `${fill(t("keysChanged"), { name: next.name })} · ${formatMoment(next.time, host.language())}`);
       },
     };
   }
@@ -615,6 +689,8 @@ export function mountDevices(host: Host) {
     const controllerRows = h("div", { class: "device-rows" });
     const controllerList = list<Controller>(
       controllerRows, controller => JSON.stringify([host.language(), controller.name, controller.kind]), controllerRow);
+    const warningRows = h("div", { class: "device-rows" });
+    const warningList = list<WarningItem>(warningRows, warning => JSON.stringify([host.language(), warning.name]), warningRow);
 
     const addAction = iconButton(t("addAction"), "plus", "outlined");
     addAction.button.setAttribute("aria-haspopup", "dialog");
@@ -650,6 +726,7 @@ export function mountDevices(host: Host) {
 
     const root = h("div", { class: "device-body" },
       access.root, pairingRow.root,
+      warningRows,
       h("div", { class: "device-subhead" }, h("h3", {}, t("whoCanControl"))),
       controllerRows, controllersEmpty.root, socketNote.root,
       h("div", { class: "device-subhead" }, h("h3", {}, t("deviceActions")), addAction.root),
@@ -695,7 +772,9 @@ export function mountDevices(host: Host) {
         log.disable(undefined, t("showLog"));
         if (confirming && confirming !== "cut" && confirming !== "passwords" && !confirming.startsWith("forget:") &&
           !(confirming.startsWith("action:") && localActions.some(({ id }) => `action:${id}` === confirming)) &&
+          !(confirming.startsWith("shell:") && data.controllers.some(({ id, shell }) => `shell:${id}` === confirming && shell !== null)) &&
           !data.controllers.some(({ id }) => id === confirming)) confirming = undefined;
+        warningList.sync(data.warnings.map(warning => ({ ...warning, id: String(warning.id) })));
         if (data.controllers.length === 0 && confirming === "cut") confirming = undefined;
         controllerList.sync(data.controllers);
         controllersEmpty.show(data.controllers.length === 0);
@@ -785,7 +864,7 @@ export function mountDevices(host: Host) {
   });
   document.addEventListener("keydown", event => {
     if (event.key !== "Escape") return;
-    if (windows.closeTop()) return;
+    if (shells.closeTop() || windows.closeTop()) return;
     if (addOverlay.isOpen()) addOverlay.close();
     else if (pairOverlay.isOpen()) pairOverlay.close();
     else if (appsWindow.hasAttribute("data-open")) closeApps();
@@ -1370,6 +1449,7 @@ export function mountDevices(host: Host) {
     renderPairForm();
     renderPairWindow();
     windows.retranslate();
+    shells.retranslate();
   }
 
   /** Leaving the view drops what waits for a second click, closes the windows, and drops what was typed in them. */
@@ -1380,6 +1460,7 @@ export function mountDevices(host: Host) {
     addOverlay.close(false);
     pairOverlay.close(false);
     windows.closeAll();
+    shells.closeAll();
     syncTicker();
     watchTools();
     watchApps();
@@ -1412,11 +1493,13 @@ export function mountDevices(host: Host) {
     try {
       const entry = live.get(id);
       const found = listTools(await desktop.remoteStatuses(id));
-      live.set(id, { tools: found, permissions: entry?.permissions });
-      if (!entry?.permissions) {
+      live.set(id, { ...entry, tools: found, error: undefined });
+      // The session says what the device allows and whether its shell is on. It changes rarely, so it is read now and then.
+      if (!entry?.permissions || Date.now() - (entry.sessionAt ?? 0) >= sessionPoll) {
+        live.get(id)!.sessionAt = Date.now();
         void desktop.remoteSession(id).then(session => {
           const current = live.get(id);
-          if (current) current.permissions = session.permissions;
+          if (current) Object.assign(current, { permissions: session.permissions, shell: session.shell });
           render();
         }).catch(() => {});
       }
@@ -1929,6 +2012,9 @@ export function mountDevices(host: Host) {
 
     const shellNote = h("span", { class: "setting-note" });
     const terminal = iconButton(t("openTerminal"), "terminal", "outlined");
+    terminal.button.addEventListener("click", () => {
+      void desktop.openShell(latest.id).catch(error => host.fail(error));
+    });
     shellSection.rows.append(h("div", { class: "device-row" },
       h("span", { class: "action-icon" }, icon("square-terminal")),
       h("div", { class: "device-row-text" }, h("strong", {}, t("openTerminal")), shellNote), terminal.root));
@@ -1987,11 +2073,14 @@ export function mountDevices(host: Host) {
           : next.length ? fill(t("deviceActionsNext"), { time: formatClock(Math.min(...next), host.language()) })
           : t(listedActions.length ? "actionManual" : "deviceActionsNone"));
 
-        const on = current.shell !== null && current.shell.until > seconds();
-        const until = on ? fill(t("deviceShellOn"), { time: formatClock(current.shell!.until, host.language()) }) : t("off");
+        // The device says whether its shell is on. Only the person at that device turns it on.
+        const grant = found?.shell ?? null;
+        const on = grant !== null && (grant.until === "untilOff" || grant.until > seconds());
+        const until = !on ? t("off") : grant.until === "untilOff" ? t("deviceShellOnUntilOff")
+          : fill(t("deviceShellOn"), { time: formatClock(grant.until, host.language()) });
         setText(shellSection.summary, until);
         setText(shellNote, on ? until : t("shellOnlyThere"));
-        terminal.disable(on ? (desktop.sampleDevices ? undefined : t("notAvailableYet")) : t("shellOnlyThere"), t("openTerminal"));
+        terminal.disable(on ? undefined : t("shellOnlyThere"), t("openTerminal"));
       },
     };
   }
@@ -2091,7 +2180,7 @@ export function mountDevices(host: Host) {
           name: "", kind: "desktop",
           remoteAccess: { remoteLogin: "off", passwordLogin: "unknown", userAllowed: null, managedFile: false, macosMajor: null },
           pairing: { open: false, expires: null, attemptsLeft: 0 }, account: null, controllers: [],
-          socket: { listening: true, error: null },
+          socket: { listening: true, error: null }, warnings: [],
         },
         devices: [],
       };

@@ -38,6 +38,8 @@ use std::{
 pub const MAX_CONNECTIONS: usize = 16;
 /// Open connections that one paired device may have.
 const MAX_PER_PEER: usize = 4;
+/// Open shell sessions that one paired device may have. They count apart from the connections above.
+const MAX_SHELLS_PER_PEER: usize = 2;
 /// Pairing connections at once. The pairing session takes one slot too.
 const MAX_PAIRING: usize = 1;
 
@@ -71,6 +73,10 @@ const MAX_RESPONSE: usize = 1024 * 1024;
 /// Runs one request for an origin. The app runs the same dispatcher as the webview does.
 pub trait Handler: Send + Sync + 'static {
     fn handle(&self, origin: Origin, request: Request) -> Result<Value, &'static str>;
+
+    /// A shell session of a peer began, or ended. The default does nothing.
+    fn shell_started(&self, _peer: &str) {}
+    fn shell_ended(&self, _peer: &str) {}
 }
 
 #[derive(Deserialize)]
@@ -79,12 +85,14 @@ struct Hello {
     hello: HelloBody,
 }
 
-/// A paired device names itself with `peer`. A device that is pairing says `pair: true`.
+/// A paired device names itself with `peer`. A device that is pairing says `pair: true`. A peer
+/// that wants a shell adds `shell: true`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct HelloBody {
     peer: Option<String>,
     pair: Option<bool>,
+    shell: Option<bool>,
 }
 
 /// The registered name of a pairing connection. It is not a device id, so it never matches a peer.
@@ -156,10 +164,17 @@ struct Envelope {
     request: Value,
 }
 
+/// One listed connection. A shell session is listed too, so that revoking, cutting, or removing ends it.
+struct Open {
+    peer: String,
+    stream: UnixStream,
+    shell: bool,
+}
+
 #[derive(Default)]
 struct Connections {
     next: u64,
-    open: HashMap<u64, (String, UnixStream)>,
+    open: HashMap<u64, Open>,
 }
 
 struct Shared {
@@ -270,16 +285,25 @@ impl Server {
 
     /// Ends every open connection of one peer at once.
     pub fn close_peer(&self, id: &str) {
-        for (peer, stream) in self.shared.lock().open.values() {
-            if peer == id {
-                let _ = stream.shutdown(std::net::Shutdown::Both);
+        for open in self.shared.lock().open.values() {
+            if open.peer == id {
+                let _ = open.stream.shutdown(std::net::Shutdown::Both);
+            }
+        }
+    }
+
+    /// Ends the shell sessions of one peer and leaves its other connections open.
+    pub fn close_shell(&self, id: &str) {
+        for open in self.shared.lock().open.values() {
+            if open.shell && open.peer == id {
+                let _ = open.stream.shutdown(std::net::Shutdown::Both);
             }
         }
     }
 
     pub fn close_all(&self) {
-        for (_, stream) in self.shared.lock().open.values() {
-            let _ = stream.shutdown(std::net::Shutdown::Both);
+        for open in self.shared.lock().open.values() {
+            let _ = open.stream.shutdown(std::net::Shutdown::Both);
         }
     }
 
@@ -289,7 +313,8 @@ impl Server {
             .lock()
             .open
             .values()
-            .map(|(peer, _)| peer.clone())
+            .filter(|open| !open.shell)
+            .map(|open| open.peer.clone())
             .collect()
     }
 
@@ -337,14 +362,23 @@ fn register(
     name: &str,
     max: usize,
     stream: UnixStream,
+    shell: bool,
 ) -> Result<(), ()> {
     let mut open = shared.lock();
-    if open.open.values().filter(|(peer, _)| peer == name).count() >= max {
+    let same = |open: &&Open| open.peer == name && open.shell == shell;
+    if open.open.values().filter(same).count() >= max {
         return Err(());
     }
     open.next += 1;
     let key = open.next;
-    open.open.insert(key, (name.to_owned(), stream));
+    open.open.insert(
+        key,
+        Open {
+            peer: name.to_owned(),
+            stream,
+            shell,
+        },
+    );
     slot.id = Some(key);
     Ok(())
 }
@@ -365,6 +399,54 @@ fn serve_pairing(reader: BufReader<Dripped>, mut writer: UnixStream, shared: &Sh
         first_line,
     }));
     shared.pairing.serve(&mut input, &mut writer);
+}
+
+/// Keeps a shell session open. It answers `ok` only while the grant of this peer lasts now, and it
+/// holds the connection until the helper or the app ends it. The app ends it when the grant ends,
+/// when the peer is removed, when all access is cut, or when it quits.
+fn serve_shell(
+    mut reader: BufReader<Dripped>,
+    mut writer: UnixStream,
+    registered: UnixStream,
+    slot: &mut Slot,
+    shared: &Shared,
+    id: &str,
+) {
+    let record = |name: Option<&str>, request: &str, outcome: &str| {
+        let _ = shared.log.append(&Entry::new(Some(id), name, request, outcome));
+    };
+    let granted = || shared.peers.get(id).filter(|peer| peer.permissions.shell);
+    let Some(peer) = granted() else {
+        let name = shared.peers.get(id).map(|peer| peer.name);
+        record(name.as_deref(), "shellStart", "notPermitted");
+        let _ = writer.write_all(error_line("notPermitted").as_bytes());
+        return;
+    };
+    if register(shared, slot, id, MAX_SHELLS_PER_PEER, registered, true).is_err() {
+        record(Some(&peer.name), "shellStart", "busy");
+        let _ = writer.write_all(error_line("busy").as_bytes());
+        return;
+    }
+    // A grant that ended between the check and the listing would have missed the call that
+    // closes the sessions. The grant is read again now that the session is listed.
+    if granted().is_none() {
+        record(Some(&peer.name), "shellStart", "notPermitted");
+        let _ = writer.write_all(error_line("notPermitted").as_bytes());
+        return;
+    }
+    // The start is recorded before the helper hears `ok`, so no shell runs without its line in the log.
+    record(Some(&peer.name), "shellStart", "ok");
+    shared.handler.shell_started(id);
+    let stream = &mut reader.get_mut().stream;
+    if writer.write_all(b"{\"ok\":\"shell\"}\n").is_ok() {
+        // The helper sends nothing during a session. The read ends when either side closes the socket.
+        let _ = stream.set_read_timeout(None);
+        let mut sink = [0u8; 256];
+        while matches!(stream.read(&mut sink), Ok(count) if count > 0) {}
+    }
+    let name = shared.peers.get(id).map_or(peer.name, |peer| peer.name);
+    shared.handler.shell_ended(id);
+    record(Some(&name), "shellEnd", "ok");
 }
 
 fn connection(stream: UnixStream, mut slot: Slot) {
@@ -397,25 +479,28 @@ fn connection(stream: UnixStream, mut slot: Slot) {
         _ => return,
     };
     let Ok(Hello {
-        hello: HelloBody { peer, pair },
+        hello: HelloBody { peer, pair, shell },
     }) = serde_json::from_slice(&hello)
     else {
         return reply(&mut writer, "badHello");
     };
-    let id = match (peer, pair) {
-        (Some(peer), None) => match DeviceId::parse(&peer) {
+    let id = match (peer, pair, shell) {
+        (Some(peer), None, _) => match DeviceId::parse(&peer) {
             Ok(id) if shared.peers.get(id.as_str()).is_some() => id.as_str().to_owned(),
             _ => return reply(&mut writer, "notPaired"),
         },
-        (None, Some(true)) => {
-            if register(&shared, &mut slot, PAIRING_CONNECTION, MAX_PAIRING, registered).is_err() {
+        (None, Some(true), None) => {
+            if register(&shared, &mut slot, PAIRING_CONNECTION, MAX_PAIRING, registered, false).is_err() {
                 return reply(&mut writer, "pairingBusy");
             }
             return serve_pairing(reader, writer, &shared);
         }
         _ => return reply(&mut writer, "badHello"),
     };
-    if register(&shared, &mut slot, &id, MAX_PER_PEER, registered).is_err() {
+    if shell == Some(true) {
+        return serve_shell(reader, writer, registered, &mut slot, &shared, &id);
+    }
+    if register(&shared, &mut slot, &id, MAX_PER_PEER, registered, false).is_err() {
         return reply(&mut writer, "busy");
     }
     {
@@ -938,7 +1023,7 @@ mod tests {
         let (first, first_reader) = held.remove(0);
         drop((first, first_reader));
         for _ in 0..50 {
-            if setup.server.shared.lock().open.values().filter(|(p, _)| p == ID_A).count()
+            if setup.server.shared.lock().open.values().filter(|open| open.peer == ID_A).count()
                 < MAX_PER_PEER
             {
                 break;
@@ -1253,5 +1338,178 @@ mod tests {
         setup.peers.remove(ID_A).unwrap();
         setup.server.close_peer(ID_A);
         assert_eq!(clients.call(&target(), &status()), Err("notPaired"));
+    }
+
+    // The shell sessions: a real helper function, the real server, and `sh` in place of the login shell.
+
+    fn grant_shell(setup: &Setup, id: &str, until: crate::devices::ShellUntil) {
+        setup.pair(id, true, false);
+        setup.peers.set_shell(id, Some(until)).unwrap();
+    }
+
+    /// Runs the helper's shell session on a thread. The stand-in shell writes the id of its `sleep` to the file.
+    fn start_shell(setup: &Setup, id: &str, pids: &PathBuf) -> (Sink, std::sync::mpsc::Receiver<i32>) {
+        let (socket, peer, pids) = (setup.socket.clone(), DeviceId::parse(id).unwrap(), pids.clone());
+        let sink = Sink::default();
+        let (done, result) = std::sync::mpsc::channel();
+        let output = sink.clone();
+        thread::spawn(move || {
+            use std::os::unix::process::CommandExt;
+            let code = helper::shell_session_with(
+                &socket,
+                &peer,
+                true,
+                Some(PathBuf::from("/bin/sh")),
+                &helper::Output::new(output),
+                Duration::from_millis(500),
+                move |_| {
+                    let mut command = std::process::Command::new("/bin/sh");
+                    command
+                        .args(["-c", &format!("sleep 60 & echo $! > '{}'; wait", pids.display())])
+                        .stdin(std::process::Stdio::null())
+                        .process_group(0);
+                    command
+                },
+            );
+            let _ = done.send(code);
+        });
+        (sink, result)
+    }
+
+    fn sleeper(pids: &PathBuf) -> i32 {
+        for _ in 0..200 {
+            if let Some(pid) = fs::read_to_string(pids).ok().and_then(|text| text.trim().parse().ok()) {
+                return pid;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        panic!("the shell did not start");
+    }
+
+    fn process_gone(pid: i32) -> bool {
+        for _ in 0..200 {
+            // SAFETY: signal 0 only checks that the process exists.
+            if unsafe { libc::kill(pid, 0) } != 0 {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        false
+    }
+
+    fn shell_open(setup: &Setup) -> bool {
+        setup.server.shared.lock().open.values().any(|open| open.shell)
+    }
+
+    #[test]
+    fn the_helper_refuses_a_shell_without_an_active_grant_and_starts_nothing() {
+        use crate::devices::ShellUntil;
+        let setup = setup("shell-refused");
+        setup.pair(ID_A, true, true);
+        for until in [None, Some(ShellUntil::At(1))] {
+            setup.peers.set_shell(ID_A, until).unwrap();
+            let sink = Sink::default();
+            let code = helper::shell_session_with(
+                &setup.socket,
+                &DeviceId::parse(ID_A).unwrap(),
+                true,
+                Some(PathBuf::from("/bin/sh")),
+                &helper::Output::new(sink.clone()),
+                Duration::from_secs(1),
+                |_| panic!("no shell may start"),
+            );
+            assert_eq!(code, helper::EXIT_REFUSED);
+            assert_eq!(sink.text(), "Full shell is off on this device.\r\n");
+        }
+        assert!(!shell_open(&setup));
+        let log = setup.log.read();
+        assert!(log.iter().all(|entry| entry.request == "shellStart" && entry.outcome == "notPermitted"));
+        assert_eq!(log.len(), 2);
+        // A device that is not paired gets nothing either.
+        let stranger = DeviceId::parse(ID_B).unwrap();
+        let sink = Sink::default();
+        let code = helper::shell_session_with(
+            &setup.socket, &stranger, true, Some(PathBuf::from("/bin/sh")), &helper::Output::new(sink.clone()),
+            Duration::from_secs(1), |_| panic!("no shell may start"),
+        );
+        assert_eq!(code, helper::EXIT_REFUSED);
+    }
+
+    #[test]
+    fn the_pairing_hello_cannot_ask_for_a_shell() {
+        let setup = setup("shell-pair");
+        for hello in [
+            serde_json::json!({"hello": {"pair": true, "shell": true}}),
+            serde_json::json!({"hello": {"shell": true}}),
+            serde_json::json!({"hello": {"peer": ID_A, "pair": true, "shell": true}}),
+        ] {
+            let stream = UnixStream::connect(&setup.socket).unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            writeln!(&stream, "{hello}").unwrap();
+            let mut line = String::new();
+            BufReader::new(stream).read_line(&mut line).unwrap();
+            assert_eq!(line, "{\"error\":\"badHello\"}\n", "{hello}");
+        }
+        assert!(!shell_open(&setup));
+    }
+
+    #[test]
+    fn a_shell_runs_while_the_grant_lasts_and_each_way_to_end_it_ends_the_session() {
+        use crate::devices::ShellUntil;
+        for ending in ["revoke", "cut", "remove", "stop"] {
+            let setup = setup("shell-ends");
+            grant_shell(&setup, ID_A, ShellUntil::OFF);
+            let pids = setup.dir.join("pids");
+            let (_sink, result) = start_shell(&setup, ID_A, &pids);
+            let sleeping = sleeper(&pids);
+            assert!(shell_open(&setup), "{ending}");
+            // A shell is not a connection that makes the device show as connected.
+            assert!(!setup.server.connected().contains(ID_A));
+            match ending {
+                "revoke" => {
+                    setup.peers.set_shell(ID_A, None).unwrap();
+                    setup.server.close_shell(ID_A);
+                }
+                "cut" => {
+                    setup.peers.clear().unwrap();
+                    setup.server.close_all();
+                }
+                "remove" => {
+                    setup.peers.remove(ID_A).unwrap();
+                    setup.server.close_peer(ID_A);
+                }
+                _ => setup.server.stop(),
+            }
+            result.recv_timeout(Duration::from_secs(10)).unwrap_or_else(|_| panic!("{ending}: the helper did not end"));
+            assert!(process_gone(sleeping), "{ending}: the shell group is still running");
+            for _ in 0..100 {
+                if setup.log.read().iter().any(|entry| entry.request == "shellEnd") {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+            let events: Vec<_> = setup.log.read().iter().rev().map(|entry| (entry.request.clone(), entry.outcome.clone())).collect();
+            assert_eq!(
+                events,
+                [("shellStart".to_owned(), "ok".to_owned()), ("shellEnd".to_owned(), "ok".to_owned())],
+                "{ending}"
+            );
+        }
+    }
+
+    #[test]
+    fn revoking_a_shell_leaves_the_other_connections_of_the_device_open() {
+        use crate::devices::ShellUntil;
+        let setup = setup("shell-keeps");
+        grant_shell(&setup, ID_A, ShellUntil::OFF);
+        let (mut stream, mut reader) = setup.connect(ID_A);
+        assert_eq!(ask(&mut stream, &mut reader, status()), serde_json::json!({"ok": "done"}));
+        let pids = setup.dir.join("pids");
+        let (_sink, result) = start_shell(&setup, ID_A, &pids);
+        let sleeping = sleeper(&pids);
+        setup.server.close_shell(ID_A);
+        result.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert!(process_gone(sleeping));
+        assert_eq!(ask(&mut stream, &mut reader, status()), serde_json::json!({"ok": "done"}));
     }
 }

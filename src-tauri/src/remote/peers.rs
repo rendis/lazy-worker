@@ -8,7 +8,7 @@ use super::{
     identity::{parse_public_key, DeviceId},
     now, read_small, write_atomic,
 };
-use crate::devices::Kind;
+use crate::devices::{Kind, ShellUntil};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
@@ -34,7 +34,7 @@ pub struct PeerPermissions {
     pub applications: bool,
     #[serde(default)]
     pub actions: bool,
-    /// Granting the shell arrives in a later step. Nothing here sets it.
+    /// Derived from `Peer::shell_until` each time a peer is read. A value in the file is ignored.
     #[serde(default)]
     pub shell: bool,
 }
@@ -50,6 +50,9 @@ pub struct Peer {
     pub permissions: PeerPermissions,
     pub added: u64,
     pub last_access: Option<u64>,
+    /// When the full shell that the user granted at this device ends. Only `Peers::set_shell` sets it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell_until: Option<ShellUntil>,
 }
 
 /// True for an invisible format character (Unicode Cf) that can reorder or hide text:
@@ -119,6 +122,7 @@ impl Peer {
             permissions: PeerPermissions::default(),
             added,
             last_access: None,
+            shell_until: None,
         };
         peer.validate()?;
         Ok(peer)
@@ -231,6 +235,13 @@ impl Peers {
         Ok(result)
     }
 
+    /// The peer as the rest of the app reads it: `permissions.shell` says whether its shell grant
+    /// lasts now. The stored flag is never used.
+    fn derived(mut peer: Peer) -> Peer {
+        peer.permissions.shell = peer.shell_until.is_some_and(|until| until.active(now()));
+        peer
+    }
+
     pub fn get(&self, id: &str) -> Option<Peer> {
         self.lock()
             .data
@@ -238,19 +249,50 @@ impl Peers {
             .iter()
             .find(|peer| peer.id == id)
             .cloned()
+            .map(Self::derived)
     }
 
     pub fn list(&self) -> Vec<Peer> {
-        self.lock().data.peers.clone()
+        self.lock().data.peers.iter().cloned().map(Self::derived).collect()
+    }
+
+    /// The ids of the peers whose shell grant ended at or before `at`, and has not been cleared.
+    pub fn shell_expired(&self, at: u64) -> Vec<String> {
+        self.lock()
+            .data
+            .peers
+            .iter()
+            .filter(|peer| matches!(peer.shell_until, Some(ShellUntil::At(end)) if end <= at))
+            .map(|peer| peer.id.clone())
+            .collect()
+    }
+
+    /// Sets or clears the shell grant of a peer, and returns the grant it had.
+    pub fn set_shell(
+        &self,
+        id: &str,
+        until: Option<ShellUntil>,
+    ) -> Result<Option<ShellUntil>, &'static str> {
+        self.change(|data| {
+            let peer = data
+                .peers
+                .iter_mut()
+                .find(|peer| peer.id == id)
+                .ok_or("notPaired")?;
+            peer.permissions.shell = false;
+            Ok(std::mem::replace(&mut peer.shell_until, until))
+        })
     }
 
     pub fn networks(&self) -> Vec<String> {
         self.lock().data.networks.clone()
     }
 
-    /// Adds a peer, or replaces the one with the same id.
-    pub fn insert(&self, peer: Peer) -> Result<(), &'static str> {
+    /// Adds a peer, or replaces the one with the same id. A shell grant is never carried in.
+    pub fn insert(&self, mut peer: Peer) -> Result<(), &'static str> {
         peer.validate()?;
+        peer.shell_until = None;
+        peer.permissions.shell = false;
         self.change(|data| {
             if let Some(known) = data.peers.iter_mut().find(|known| known.id == peer.id) {
                 *known = peer;
@@ -263,7 +305,7 @@ impl Peers {
         })
     }
 
-    /// Sets what the user can set here. The shell stays as it is.
+    /// Sets what the user can set here. The shell has its own grant.
     pub fn set_permissions(
         &self,
         id: &str,
@@ -281,7 +323,7 @@ impl Peers {
                 control,
                 applications,
                 actions,
-                shell: peer.permissions.shell,
+                shell: false,
             };
             Ok(())
         })
@@ -550,6 +592,60 @@ mod tests {
         assert_eq!(on_disk(dir.join("peers.json")), Some(first));
         peers.touch(ID_A);
         peers.touch("ffffffffffffffffffffffffffffffff");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_shell_grant_is_stored_and_the_permission_is_derived_from_it() {
+        let (dir, peers) = store("peers-shell");
+        peers.insert(peer(ID_A, "A")).unwrap();
+        assert!(!peers.get(ID_A).unwrap().permissions.shell);
+        let later = ShellUntil::At(now() + 600);
+        assert_eq!(peers.set_shell(ID_A, Some(later)).unwrap(), None);
+        let granted = peers.get(ID_A).unwrap();
+        assert!(granted.permissions.shell && granted.shell_until == Some(later));
+        // The same state comes back from the file, with the time as a number.
+        let text = fs::read_to_string(dir.join("peers.json")).unwrap();
+        assert!(text.contains("\"shellUntil\""));
+        assert!(Peers::open(dir.join("peers.json")).unwrap().get(ID_A).unwrap().permissions.shell);
+        // Until turned off is stored as the word, and has no end.
+        peers.set_shell(ID_A, Some(ShellUntil::OFF)).unwrap();
+        assert!(fs::read_to_string(dir.join("peers.json")).unwrap().contains("\"untilOff\""));
+        assert!(Peers::open(dir.join("peers.json")).unwrap().get(ID_A).unwrap().permissions.shell);
+        assert!(peers.shell_expired(u64::MAX).is_empty(), "no end, no expiry");
+        // A grant in the past is not active, and is listed as expired until it is cleared.
+        peers.set_shell(ID_A, Some(ShellUntil::At(5))).unwrap();
+        assert!(!peers.get(ID_A).unwrap().permissions.shell);
+        assert_eq!(peers.shell_expired(5), [ID_A]);
+        assert!(peers.shell_expired(4).is_empty());
+        assert_eq!(peers.set_shell(ID_A, None).unwrap(), Some(ShellUntil::At(5)));
+        assert!(peers.shell_expired(u64::MAX).is_empty());
+        assert_eq!(peers.set_shell(ID_B, None), Err("notPaired"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn permissions_and_pairing_never_carry_or_keep_a_shell() {
+        let (dir, peers) = store("peers-shell-keep");
+        peers.insert(peer(ID_A, "A")).unwrap();
+        peers.set_shell(ID_A, Some(ShellUntil::OFF)).unwrap();
+        // Setting the other permissions leaves the grant as it is, and a stored `shell: true` is ignored.
+        peers.set_permissions(ID_A, true, true, true).unwrap();
+        assert!(peers.get(ID_A).unwrap().permissions.shell);
+        peers.set_shell(ID_A, None).unwrap();
+        let mut forged = peer(ID_B, "B");
+        forged.permissions.shell = true;
+        forged.shell_until = Some(ShellUntil::OFF);
+        peers.insert(forged).unwrap();
+        let stored = peers.get(ID_B).unwrap();
+        assert!(!stored.permissions.shell && stored.shell_until.is_none());
+        let text = serde_json::json!({"version": 1, "peers": [{
+            "id": ID_A, "name": "A", "kind": "laptop", "publicKey": KEY,
+            "permissions": {"shell": true}, "added": 1, "lastAccess": null
+        }]});
+        fs::write(dir.join("peers2.json"), text.to_string()).unwrap();
+        fs::set_permissions(dir.join("peers2.json"), fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(!Peers::open(dir.join("peers2.json")).unwrap().get(ID_A).unwrap().permissions.shell);
         fs::remove_dir_all(dir).unwrap();
     }
 }

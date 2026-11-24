@@ -2,7 +2,9 @@
 //!
 //! A managed line ends with the comment `lazy-worker:<id>`. Only those lines are ever changed.
 //! Every other line keeps its exact bytes and its place. A managed line grants one thing: to run
-//! this app's helper for one peer, from the networks listed, with no terminal.
+//! this app's helper for one peer, from the networks listed. The line has no terminal (`pty`)
+//! until the user grants a full shell to that peer at this device, and it loses `pty` again when
+//! the grant ends.
 
 use super::{
     identity::{parse_public_key, DeviceId},
@@ -107,18 +109,21 @@ fn check_helper(path: &Path) -> Result<&str, &'static str> {
     Ok(text)
 }
 
-/// The line for one peer. The networks are the defaults and the user's extra ones.
+/// The line for one peer. The networks are the defaults and the user's extra ones. `shell` adds
+/// `pty`, which lets the peer ask for a terminal. The line still runs only our helper.
 pub fn render(
     id: &str,
     public_key: &str,
     networks: &[String],
     helper: &Path,
+    shell: bool,
 ) -> Result<String, &'static str> {
     let id = DeviceId::parse(id)?;
     let key = parse_public_key(public_key)?;
     let helper = check_helper(helper)?;
     Ok(format!(
-        "restrict,from=\"{}\",command=\"\\\"{}\\\" remote --peer {}\" {} {}{}",
+        "restrict,{}from=\"{}\",command=\"\\\"{}\\\" remote --peer {}\" {} {}{}",
+        if shell { "pty," } else { "" },
         allowed_networks(networks)?.join(","),
         helper,
         id.as_str(),
@@ -206,7 +211,8 @@ impl AuthorizedKeys {
     }
 
     pub fn install(&self, peer: &Peer, networks: &[String]) -> Result<(), &'static str> {
-        let line = render(&peer.id, &peer.public_key, networks, &self.trusted_helper()?)?;
+        let shell = peer.permissions.shell;
+        let line = render(&peer.id, &peer.public_key, networks, &self.trusted_helper()?, shell)?;
         self.rewrite(
             BTreeMap::from([(peer.id.clone(), Some(line))]),
             Others::Keep,
@@ -241,10 +247,26 @@ impl AuthorizedKeys {
     pub fn refresh_all(&self, peers: &[Peer], networks: &[String]) -> Result<(), &'static str> {
         let mut wanted = BTreeMap::new();
         for peer in peers {
-            let line = render(&peer.id, &peer.public_key, networks, &self.trusted_helper()?)?;
+            let shell = peer.permissions.shell;
+            let line = render(&peer.id, &peer.public_key, networks, &self.trusted_helper()?, shell)?;
             wanted.insert(peer.id.clone(), Some(line));
         }
         self.rewrite(wanted, Others::Drop)
+    }
+
+    /// A hash of every line that is not ours, with their exact bytes and order. It does not change
+    /// when a managed line is added, changed, or removed. A missing file hashes as an empty one.
+    pub fn foreign_digest(&self) -> Result<String, &'static str> {
+        use sha2::{Digest, Sha256};
+        let original = self.read()?;
+        let mut hash = Sha256::new();
+        for segment in original.split_inclusive(|&byte| byte == b'\n') {
+            let content = segment.strip_suffix(b"\n").unwrap_or(segment);
+            if managed_id(content).is_none() {
+                hash.update(segment);
+            }
+        }
+        Ok(hash.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
     }
 
     /// Makes `~/.ssh` when it is missing, and checks that it is ours and that others cannot write it.
@@ -364,7 +386,7 @@ mod tests {
 
     #[test]
     fn the_line_has_the_exact_text_with_a_path_with_spaces() {
-        let line = render(ID_A, KEY, &["203.0.113.0/24".into()], Path::new(HELPER)).unwrap();
+        let line = render(ID_A, KEY, &["203.0.113.0/24".into()], Path::new(HELPER), false).unwrap();
         let expected = format!(
             "restrict,from=\"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,100.64.0.0/10,fc00::/7,fe80::/10,203.0.113.0/24\",\
 command=\"\\\"{HELPER}\\\" remote --peer {ID_A}\" {KEY} lazy-worker:{ID_A}"
@@ -373,7 +395,7 @@ command=\"\\\"{HELPER}\\\" remote --peer {ID_A}\" {KEY} lazy-worker:{ID_A}"
         assert!(!line.contains("pty"));
         assert!(!line.contains("127.0.0.1"));
         // An extra network that is already a default is not listed twice.
-        let again = render(ID_A, KEY, &["10.0.0.0/8".into()], Path::new(HELPER)).unwrap();
+        let again = render(ID_A, KEY, &["10.0.0.0/8".into()], Path::new(HELPER), false).unwrap();
         assert_eq!(again.matches("10.0.0.0/8").count(), 1);
     }
 
@@ -464,7 +486,7 @@ expiry-time=\"202611231215\",command=\"\\\"{HELPER}\\\" remote --pair\" {} lazy-
             "/a/\u{7f}",
         ] {
             assert_eq!(
-                render(ID_A, KEY, &[], Path::new(path)),
+                render(ID_A, KEY, &[], Path::new(path), false),
                 Err("helperPathInvalid"),
                 "{path:?}"
             );
@@ -475,9 +497,9 @@ expiry-time=\"202611231215\",command=\"\\\"{HELPER}\\\" remote --pair\" {} lazy-
     #[test]
     fn a_bad_id_key_or_network_is_refused() {
         let helper = Path::new(HELPER);
-        assert!(render("short", KEY, &[], helper).is_err());
-        assert!(render(ID_A, "ssh-rsa AAAA", &[], helper).is_err());
-        assert!(render(ID_A, KEY, &["10.0.0.0/8\",command=\"x".into()], helper).is_err());
+        assert!(render("short", KEY, &[], helper, false).is_err());
+        assert!(render(ID_A, "ssh-rsa AAAA", &[], helper, false).is_err());
+        assert!(render(ID_A, KEY, &["10.0.0.0/8\",command=\"x".into()], helper, false).is_err());
     }
 
     #[test]
@@ -529,8 +551,8 @@ expiry-time=\"202611231215\",command=\"\\\"{HELPER}\\\" remote --pair\" {} lazy-
     #[test]
     fn install_replaces_in_place_and_duplicates_collapse() {
         let (home, keys) = keys("ak-dup");
-        let a = render(ID_A, KEY, &[], Path::new(HELPER)).unwrap();
-        let b = render(ID_B, KEY, &[], Path::new(HELPER)).unwrap();
+        let a = render(ID_A, KEY, &[], Path::new(HELPER), false).unwrap();
+        let b = render(ID_B, KEY, &[], Path::new(HELPER), false).unwrap();
         fs::create_dir(home.join(".ssh")).unwrap();
         fs::set_permissions(home.join(".ssh"), fs::Permissions::from_mode(0o700)).unwrap();
         let old = a.replace("10.0.0.0/8,", "");
@@ -689,6 +711,75 @@ expiry-time=\"202611231215\",command=\"\\\"{HELPER}\\\" remote --pair\" {} lazy-
                 .ino(),
             before
         );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn a_shell_grant_adds_pty_to_the_line_and_the_end_of_it_takes_it_away() {
+        let from = "from=\"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,100.64.0.0/10,fc00::/7,fe80::/10\"";
+        let command = format!("command=\"\\\"{HELPER}\\\" remote --peer {ID_A}\" {KEY} lazy-worker:{ID_A}");
+        let without = format!("restrict,{from},{command}");
+        let with = format!("restrict,pty,{from},{command}");
+        assert_eq!(render(ID_A, KEY, &[], Path::new(HELPER), false).unwrap(), without);
+        assert_eq!(render(ID_A, KEY, &[], Path::new(HELPER), true).unwrap(), with);
+
+        let (home, keys) = keys("ak-shell");
+        let mut shell_peer = peer(ID_A, "A");
+        keys.install(&shell_peer, &[]).unwrap();
+        keys.install(&peer(ID_B, "B"), &[]).unwrap();
+        let text = |home: &Path| String::from_utf8(contents(home)).unwrap();
+        assert_eq!(text(&home).lines().next().unwrap(), without);
+        // The grant rewrites that peer's line in place and leaves the other line alone.
+        shell_peer.permissions.shell = true;
+        keys.install(&shell_peer, &[]).unwrap();
+        let granted = text(&home);
+        assert_eq!(granted.lines().next().unwrap(), with);
+        assert_eq!(granted.lines().count(), 2);
+        assert!(!granted.lines().nth(1).unwrap().contains("pty"));
+        // The end of the grant restores the exact first text.
+        shell_peer.permissions.shell = false;
+        keys.install(&shell_peer, &[]).unwrap();
+        assert_eq!(text(&home).lines().next().unwrap(), without);
+        // A refresh renders `pty` for a peer that has the grant, and only for it.
+        let mut granted_peer = peer(ID_B, "B");
+        granted_peer.permissions.shell = true;
+        keys.refresh_all(&[peer(ID_A, "A"), granted_peer], &[]).unwrap();
+        let lines: Vec<String> = text(&home).lines().map(str::to_owned).collect();
+        assert!(!lines[0].contains("pty") && lines[1].contains("restrict,pty,"));
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn the_foreign_digest_ignores_our_lines_and_sees_any_other_change() {
+        let (home, keys) = keys("ak-digest");
+        // No file hashes as an empty one.
+        let empty = keys.foreign_digest().unwrap();
+        fs::create_dir_all(home.join(".ssh")).unwrap();
+        fs::set_permissions(home.join(".ssh"), fs::Permissions::from_mode(0o700)).unwrap();
+        let file = home.join(".ssh/authorized_keys");
+        fs::write(&file, "ssh-ed25519 AAAAuser user@host\n# note\n").unwrap();
+        let base = keys.foreign_digest().unwrap();
+        assert_ne!(base, empty);
+        // Our lines, with and without `pty`, an install, a removal, and a pairing line do not move it.
+        let mut shell_peer = peer(ID_A, "A");
+        keys.install(&shell_peer, &[]).unwrap();
+        keys.install_pairing(&[], "202611231215").unwrap();
+        shell_peer.permissions.shell = true;
+        keys.install(&shell_peer, &[]).unwrap();
+        keys.remove(ID_A).unwrap();
+        keys.remove_pairing().unwrap();
+        keys.install(&peer(ID_B, "B"), &[]).unwrap();
+        assert_eq!(keys.foreign_digest().unwrap(), base);
+        // A key that is added, edited, or removed does.
+        let mut text = fs::read_to_string(&file).unwrap();
+        text.push_str("ssh-ed25519 AAAAattacker evil\n");
+        fs::write(&file, &text).unwrap();
+        let added = keys.foreign_digest().unwrap();
+        assert_ne!(added, base);
+        fs::write(&file, text.replace("user@host", "user@other")).unwrap();
+        assert_ne!(keys.foreign_digest().unwrap(), added);
+        fs::write(&file, text.replace("ssh-ed25519 AAAAuser user@host\n", "")).unwrap();
+        assert_ne!(keys.foreign_digest().unwrap(), base);
         fs::remove_dir_all(home).unwrap();
     }
 }

@@ -9,6 +9,42 @@ pub enum Kind {
     Desktop,
 }
 
+/// When a full shell that this device granted ends: Unix seconds, or `"untilOff"` until the user turns it off.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+#[cfg_attr(not(unix), allow(dead_code))]
+pub enum ShellUntil {
+    At(u64),
+    Off(UntilOff),
+}
+
+/// The one word that stands for no end time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UntilOff {
+    #[serde(rename = "untilOff")]
+    UntilOff,
+}
+
+#[cfg_attr(not(unix), allow(dead_code))]
+impl ShellUntil {
+    pub const OFF: Self = Self::Off(UntilOff::UntilOff);
+
+    /// True while the grant lasts at `now` (Unix seconds).
+    pub fn active(self, now: u64) -> bool {
+        match self {
+            Self::At(end) => end > now,
+            Self::Off(_) => true,
+        }
+    }
+}
+
+/// A shell that this device granted, as the webview reads it: `{ "until": <seconds> | "untilOff" }`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellGrant {
+    pub until: ShellUntil,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Device {
@@ -80,8 +116,8 @@ impl Pairing {
     }
 }
 
-/// A device that this one controls, as the Devices view shows it. The lists after `online` come
-/// in later steps and are empty until then.
+/// A device that this one controls, as the Devices view shows it. The tools list comes in a later
+/// step and is empty until then.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Remote {
@@ -96,7 +132,6 @@ pub struct Remote {
     pub online: Option<bool>,
     pub tools: Vec<()>,
     pub apps: RemoteApps,
-    pub shell: Option<()>,
 }
 
 /// `pinned` holds bundle identifiers. The view reads the list itself, because it changes while the view is open.
@@ -121,7 +156,6 @@ impl Remote {
             apps: RemoteApps {
                 pinned: device.pinned.clone(),
             },
-            shell: None,
         }
     }
 }
@@ -138,6 +172,8 @@ pub struct Controller {
     /// True while it has an open connection.
     pub connected: bool,
     pub permissions: ControllerPermissions,
+    /// The shell that this device granted it, or nothing while it is off.
+    pub shell: Option<ShellGrant>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -164,6 +200,10 @@ impl Controller {
                 actions: peer.permissions.actions,
                 shell: peer.permissions.shell,
             },
+            shell: peer
+                .shell_until
+                .filter(|until| until.active(crate::remote::now()))
+                .map(|until| ShellGrant { until }),
         }
     }
 }
@@ -187,7 +227,7 @@ impl Socket {
     }
 }
 
-/// The list the Devices view draws. The shell comes in a later step.
+/// The list the Devices view draws.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Overview {
@@ -207,6 +247,19 @@ pub struct ThisDevice {
     pub account: Option<String>,
     pub controllers: Vec<Controller>,
     pub socket: Socket,
+    /// Changes to `~/.ssh/authorized_keys` that happened while a device had a shell, until dismissed.
+    pub warnings: Vec<KeysWarning>,
+}
+
+/// `~/.ssh/authorized_keys` changed while a device had a shell on this one. Kept in memory until dismissed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeysWarning {
+    pub id: u64,
+    pub peer: String,
+    pub name: String,
+    /// Unix seconds.
+    pub time: u64,
 }
 
 #[cfg(target_os = "macos")]
@@ -234,6 +287,7 @@ pub struct Stores {
     pub socket: Socket,
     pub pairing: Pairing,
     pub devices: Vec<Remote>,
+    pub warnings: Vec<KeysWarning>,
 }
 
 /// This device by its name and kind. It runs commands, so call it off the main thread.
@@ -255,6 +309,7 @@ pub fn overview(stores: Stores, remote_access: RemoteAccess) -> Overview {
             account: None,
             controllers: stores.controllers,
             socket: stores.socket,
+            warnings: stores.warnings,
         },
         devices: stores.devices,
     }
@@ -329,6 +384,7 @@ mod tests {
                 account: Some("me".into()),
                 controllers: Vec::new(),
                 socket: Socket::unavailable("x"),
+                warnings: Vec::new(),
             },
             devices: Vec::new(),
         })

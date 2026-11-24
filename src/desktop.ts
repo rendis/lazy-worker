@@ -81,6 +81,10 @@ export type ActivityAccessibility = "granted" | "required" | "unsupported" | "un
 
 export type DeviceKind = "laptop" | "desktop";
 export type ControllerPermission = "control" | "applications" | "actions" | "shell";
+/** When a full shell ends: seconds since the Unix epoch, or `"untilOff"` while it lasts until the person turns it off. */
+export type ShellUntil = number | "untilOff";
+/** A full shell that a device granted, or `null` while it is off. */
+export type ShellState = { until: ShellUntil } | null;
 /** A device that may control this one. `lastAccess` is in seconds since the Unix epoch. */
 export type Controller = {
   id: string;
@@ -90,7 +94,11 @@ export type Controller = {
   /** True while the device has an open connection. */
   connected: boolean;
   permissions: Record<ControllerPermission, boolean>;
+  /** The shell that this device granted it. Only the person at this device turns it on. */
+  shell: ShellState;
 };
+/** `~/.ssh/authorized_keys` changed while a device had a shell on this one. It stays until dismissed. */
+export type KeysWarning = { id: number; peer: string; name: string; time: number };
 /** One request or event in the log of remote access. `request` is a command name, never its arguments. */
 export type RemoteLogEntry = {
   time: number;
@@ -144,8 +152,6 @@ export type RemoteDevice = {
   tools: RemoteTool[];
   /** The bundle identifiers of the apps the user chose to see first. The view reads the list itself. */
   apps: { pinned: string[] };
-  /** The shell is on until this time, or `null` while it is off. Only that device can turn it on. */
-  shell: { until: number } | null;
 };
 /** How this device lets others in over SSH. `macosMajor` is the major version of macOS. */
 export type RemoteAccess = {
@@ -175,6 +181,7 @@ export type DevicesOverview = {
     controllers: Controller[];
     /** Whether this device can receive requests, and an error code when it cannot. */
     socket: { listening: boolean; error: string | null };
+    warnings: KeysWarning[];
   };
   devices: RemoteDevice[];
 };
@@ -366,6 +373,20 @@ function updatePreviewCaffeinateSession(settings: CaffeinateSettings): void {
 /** The controllers and the log of a preview. A change lasts until the page reloads. */
 let previewControllers: Controller[] | undefined;
 const previewPairing: PairingState = { open: false, expires: null, attemptsLeft: 0 };
+/** The full shell that each controlled sample device granted this one. Only that device can turn it on, so a preview never changes it. */
+function previewShellOf(id: string): ShellState {
+  if (id !== "studio" || previewQuery.has("shell-off")) return null;
+  const end = new Date();
+  end.setHours(end.getHours() + 3, 0, 0, 0);
+  return { until: previewQuery.has("shell-forever") ? "untilOff" : Math.floor(end.getTime() / 1000) };
+}
+/** The changes of the keys file that a preview shows with `?keys-warning`, until they are dismissed. */
+let previewWarnings: KeysWarning[] | undefined;
+function previewWarningList(): KeysWarning[] {
+  previewWarnings ??= previewQuery.has("keys-warning")
+    ? [{ id: 1, peer: "studio", name: "iMac del estudio", time: Math.floor(Date.now() / 1000) - 600 }] : [];
+  return previewWarnings;
+}
 /** A preview shows a device pairing with this one with `?pair-in`, six seconds after the window opens. */
 let previewPairingOpened = 0;
 /** The window ends by itself, as on the device. */
@@ -374,7 +395,7 @@ function settlePreviewPairing(now: number): void {
   if (previewQuery.has("pair-in") && now - previewPairingOpened >= 6) {
     previewControllerList().push({
       id: "mini", name: "Mac mini de la sala", kind: "desktop", lastAccess: null, connected: false,
-      permissions: { control: true, applications: false, actions: false, shell: false },
+      permissions: { control: true, applications: false, actions: false, shell: false }, shell: null,
     });
     Object.assign(previewPairing, { open: false, expires: null, attemptsLeft: 0 });
   } else if (previewPairing.expires !== null && previewPairing.expires <= now) {
@@ -389,15 +410,15 @@ function sampleControllers(now: number): Controller[] {
   return [
     {
       id: "studio", name: "iMac del estudio", kind: "desktop", lastAccess: now - 5 * 60, connected: true,
-      permissions: { control: true, applications: true, actions: true, shell: false },
+      permissions: { control: true, applications: true, actions: true, shell: false }, shell: null,
     },
     {
       id: "office", name: "MacBook Air de la oficina", kind: "laptop", lastAccess: now - 26 * 3600, connected: false,
-      permissions: { control: true, applications: false, actions: false, shell: false },
+      permissions: { control: true, applications: false, actions: false, shell: false }, shell: null,
     },
     {
       id: "new", name: "Mac mini", kind: "desktop", lastAccess: null, connected: false,
-      permissions: { control: false, applications: false, actions: false, shell: false },
+      permissions: { control: false, applications: false, actions: false, shell: false }, shell: null,
     },
   ];
 }
@@ -613,16 +634,18 @@ function previewActionView(action: SavedAction, remote: boolean): SavedAction {
 function previewDevices(): DevicesOverview {
   const now = Math.floor(Date.now() / 1000);
   settlePreviewPairing(now);
-  const shellEnd = new Date();
-  shellEnd.setHours(shellEnd.getHours() + 3, 0, 0, 0);
   return {
     thisDevice: {
       name: "MacBook Pro", kind: "laptop", remoteAccess: { ...previewAccess }, pairing: { ...previewPairing },
       account: "alex",
-      controllers: previewControllerList().map(controller => ({
-        ...controller, permissions: { ...controller.permissions },
-      })),
+      controllers: previewControllerList().map(controller => {
+        // A grant that has ended is off, as on the device.
+        const ended = typeof controller.shell?.until === "number" && controller.shell.until <= now;
+        const shell = ended ? null : controller.shell;
+        return { ...controller, shell, permissions: { ...controller.permissions, shell: shell !== null } };
+      }),
       socket: { listening: true, error: null },
+      warnings: previewWarningList().map(warning => ({ ...warning })),
     },
     devices: [
       {
@@ -630,12 +653,11 @@ function previewDevices(): DevicesOverview {
         user: "studio", host: "imac-del-estudio.local", port: 22, added: now - 12 * 86400,
         tools: [{ id: "activity", running: true }, { id: "caffeinate", running: false }],
         apps: { pinned: [...previewPinned] },
-        shell: { until: Math.floor(shellEnd.getTime() / 1000) },
       },
       {
         id: "old", name: "MacBook Air de la oficina con un nombre muy largo para probar el ajuste", kind: "laptop",
         user: "oficina", host: "192.168.1.40", port: 22, added: now - 90 * 86400,
-        online: false, tools: [], apps: { pinned: [] }, shell: null,
+        online: false, tools: [], apps: { pinned: [] },
       },
       ...previewDeviceAdditions.map(device => ({ ...device })),
     ],
@@ -676,6 +698,7 @@ export const desktop = {
     return {
       device: { id: remoteId ?? "", name: device?.name ?? "Device", kind: device?.kind ?? "desktop" },
       permissions: previewPermissions(),
+      shell: previewShellOf(remoteId ?? ""),
       version: previewQuery.has("mismatch") ? "0.5.0" : previewVersion,
       protocol: previewQuery.has("protocol") ? PROTOCOL + 1 : PROTOCOL,
     };
@@ -699,7 +722,7 @@ export const desktop = {
   },
   async remoteSession(id: string): Promise<Session> {
     if (native) return call("remoteCall", { id, request: { command: "getSession" } });
-    return { ...(await desktop.getSession()), device: { id, name: "", kind: "desktop" } };
+    return { ...(await desktop.getSession()), shell: previewShellOf(id), device: { id, name: "", kind: "desktop" } };
   },
   /** Turns a tool of another device on or off. Starting the proxy server is for the person at that device only. */
   async remoteSetToolActive(id: string, tool: ToolId, active: boolean): Promise<Statuses> {
@@ -968,6 +991,42 @@ export const desktop = {
     if (!controller) throw "notPaired";
     controller.permissions = { ...controller.permissions, ...permissions };
   },
+  /**
+   * Allows a full shell for a device that controls this one: `minutes` from 1 to 1440, or `null` until the person turns it off.
+   * Only the person at this device can do it, and only here, never from a window that controls it.
+   */
+  async grantShell(id: string, minutes: number | null): Promise<ShellState> {
+    if (native) return call("grantShell", { id, minutes });
+    const controller = previewControllerList().find(item => item.id === id);
+    if (!controller) throw "notPaired";
+    if (minutes !== null && (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440)) throw "shellDurationInvalid";
+    controller.shell = { until: minutes === null ? "untilOff" : Math.floor(Date.now() / 1000) + minutes * 60 };
+    previewLogList().unshift({
+      time: Math.floor(Date.now() / 1000), peer: id, name: controller.name, request: "shellGranted", outcome: "ok",
+    });
+    return controller.shell;
+  },
+  /** Ends the shell of a device now. */
+  async revokeShell(id: string): Promise<void> {
+    if (native) return call("revokeShell", { id });
+    const controller = previewControllerList().find(item => item.id === id);
+    if (!controller) throw "notPaired";
+    controller.shell = null;
+    previewLogList().unshift({
+      time: Math.floor(Date.now() / 1000), peer: id, name: controller.name, request: "shellRevoked", outcome: "ok",
+    });
+  },
+  /** Hides a note that the keys file changed during a shell. */
+  async dismissKeysWarning(id: number): Promise<void> {
+    if (native) return call("dismissKeysWarning", { id });
+    previewWarnings = previewWarningList().filter(warning => warning.id !== id);
+  },
+  /** Opens a shell on a device that this one controls, in Terminal. The device decides whether it is on. */
+  async openShell(id: string): Promise<void> {
+    if (native) return call("openShell", { id });
+    if (previewShellOf(id) === null) throw "notPermitted";
+    if (previewQuery.has("terminal-fails")) throw "terminalFailed";
+  },
   /** The devices on this network that announce an SSH server, other than this one. */
   async discoverDevices(): Promise<DiscoveredDevice[]> {
     if (native) return call("discoverDevices");
@@ -999,7 +1058,7 @@ export const desktop = {
     const device: RemoteDevice = {
       id: Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join(""),
       name: host, kind: "desktop", user, host, port: port ?? 22, added: Math.floor(Date.now() / 1000), online: true,
-      tools: [], apps: { pinned: [] }, shell: null,
+      tools: [], apps: { pinned: [] },
     };
     previewDeviceAdditions.push(device);
     return device;

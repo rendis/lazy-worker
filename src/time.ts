@@ -58,6 +58,13 @@ export function formatMoment(epochSeconds: number, locale: string, now = new Dat
     : moment.toLocaleString(locale, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
+/** True when the moment falls on the same calendar day as `now`. `now` exists for tests. */
+export function isToday(epochSeconds: number, now = new Date()): boolean {
+  const moment = new Date(epochSeconds * 1000);
+  return moment.getFullYear() === now.getFullYear() && moment.getMonth() === now.getMonth() &&
+    moment.getDate() === now.getDate();
+}
+
 /**
  * A time of day that is still to come or just passed, such as when a shell ends or an action runs next:
  * the time alone when it falls today, and the date with the time otherwise. Its longest text has 12 characters.
