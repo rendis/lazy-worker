@@ -125,7 +125,7 @@ Pairing links two devices with a code that works once. Start on the device you w
 2. Choose what the new device may do. **Control** starts on. **Applications**, **Actions**, and **Screen** start off. Shell and files are never part of pairing. You turn them on later, at this device.
 3. Select **Open for 10 minutes**. The row then says **Waiting for a device** with the time left, and the button becomes **Show code**. The device shows a 6-digit code, the user name to enter, and the address to reach it.
 4. On the other device, open **Devices** and select **Add device**.
-5. Choose the device in the list. If it is not there, select **Enter an address**. Use this for a device on a VPN such as Tailscale, for example `studio.local` or `100.64.0.5`. Add `:port` if the port is not 22.
+5. Choose the device in the list. The list shows the devices with an open pairing window first. Other Macs on the network that have Remote Login on wait behind **Show other devices**. They are shown for information only and cannot be chosen until they open their pairing window. If the device is not there, select **Enter an address**. Use this for a device on a VPN such as Tailscale, for example `studio.local` or `100.64.0.5`. Add `:port` if the port is not 22.
 6. On the same network, a device with an open pairing window shows **Pairing open**, and its user name fills in by itself. Over a VPN or with an address you typed, enter the user name. Then enter the code and select **Pair**.
 
 The code is not sent over the network. Three wrong codes close the window, and a code works once. The device shows when the pairing is done. Close the pairing window with **Close pairing** if you change your mind.

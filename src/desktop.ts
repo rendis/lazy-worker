@@ -1536,6 +1536,10 @@ export const desktop = {
         pairing: { account: "estudio", id: "0123456789abcdef0123456789abcdef" },
       },
       { name: "Mac mini de la sala", host: "mac-mini-de-la-sala.local", port: 22, pairing: null },
+      // `?many-found` fills the list like a busy office network.
+      ...(previewQuery.has("many-found") ? Array.from({ length: 12 }, (_, at) => ({
+        name: `MacBook de la oficina ${at + 1}`, host: `macbook-oficina-${at + 1}.local`, port: 22, pairing: null,
+      })) : []),
     ];
   },
   /** Runs the text of an action form in Terminal, the way an action runs, before it is saved. Only this device does it. */

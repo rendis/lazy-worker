@@ -1660,7 +1660,23 @@ export function mountDevices(host: Host) {
   bindTip(rescan, "addSearchAgain");
   const foundNote = note("");
   const foundRows = h("div", { class: "device-rows" });
-  const foundList = list<Found>(foundRows, device => JSON.stringify([host.language(), device.name, device.host, device.port]), foundRow);
+  const foundSignature = (device: Found): string => JSON.stringify([host.language(), device.name, device.host, device.port]);
+  const foundList = list<Found>(foundRows, foundSignature, foundRow);
+  // A device without an open pairing window is only an SSH server on the network. It waits behind a count,
+  // so the list shows first the devices that want to pair.
+  let showOthers = false;
+  const otherRows = h("div", { class: "device-rows found-others-rows" });
+  const otherList = list<Found>(otherRows, foundSignature, otherRow);
+  const othersLabel = h("span");
+  const othersToggle = h("button", {
+    type: "button", class: "device-row found-row found-others disclosure", "aria-expanded": "false", "aria-controls": "found-others",
+  }, icon("eye-off"), othersLabel, icon("chevron-right"));
+  const othersToggleRow = h("div", { class: "collapse", inert: true }, h("div", {}, othersToggle));
+  const others = h("div", { class: "collapse", id: "found-others", inert: true }, h("div", {}, otherRows));
+  othersToggle.addEventListener("click", () => {
+    showOthers = !showOthers;
+    renderFound();
+  });
   const addressField = h("input", {
     class: "field", type: "text", autocomplete: "off", autocapitalize: "off", spellcheck: "false", inputmode: "url",
   });
@@ -1676,7 +1692,7 @@ export function mountDevices(host: Host) {
     bind(h("p", { class: "setting-note pair-hint" }), "addAddressHint"));
   const chooseStep = h("div", { class: "pair-step" },
     h("div", { class: "device-subhead" }, bind(h("h3"), "addFound"), rescan.root),
-    foundNote.root, foundRows,
+    foundNote.root, foundRows, othersToggleRow, others,
     h("div", { class: "device-subhead" }, bind(h("h3"), "addEnterAddress")), addressForm);
 
   const summaryName = h("strong");
@@ -1750,6 +1766,15 @@ export function mountDevices(host: Host) {
     };
   }
 
+  /** A device without an open pairing window cannot pair, so its row only says that it is there. */
+  function otherRow(device: Found): Row<Found> {
+    const where = device.port === 22 ? device.host : `${device.host}:${device.port}`;
+    const root = h("div", { class: "device-row found-info" },
+      kindIcon("desktop"),
+      h("div", { class: "device-row-text" }, oneLine(h("strong", {}, device.name)), h("span", { class: "setting-note" }, where)));
+    return { root, update() {} };
+  }
+
   function settleIcons(): void {
     if (built) {
       built = false;
@@ -1760,9 +1785,21 @@ export function mountDevices(host: Host) {
   function renderFound(): void {
     rescan.disable(scanning ? t("addSearching") : undefined, t("addSearchAgain"));
     rescan.button.toggleAttribute("aria-busy", scanning);
-    foundList.sync(found);
+    const pairing = found.filter(device => device.pairing !== null);
+    const rest = found.filter(device => device.pairing === null);
+    foundList.sync(pairing);
+    otherList.sync(rest);
+    if (!rest.length) showOthers = false;
+    othersToggleRow.toggleAttribute("data-open", rest.length > 0);
+    othersToggleRow.inert = rest.length === 0;
+    others.toggleAttribute("data-open", showOthers);
+    others.inert = !showOthers;
+    othersToggle.setAttribute("aria-expanded", String(showOthers));
+    const othersText = showOthers ? t("addOthersHide")
+      : rest.length === 1 ? t("addOthersOne") : fill(t("addOthersMany"), { count: String(rest.length) });
+    if (othersLabel.textContent !== othersText) fadeText(othersLabel, othersText);
     const text = scanning && !found.length ? t("addSearching")
-      : scanError ? t(scanError) : found.length ? "" : t("addNoneFound");
+      : scanError ? t(scanError) : !found.length ? t("addNoneFound") : pairing.length ? "" : t("addNonePairing");
     if (text) foundNote.set(text);
     foundNote.show(text !== "");
     settleIcons();
@@ -1909,6 +1946,7 @@ export function mountDevices(host: Host) {
 
   function openAdd(trigger: HTMLElement): void {
     found = [];
+    showOthers = false;
     scanError = undefined;
     showStep("choose");
     renderAddress();

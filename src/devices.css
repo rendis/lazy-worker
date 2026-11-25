@@ -255,6 +255,14 @@
 .log-count { margin-inline-start: .4em; color: var(--muted); font-variant-numeric: tabular-nums; }
 .found-row { width: 100%; border-inline: 0; border-top: 0; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; }
 .found-row:hover { background: var(--glass); }
+/* The row that shows the devices without an open pairing window reads quieter than a device. */
+.found-others { min-height: 40px; color: var(--secondary); font-size: 13.5px; font-weight: 600; }
+.found-others > span { flex: 1; }
+/* The other devices show three and a half rows at most and scroll inside them, so a busy network cannot stretch the window. The half row shows that the list scrolls. */
+/* A device that cannot pair is information only, so its row has no hover and no chevron. */
+.found-info .device-kind.lucide, .found-info .device-row-text strong { color: var(--secondary); }
+.found-others-rows { max-height: calc(3.5 * 53px); overflow: hidden auto; overscroll-behavior: contain; }
+.found-others > .lucide:first-child { flex: none; width: 16px; height: 16px; margin-inline: 2px; }
 .found-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .pair-field { width: 250px; }
 .found-pairing { display: inline-flex; flex: none; align-items: center; gap: 6px; color: var(--online); font-weight: 600; white-space: nowrap; opacity: 0; transition: opacity var(--selection-duration) ease; }
