@@ -367,6 +367,7 @@ mod tests {
                     applications,
                     actions,
                     screen: false,
+                    mailbox: false,
                     shell: false,
                 })
                 .unwrap()
@@ -466,6 +467,7 @@ mod tests {
                 applications: false,
                 actions: true,
                 screen: false,
+                mailbox: false,
                 shell: false
             }
         );

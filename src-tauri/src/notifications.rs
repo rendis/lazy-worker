@@ -2,7 +2,7 @@
 //!
 //! Tauri's notification plugin does not tell a desktop app which notification was clicked, so the
 //! app owns the delegate. Each banner carries the id of its entry in the bell and a route. A click
-//! marks the entry read, shows the panel, and sends the route to the main window.
+//! removes the entry from the bell, shows the panel, and sends the route to the main window.
 
 use crate::{
     inbox::{self, Entry, Inbox},
@@ -18,14 +18,17 @@ use objc2::{
 use objc2_app_kit::NSSound;
 use objc2_foundation::{NSDictionary, NSObject, NSObjectProtocol, NSString};
 use objc2_user_notifications::{
-    UNAuthorizationOptions, UNMutableNotificationContent, UNNotification,
+    UNAuthorizationOptions, UNAuthorizationStatus, UNMutableNotificationContent, UNNotification,
     UNNotificationPresentationOptions, UNNotificationRequest, UNNotificationResponse,
-    UNUserNotificationCenter, UNUserNotificationCenterDelegate,
+    UNNotificationSettings, UNUserNotificationCenter, UNUserNotificationCenterDelegate,
 };
+use std::{process::Command, ptr::NonNull, sync::mpsc, time::Duration};
 use tauri::{AppHandle, Emitter, Manager};
 
 /// The event that the main window receives with the route to open.
 pub const OPEN_EVENT: &str = "notification-open";
+/// The event that tells the main window to read the macOS permission again.
+pub const PERMISSION_EVENT: &str = "notification-permission-changed";
 const ROUTE_KEY: &str = "route";
 
 pub struct Ivars {
@@ -75,10 +78,10 @@ define_class!(
     }
 );
 
-/// Shows the panel at a route. A click on a banner names its entry, which is then read.
+/// Shows the panel at a route. A click on a banner names its entry, which then leaves the bell.
 pub fn open(app: &AppHandle, id: Option<&str>, route: &str) {
     if let (Some(id), Some(inbox)) = (id, app.try_state::<Inbox>()) {
-        if inbox.mark_read(Some(&[id.to_owned()])).unwrap_or(false) {
+        if inbox.dismiss(&[id.to_owned()]).unwrap_or(false) {
             inbox::changed(app);
         }
     }
@@ -108,7 +111,61 @@ pub fn install(app: &AppHandle) {
     );
 }
 
-/// Shows a banner. A click opens `route` in the panel and marks the entry `id` read.
+/// Whether macOS lets this app show banners. It waits at most two seconds for the answer.
+pub fn permission() -> &'static str {
+    let (sender, receiver) = mpsc::channel();
+    let answer = RcBlock::new(move |settings: NonNull<UNNotificationSettings>| {
+        // SAFETY: The center passes valid settings for the length of the call.
+        let status = unsafe { settings.as_ref() }.authorizationStatus();
+        let _ = sender.send(match status {
+            UNAuthorizationStatus::NotDetermined => "notDetermined",
+            UNAuthorizationStatus::Denied => "denied",
+            _ => "authorized",
+        });
+    });
+    UNUserNotificationCenter::currentNotificationCenter()
+        .getNotificationSettingsWithCompletionHandler(&answer);
+    receiver.recv_timeout(Duration::from_secs(2)).unwrap_or("unknown")
+}
+
+/// Asks macOS for permission again, and tells the main window when the person answers.
+pub fn request_permission(app: &AppHandle) {
+    let app = app.clone();
+    let answer = RcBlock::new(move |_granted: objc2::runtime::Bool, _error: *mut objc2_foundation::NSError| {
+        let _ = app.emit_to("main", PERMISSION_EVENT, ());
+    });
+    UNUserNotificationCenter::currentNotificationCenter().requestAuthorizationWithOptions_completionHandler(
+        UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound,
+        &answer,
+    );
+}
+
+/// The address of the Notifications pane at one app. It holds the bundle identifier and nothing else.
+fn settings_url(identifier: &str) -> Option<String> {
+    let valid = !identifier.is_empty()
+        && identifier.len() <= 255
+        && identifier
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-'));
+    valid.then(|| format!("x-apple.systempreferences:com.apple.preference.notifications?id={identifier}"))
+}
+
+/// Opens the Notifications pane of System Settings at this app.
+pub fn open_settings(identifier: &str) -> Result<(), &'static str> {
+    let url = settings_url(identifier).ok_or("notificationSettingsFailed")?;
+    let opened = Command::new("/usr/bin/open")
+        .arg(url)
+        .stdin(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
+    if opened {
+        Ok(())
+    } else {
+        Err("notificationSettingsFailed")
+    }
+}
+
+/// Shows a banner. A click opens `route` in the panel and removes the entry `id` from the bell.
 fn post(id: &str, title: &str, body: &str, route: &str) {
     let content = UNMutableNotificationContent::new();
     content.setTitle(&NSString::from_str(title));
@@ -147,6 +204,13 @@ fn banner(entry: &Entry, spanish: bool) -> Option<(String, String)> {
         } else {
             (format!("Version {} is ready", param("version")), "Restart to update".into())
         }),
+        // The device name and the text came from another device. A banner shows them as plain text.
+        "mailboxText" => Some((param("device").to_owned(), param("item").to_owned())),
+        "mailboxFile" => Some(if spanish {
+            (format!("{} te envió un archivo", param("device")), param("item").to_owned())
+        } else {
+            (format!("{} sent you a file", param("device")), param("item").to_owned())
+        }),
         _ => None,
     }
 }
@@ -170,5 +234,21 @@ pub fn alert(app: &AppHandle, entry: &Entry) {
         if let Some((title, body)) = banner(entry, speaks_spanish(preferences.language)) {
             post(&entry.id, &title, &body, entry.route.as_deref().unwrap_or("bell"));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_settings_address_holds_only_a_bundle_identifier() {
+        assert_eq!(
+            settings_url("com.rendis.lazyworker").as_deref(),
+            Some("x-apple.systempreferences:com.apple.preference.notifications?id=com.rendis.lazyworker")
+        );
+        assert!(settings_url("").is_none());
+        assert!(settings_url("com.x&y=1").is_none());
+        assert!(settings_url("com x").is_none());
     }
 }

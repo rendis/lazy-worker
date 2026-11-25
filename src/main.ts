@@ -1,16 +1,17 @@
 import "./style.css";
 import {
   Activity, AppWindow, ArrowLeft, ArrowRight, Bell, BellOff, Bot, Box, Brain, Calendar, CalendarClock, CalendarDays, Check, ChevronDown, ChevronRight, CircleCheck, CircleHelp, CircleMinus, CircleStop, CircleX, Clock, Cloud, Code, Coffee, Contrast, Copy,
-  Cpu, createIcons, Database, Download, ExternalLink, Eye, EyeOff, File as FileIcon, FileImage, FileText, Folder, FolderKey, FolderOpen, FolderPlus, Globe, HardDrive, Hand, Hash, Hourglass, House, Inbox, Infinity as InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LoaderCircle, LockKeyhole, LockKeyholeOpen,
-  Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, MonitorUp, Moon, MousePointer2, Network, Pencil, Pin, PinOff, Play, PlugZap, Plus, Power, Radio, RefreshCw, Repeat, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
+  Cpu, createIcons, Database, Download, ExternalLink, Eye, EyeOff, File as FileIcon, FileArchive, FileImage, FileText, Folder, FolderKey, FolderOpen, FolderPlus, FolderUp, Globe, HardDrive, Hand, Hash, Hourglass, House, Image, Inbox, Infinity as InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LoaderCircle, LockKeyhole, LockKeyholeOpen,
+  Mail, Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, MonitorUp, Moon, MousePointer2, Network, Paperclip, Pencil, Pin, PinOff, Play, PlugZap, Plus, Power, Radio, RefreshCw, Repeat, Rocket, RotateCcw, ScrollText, Search, Send, Server, Settings,
   Shield, ShieldCheck, ShieldOff, Sparkles, Square, SquareArrowOutUpRight, SquareTerminal, Sun, Sunrise, Sunset, Tag, Terminal, Timer, Trash2, TriangleAlert, Upload, UserMinus, UserRound, Volume2, X, Zap,
 } from "lucide";
 import { BELL_AGE_WIDTH, mountBell } from "./bell";
 import { mountCaffeinateForm } from "./caffeinate-form";
 import { mountDevices } from "./devices";
+import { mountMailbox } from "./mailbox";
 import {
   defaults, desktop, offStatus, type ActivityAccessibility, type LidMode, type LidStatus, type CaffeinateSettings, type Duration, type Preferences,
-  type NotificationMode, type ProxySettings, type SoundName, type Statuses, type Theme,
+  type NotificationMode, type NotificationPermission, type ProxySettings, type SoundName, type Statuses, type Theme,
 } from "./desktop";
 import { messages, type Language, type Message } from "./messages";
 import { mountTools, tools, updateQuickStartMode, updateToolStatus, type ToolId } from "./modules";
@@ -46,8 +47,8 @@ function renderIcons(): void {
   createIcons({
     icons: {
       Activity, AppWindow, ArrowLeft, ArrowRight, Bell, BellOff, Bot, Box, Brain, Calendar, CalendarClock, CalendarDays, Check, ChevronDown, ChevronRight, CircleCheck, CircleHelp, CircleMinus, CircleStop, CircleX, Clock, Cloud, Code, Coffee, Contrast, Copy,
-      Cpu, Database, Download, ExternalLink, Eye, EyeOff, File: FileIcon, FileImage, FileText, Folder, FolderKey, FolderOpen, FolderPlus, Globe, HardDrive, Hand, Hash, Hourglass, House, Inbox, Infinity: InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LoaderCircle, LockKeyhole, LockKeyholeOpen,
-      Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, MonitorUp, Moon, MousePointer2, Network, Pencil, Pin, PinOff, Play, PlugZap, Plus, Power, Radio, RefreshCw, Repeat, Rocket, RotateCcw, ScrollText, Search, Server,
+      Cpu, Database, Download, ExternalLink, Eye, EyeOff, File: FileIcon, FileArchive, FileImage, FileText, Folder, FolderKey, FolderOpen, FolderPlus, FolderUp, Globe, HardDrive, Hand, Hash, Hourglass, House, Image, Inbox, Infinity: InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LoaderCircle, LockKeyhole, LockKeyholeOpen,
+      Mail, Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, MonitorUp, Moon, MousePointer2, Network, Paperclip, Pencil, Pin, PinOff, Play, PlugZap, Plus, Power, Radio, RefreshCw, Repeat, Rocket, RotateCcw, ScrollText, Search, Send, Server,
       Settings, Shield, ShieldCheck, ShieldOff, Sparkles, Square, SquareArrowOutUpRight, SquareTerminal, Sun, Sunrise, Sunset, Tag, Terminal, Timer, Trash2, TriangleAlert, Upload, UserMinus, UserRound, Volume2, X, Zap,
     },
     attrs: { "aria-hidden": "true", "stroke-width": 1.75 },
@@ -93,7 +94,12 @@ const notificationModeButtons = document.querySelectorAll<HTMLButtonElement>("[d
 const soundNameButtons = document.querySelectorAll<HTMLButtonElement>("[data-sound-name]");
 const notificationSound = element<HTMLInputElement>("notification-sound");
 const notificationSoundSection = element("notification-sound-section");
-const notificationSoundChoice = element("notification-sound-choice");
+const notificationPermission = element("notification-permission");
+const notificationPermissionBox = element("notification-permission-box");
+const notificationPermissionText = element("notification-permission-text");
+const notificationPermissionAction = element<HTMLButtonElement>("notification-permission-action");
+/** Whether macOS lets the app show banners, as last read. */
+let notificationPermissionState: NotificationPermission = "unknown";
 const notificationSoundPlay = element<HTMLButtonElement>("notification-sound-play");
 const translated = document.querySelectorAll<HTMLElement>("[data-text]");
 const accessibleLabels = document.querySelectorAll<HTMLElement>("[data-label]");
@@ -309,6 +315,21 @@ lidModes.addEventListener("input", event => {
 const changelog = mountChangelog({ translate, language: preferredLanguage, onClose: markVersionSeen });
 /** Opens a place of the panel that a notification names. Only the views of this panel are known. */
 function openRoute(route: string): void {
+  // `mailbox:device:<id>` or `mailbox:peer:<id>` opens that conversation in Devices.
+  const box = /^mailbox:(device|peer):([0-9a-f]{32})$/.exec(route);
+  if (box && !remote) {
+    document.querySelector<HTMLButtonElement>('.sidebar [data-view="devices"]')?.click();
+    void desktop.getDevices().then(overview => {
+      const id = box[2];
+      const named = box[1] === "device"
+        ? overview.devices.find(device => device.id === id)
+        : overview.thisDevice.controllers.find(controller => controller.id === id);
+      if (!named) return;
+      const online = box[1] === "device" ? (named as { online: boolean | null }).online === true : null;
+      mailbox.open(box[1] === "device" ? { device: id } : { peer: id }, named.name, online);
+    }).catch(() => {});
+    return;
+  }
   if (!/^[a-z]+$/.test(route)) return;
   document.querySelector<HTMLButtonElement>(`.sidebar [data-view="${route}"]`)?.click();
 }
@@ -370,7 +391,12 @@ const devices = mountDevices({
     feedback.devices = message;
     renderFeedback();
   },
+  openMailbox(party, name, online, trigger) {
+    mailbox.open(party, name, online, trigger);
+  },
 });
+/** The mailbox window. Only the panel has one: a window that controls a device has no mailbox. */
+const mailbox = mountMailbox({ translate, language: preferredLanguage, refreshIcons: renderIcons, onChange: () => void devices.readMailboxes() });
 
 function renderFeedback(): void {
   const unsupported = accessibility === "unsupported";
@@ -424,7 +450,11 @@ function renderFeedback(): void {
       void desktop.recordNotification("error", title, { detail: lines[0].message }, target).catch(() => {});
     }
   } else {
-    if (lines.length === 0) delete recordedFeedback[target];
+    if (lines.length === 0 && recordedFeedback[target]) {
+      // The problem is gone, so the bell no longer lists it.
+      delete recordedFeedback[target];
+      void desktop.dismissNotificationRoute(target, "error").catch(() => {});
+    }
     if (noticeRegion.contains(document.activeElement)) view.querySelector("h1")?.focus();
     setText(noticeAnnouncement, "");
     visibleNotice = undefined;
@@ -650,7 +680,11 @@ function renderControls(): void {
   renderActivityControls(unavailable, pending);
   startToolsOnLaunch.checked = preferences.startToolsOnLaunch;
   setDisabled(startToolsOnLaunch, !loaded);
-  for (const button of [...languageButtons, ...themeButtons, ...notificationModeButtons, ...soundNameButtons]) setDisabled(button, !loaded);
+  for (const button of [...languageButtons, ...themeButtons, ...notificationModeButtons]) setDisabled(button, !loaded);
+  // With the sound off, its choices keep their place and turn off.
+  const soundOff = !loaded || !preferences.notifications.sound;
+  for (const button of soundNameButtons) setDisabled(button, soundOff);
+  setDisabled(notificationSoundPlay, soundOff);
   setDisabled(notificationSound, !loaded);
   caffeinate.setDisabled(unavailable || !statuses.caffeinate.supported);
   renderBlocks();
@@ -696,7 +730,7 @@ function renderPreferences(previous?: Preferences): void {
     }
     notificationSound.checked = sound;
     setCollapseOpen(notificationSoundSection, mode !== "off");
-    setCollapseOpen(notificationSoundChoice, sound);
+    renderNotificationPermission();
   }
   if (previous?.language !== preferences.language) {
     for (const button of languageButtons) {
@@ -725,6 +759,7 @@ function renderPreferences(previous?: Preferences): void {
     onboarding.render();
     changelog.render();
     bell?.render();
+    renderNotificationPermission();
     renderLid();
     renderStatus();
   } else {
@@ -1174,6 +1209,36 @@ languageButtons.forEach(button => button.addEventListener("click", () => {
 themeButtons.forEach(button => button.addEventListener("click", () => {
   updateChoice("settings", "theme", button.dataset.themeChoice as Theme);
 }));
+function renderNotificationPermission(): void {
+  const state = notificationPermissionState;
+  const shown = !remote && preferences.notifications.mode === "system" && (state === "notDetermined" || state === "denied");
+  // The note keeps its last text while it closes.
+  if (shown) {
+    notificationPermissionBox.dataset.state = state;
+    setText(notificationPermissionText, translate(state === "denied" ? "notificationsBlocked" : "notificationsAsk"));
+    setText(notificationPermissionAction, translate(state === "denied" ? "notificationsOpenSettings" : "notificationsAllow"));
+  }
+  notificationPermissionAction.toggleAttribute("data-attention", shown && state === "denied");
+  setCollapseOpen(notificationPermission, shown);
+}
+async function refreshNotificationPermission(): Promise<void> {
+  if (remote) return;
+  notificationPermissionState = await desktop.getNotificationPermission().catch(() => "unknown" as const);
+  renderNotificationPermission();
+}
+notificationPermissionAction.addEventListener("click", () => {
+  const blocked = notificationPermissionState === "denied";
+  const action = blocked ? desktop.openNotificationSettings() : desktop.requestNotificationPermission();
+  void action.then(() => refreshNotificationPermission()).catch(error => {
+    feedback.settings = errorMessage(error, "notificationSettingsFailed");
+    delete dismissedFeedback.settings;
+    renderFeedback();
+  });
+});
+if (!remote) {
+  void desktop.onNotificationPermission(() => void refreshNotificationPermission());
+  void refreshNotificationPermission();
+}
 function updateNotifications(change: Partial<Preferences["notifications"]>): void {
   updatePreference("settings", {
     key: "notifications",
@@ -1264,9 +1329,13 @@ settingsAccessibility.addEventListener("click", () => { void openAccessibility("
 for (const button of document.querySelectorAll<HTMLButtonElement>("[data-view]")) {
   button.addEventListener("click", () => {
     renderFeedback();
+    // Opening a place answers what the bell said about it.
+    if (!remote && button.dataset.view) void desktop.dismissNotificationRoute(button.dataset.view, "error").catch(() => {});
+    if (!remote && button.dataset.view === "settings") void desktop.dismissNotificationRoute("settings", "update").catch(() => {});
     if (button.dataset.view === "settings") {
       refreshPermissions();
       void updateLoginLaunch();
+      void refreshNotificationPermission();
     }
     if (button.dataset.view === "devices") void devices.refresh();
     else devices.reset();
@@ -1280,13 +1349,24 @@ async function refreshSystemLanguage(): Promise<void> {
 }
 
 systemAppearance.addEventListener("change", () => renderTheme(true));
+// The panel is an app, not a page: a right click offers nothing, except the editing menu of a text
+// field and Copy for text the person selected.
+document.addEventListener("contextmenu", event => {
+  const target = event.target instanceof Element ? event.target : null;
+  const editable = target?.closest("input, textarea, [contenteditable=\"true\"]");
+  const selected = (window.getSelection()?.toString() ?? "") !== "";
+  if (!editable && !selected) event.preventDefault();
+});
 window.addEventListener("languagechange", () => { void refreshSystemLanguage(); });
 desktop.onFocus(() => {
   proxy.refresh();
   if (!remote && activeView().dataset.moduleView === "devices") void devices.refresh();
   refreshPermissions();
   void refreshLid();
-  if (activeView().dataset.moduleView === "settings") void updateLoginLaunch();
+  if (activeView().dataset.moduleView === "settings") {
+    void updateLoginLaunch();
+    void refreshNotificationPermission();
+  }
   void refreshSystemLanguage();
   if (remote) void refreshViewer();
   else void updates.refresh();

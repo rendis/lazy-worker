@@ -16,6 +16,7 @@ pub mod icons;
 pub mod identity;
 pub mod known_hosts;
 pub mod log;
+pub mod mailbox;
 pub mod pair_client;
 pub mod pake;
 pub mod pairing;

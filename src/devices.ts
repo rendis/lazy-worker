@@ -2,10 +2,11 @@ import "./devices.css";
 import {
   desktop, type ActionSchedule, type Controller, type ControllerPermission, type DeviceKind, type DevicesOverview,
   type DiscoveredDevice, type KeysWarning, type ProxyNetwork, type RemoteApp, type RemoteDevice, type RemoteLogEntry, type RemoteTool,
-  type SavedAction, type ScreenSharing, type ShellState, type Statuses,
+  type SavedAction, type ScreenSharing, type ShellState, type Statuses, type MailboxParty, type MailboxSummary,
 } from "./desktop";
 import { mountActionWindows, type Target } from "./device-actions";
 import { mountFilesExplorer } from "./device-explorer";
+import { mailboxBlocked } from "./mailbox";
 import { mountFilesGrantWindow } from "./device-files";
 import { mountShellWindow } from "./device-shell";
 import { formatBytes, type FilesGrant, type FileShare } from "./files";
@@ -58,6 +59,7 @@ const permissions: { id: ControllerPermission; icon: string; label: Message; hin
   { id: "control", icon: "layout-grid", label: "permControl", hint: "permControlHint" },
   { id: "applications", icon: "app-window", label: "permApplications", hint: "permApplicationsHint" },
   { id: "actions", icon: "play", label: "permActions", hint: "permActionsHint" },
+  { id: "mailbox", icon: "mail", label: "permMailbox", hint: "permMailboxHint" },
   { id: "files", icon: "folder", label: "permFiles", hint: "permFilesHint" },
   { id: "shell", icon: "terminal", label: "permShell" },
   { id: "screen", icon: "monitor", label: "permScreen", hint: "permScreenHint" },
@@ -88,6 +90,8 @@ type Host = {
   fail(error: unknown): void;
   /** Shows a message that is not a failure. */
   notify(message: Message): void;
+  /** Opens the mailbox with a device. `online` is nothing for a device that controls this one. */
+  openMailbox(party: MailboxParty, name: string, online: boolean | null, trigger: HTMLElement): void;
 };
 type Row<T> = { root: HTMLElement; update(item: T): void };
 type AppItem = RemoteApp & { id: string };
@@ -198,6 +202,10 @@ export function mountDevices(host: Host) {
   const guideOpen = document.getElementById("remote-guide-open") as HTMLButtonElement;
 
   let overview: DevicesOverview | undefined;
+  /** What the mailbox knows of each conversation: new items, and whether a device allows it. */
+  let mailboxes: MailboxSummary[] = [];
+  const mailboxOf = (party: MailboxParty) => mailboxes.find(entry =>
+    "device" in party ? "device" in entry.party && entry.party.device === party.device : "peer" in entry.party && entry.party.peer === party.peer);
   let enabling = false;
   /** What this device found about its own Screen Sharing. Nothing until the first answer. */
   let localScreen: ScreenSharing | undefined;
@@ -382,6 +390,26 @@ export function mountDevices(host: Host) {
         const off = reason !== undefined;
         if (button.disabled !== off) button.disabled = off;
         setTip(root, reason ?? name);
+      },
+    };
+  }
+
+  /** The mailbox button of a row, with the count of what is new. */
+  function mailboxButton() {
+    const base = iconButton(t("mailbox"), "mail", "outlined mailbox-button");
+    const count = h("span", { class: "mailbox-count", "aria-hidden": "true", hidden: true });
+    base.button.append(count);
+    base.button.setAttribute("aria-haspopup", "dialog");
+    return {
+      ...base,
+      /** Shows the count of what is new. With `blocked`, the button is off and its wrapper's tip says why. */
+      set(unread: number, blocked?: string): void {
+        setHidden(count, unread === 0);
+        const text = unread > 99 ? "99+" : String(unread);
+        if (count.textContent !== text) count.textContent = text;
+        const label = unread ? fill(t("mailboxUnread"), { n: unread }) : t("mailbox");
+        base.disable(blocked, label);
+        setAttribute(base.button, "aria-label", blocked ? `${label}. ${blocked}` : label);
       },
     };
   }
@@ -841,6 +869,16 @@ export function mountDevices(host: Host) {
     await refresh();
   }
 
+  /** The mailbox has its own switch. Turning it off drops what waits for that device. */
+  async function setMailbox(controller: Controller, on: boolean): Promise<void> {
+    try {
+      await desktop.setPeerMailbox(controller.id, on);
+    } catch (error) {
+      host.fail(error);
+    }
+    await refresh();
+  }
+
   async function removeController(controller: Controller): Promise<void> {
     confirming = undefined;
     try {
@@ -923,6 +961,17 @@ export function mountDevices(host: Host) {
       filesChip?.focus();
     });
     let filesChip: HTMLButtonElement | undefined;
+    const mailboxConfirm = confirmButtons(t("mailboxTurnOff"), () => {
+      confirming = undefined;
+      void setMailbox(current, false);
+    }, () => {
+      confirming = undefined;
+      render();
+      mailboxChip?.focus();
+    });
+    mailboxConfirm.cancel.root.dataset.tip = t("mailboxKeep");
+    mailboxConfirm.cancel.button.setAttribute("aria-label", t("mailboxKeep"));
+    let mailboxChip: HTMLButtonElement | undefined;
     const chips = permissions.map(permission => {
       const label = h("span", { class: "chip-label" }, t(permission.label));
       // The time that a shell or files end at, as a short suffix. The label and the suffix stay on one line.
@@ -933,9 +982,19 @@ export function mountDevices(host: Host) {
       const wrapper = h("span", { class: "tip" }, chip);
       if (permission.id === "shell") shellChip = chip;
       if (permission.id === "files") filesChip = chip;
+      if (permission.id === "mailbox") mailboxChip = chip;
       chip.addEventListener("click", () => {
         const on = chip.getAttribute("aria-pressed") === "true";
-        if (permission.id !== "shell" && permission.id !== "files") {
+        if (permission.id === "mailbox") {
+          // Turning it off deletes what waits for that device, so the row asks first when something does.
+          if (on && (mailboxOf({ peer: current.id })?.pending ?? 0) > 0) {
+            confirming = `mailbox:${current.id}`;
+            render();
+            mailboxConfirm.cancel.button.focus();
+          } else {
+            void setMailbox(current, !on);
+          }
+        } else if (permission.id !== "shell" && permission.id !== "files") {
           void setPermission(current, permission.id, !on);
         } else if (on) {
           // Turning the shell or the files off asks first, in the row.
@@ -952,6 +1011,8 @@ export function mountDevices(host: Host) {
     });
     // Each chip says what it allows, and with a short chip its name, in its tip. The shell has its own window, which says it.
     const chipBox = h("div", { class: "permission-chips" }, ...chips.map(({ wrapper }) => wrapper));
+    const mailbox = mailboxButton();
+    mailbox.button.addEventListener("click", () => host.openMailbox({ peer: current.id }, current.name, null, mailbox.button));
     const remove = iconButton(fill(t("removeController"), { device: controller.name }), "user-minus");
     const { accept, cancel } = confirmButtons(t("removeAccess"), () => { void removeController(current); }, () => {
       confirming = undefined;
@@ -964,6 +1025,9 @@ export function mountDevices(host: Host) {
       h("span", { class: "setting-note" }, t("shellOffConfirm")), shellConfirm.accept.root, shellConfirm.cancel.root);
     const filesOffConfirm = h("div", { class: "device-confirm", hidden: true },
       h("span", { class: "setting-note" }, t("filesOffConfirm")), filesConfirm.accept.root, filesConfirm.cancel.root);
+    const mailboxOffText = h("span", { class: "setting-note" });
+    const mailboxOffConfirm = h("div", { class: "device-confirm", hidden: true },
+      mailboxOffText, mailboxConfirm.accept.root, mailboxConfirm.cancel.root);
     remove.button.addEventListener("click", () => {
       confirming = current.id;
       render();
@@ -973,7 +1037,7 @@ export function mountDevices(host: Host) {
     const root = h("div", { class: "device-row controller-row" },
       kindIcon(controller.kind),
       text,
-      chipBox, remove.root, confirm, offConfirm, filesOffConfirm);
+      chipBox, mailbox.root, remove.root, confirm, offConfirm, filesOffConfirm, mailboxOffConfirm);
     /** Chips show their words while the row has room for them and the name keeps its least width. Otherwise they show their icons and times. */
     const fit = (): void => {
       if (!root.isConnected || root.clientWidth === 0) return;
@@ -1009,9 +1073,16 @@ export function mountDevices(host: Host) {
         const removing = confirming === next.id;
         const turningOff = confirming === `shell:${next.id}`;
         const turningFilesOff = confirming === `files:${next.id}`;
-        const normal = [chipBox, remove.root];
-        only([...normal, confirm, offConfirm, filesOffConfirm],
-          removing ? [confirm] : turningOff ? [offConfirm] : turningFilesOff ? [filesOffConfirm] : normal);
+        const turningMailboxOff = confirming === `mailbox:${next.id}`;
+        fadeText(mailboxOffText, fill(t("mailboxOffConfirm"), { n: mailboxOf({ peer: next.id })?.pending ?? 0 }));
+        const normal = [chipBox, mailbox.root, remove.root];
+        only([...normal, confirm, offConfirm, filesOffConfirm, mailboxOffConfirm],
+          removing ? [confirm] : turningOff ? [offConfirm] : turningFilesOff ? [filesOffConfirm]
+            : turningMailboxOff ? [mailboxOffConfirm] : normal);
+        // The mailbox shows once the person here turned it on for that device. Its place stays, so the chips of every row line up.
+        mailbox.root.toggleAttribute("data-absent", !next.permissions.mailbox);
+        mailbox.button.inert = !next.permissions.mailbox;
+        mailbox.set(mailboxOf({ peer: next.id })?.unread ?? 0);
       },
     };
   }
@@ -1229,6 +1300,7 @@ export function mountDevices(host: Host) {
           !(confirming.startsWith("action:") && localActions.some(({ id }) => `action:${id}` === confirming)) &&
           !(confirming.startsWith("shell:") && data.controllers.some(({ id, shell }) => `shell:${id}` === confirming && shell !== null)) &&
           !(confirming.startsWith("files:") && data.controllers.some(({ id, files }) => `files:${id}` === confirming && files !== null)) &&
+          !(confirming.startsWith("mailbox:") && data.controllers.some(({ id, permissions }) => `mailbox:${id}` === confirming && permissions.mailbox)) &&
           !data.controllers.some(({ id }) => id === confirming)) confirming = undefined;
         warningList.sync(data.warnings.map(warning => ({ ...warning, id: String(warning.id) })));
         if (data.controllers.length === 0 && confirming === "cut") confirming = undefined;
@@ -2458,7 +2530,10 @@ export function mountDevices(host: Host) {
     if (online !== false) {
       await Promise.all([
         readSession(device.id), readTools(device.id), readApps(device.id), readActions(device.id),
+        // Asks the mailbox too, so a mailbox turned on there shows here at once.
+        desktop.mailboxCheck({ device: device.id }).catch(() => {}),
       ]);
+      void readMailboxes();
     }
     await shown;
     refreshing.delete(device.id);
@@ -2912,7 +2987,12 @@ export function mountDevices(host: Host) {
     const open = iconButton(t("openInterface"), "square-arrow-out-up-right", "outlined");
     const refreshButton = iconButton(t("refreshDevice"), "refresh-cw", "outlined");
     const forget = iconButton(t("forgetDevice"), "user-minus");
+    const mailbox = mailboxButton();
     const remote = item.self ? undefined : item.data as RemoteDevice;
+    let latestRemote = remote;
+    mailbox.button.addEventListener("click", () => {
+      if (latestRemote) host.openMailbox({ device: latestRemote.id }, latestRemote.name, latestRemote.online === true, mailbox.button);
+    });
     const { accept, cancel } = confirmButtons(t("forgetAccept"), () => { if (remote) void forgetRemote(remote); }, () => {
       confirming = undefined;
       render();
@@ -2938,7 +3018,7 @@ export function mountDevices(host: Host) {
     const head = h("div", { class: "device-head" },
       kindIcon(item.kind),
       h("span", { class: "device-name" }, nameTip, item.self && h("span", { class: "device-badge" }, t("thisDevice"))),
-      !item.self && state, !item.self && refreshButton.root, !item.self && open.root, !item.self && forget.root, !item.self && confirm, chevron());
+      !item.self && state, !item.self && refreshButton.root, !item.self && open.root, !item.self && mailbox.root, !item.self && forget.root, !item.self && confirm, chevron());
     const content = item.self ? thisDeviceBody() : remoteBody(item.data as RemoteDevice);
     const body = h("div", { class: "collapse" }, content.root);
     disclosure(item.id, head, name, body, item.self);
@@ -2951,9 +3031,17 @@ export function mountDevices(host: Host) {
           return;
         }
         const device = current.data as RemoteDevice;
+        latestRemote = device;
         const asking = confirming === `forget:${device.id}`;
-        const normal = [state, refreshButton.root, open.root, forget.root];
+        // The mailbox is always there. Until that device allows it for this one, it is off and says where to turn it on.
+        const box = mailboxOf({ device: device.id });
+        const normal = [state, refreshButton.root, open.root, mailbox.root, forget.root];
         only([...normal, confirm], asking ? [confirm] : normal);
+        // The tip of an off button explains it in the words of the mailbox window: off there, not reached, or not answered yet.
+        const blocked = mailboxBlocked(box?.granted ?? null, box?.check ?? null, device.name, t, host.language());
+        // A device that allows it but was not reached keeps the button on, so what came before stays readable.
+        mailbox.set(box?.unread ?? 0, box?.granted === true ? undefined
+          : blocked ? `${blocked.text} ${blocked.checked}`.trim() : fill(t("mailboxNotOn"), { name: device.name }));
         const checking = refreshing.has(device.id);
         state.toggleAttribute("data-on", device.online === true && !checking);
         fadeText(state, checking ? t("deviceChecking") : t(device.online === true ? "deviceOnline" : "deviceOffline"));
@@ -3018,6 +3106,17 @@ export function mountDevices(host: Host) {
     render();
     void readLocalActions();
     void readLocalScreen();
+    void readMailboxes();
+  }
+
+  /** Reads the mailbox summary and shows its counts. */
+  async function readMailboxes(): Promise<void> {
+    try {
+      mailboxes = await desktop.mailboxSummary();
+      render();
+    } catch {
+      // The buttons keep what they showed.
+    }
   }
 
   addButton.setAttribute("aria-haspopup", "dialog");
@@ -3025,5 +3124,5 @@ export function mountDevices(host: Host) {
   addButton.disabled = false;
   host.refreshIcons();
 
-  return { refresh, render, reset };
+  return { refresh, render, reset, readMailboxes };
 }

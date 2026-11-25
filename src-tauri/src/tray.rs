@@ -39,7 +39,7 @@ struct MenuState {
     spanish: bool,
     /// The names of the devices that have an open connection to control this one.
     controlled_by: Vec<String>,
-    /// The notifications of the bell that are not read yet.
+    /// The notifications that the bell shows. Each one is still new.
     unread: usize,
     can_start_selected: bool,
     update_available: bool,
@@ -73,7 +73,7 @@ impl MenuState {
             spanish: speaks_spanish(preferences.language),
             unread: app
                 .try_state::<crate::inbox::Inbox>()
-                .map_or(0, |inbox| inbox.unread()),
+                .map_or(0, |inbox| inbox.count()),
             can_start_selected: (preferences.quick_start.activity
                 && activity.supported
                 && !activity.active)

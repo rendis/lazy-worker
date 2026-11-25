@@ -37,6 +37,9 @@ pub struct PeerPermissions {
     /// Whether the device may see the Screen Sharing state and open this screen. Off until the user turns it on here.
     #[serde(default)]
     pub screen: bool,
+    /// Whether the device may leave texts and files here and pick up what waits for it. Off until the user turns it on here.
+    #[serde(default)]
+    pub mailbox: bool,
     /// Derived from `Peer::shell_until` each time a peer is read. A value in the file is ignored.
     #[serde(default)]
     pub shell: bool,
@@ -63,7 +66,7 @@ pub struct Peer {
 
 /// True for an invisible format character (Unicode Cf) that can reorder or hide text:
 /// soft hyphen, zero-width and bidi marks, bidi embeds, isolates, and the word joiner range.
-fn is_format(c: char) -> bool {
+pub(crate) fn is_format(c: char) -> bool {
     matches!(
         c,
         '\u{00AD}'
@@ -371,9 +374,21 @@ impl Peers {
                 applications,
                 actions,
                 screen,
+                // The mailbox has its own switch.
+                mailbox: peer.permissions.mailbox,
                 shell: false,
             };
             Ok(())
+        })
+    }
+
+    /// Turns the mailbox of a device on or off. Returns whether it was on.
+    pub fn set_mailbox(&self, id: &str, on: bool) -> Result<bool, &'static str> {
+        self.change(|data| {
+            let peer = data.peers.iter_mut().find(|peer| peer.id == id).ok_or("notPaired")?;
+            let before = peer.permissions.mailbox;
+            peer.permissions.mailbox = on;
+            Ok(before)
         })
     }
 
@@ -596,6 +611,7 @@ mod tests {
                 applications: true,
                 actions: false,
                 screen: true,
+                mailbox: false,
                 shell: false
             }
         );

@@ -699,7 +699,7 @@ mod tests {
     }
 
     fn peer(id: &str) -> Origin {
-        Origin::Remote(Permissions { control: false, applications: false, actions: true, screen: false, files: None, peer: crate::dispatch::PeerId::parse(id) })
+        Origin::Remote(Permissions { control: false, applications: false, actions: true, screen: false, mailbox: false, files: None, peer: crate::dispatch::PeerId::parse(id) })
     }
 
     fn names(id: &str) -> Option<String> {

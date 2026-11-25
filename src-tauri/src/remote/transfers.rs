@@ -4,11 +4,15 @@
 //! the jobs one after the other, a chunk per request, with the same requests that any paired
 //! device sends. The webview reads the progress and may stop a job. A device that ends the
 //! permission, or a link that fails, ends the job with the error word it got.
+//!
+//! One worker is enough: a device has one session, and its calls take turns, so more workers would
+//! wait on the same link. The mailbox sends and fetches its files through this queue too.
 
 use super::files::CHUNK;
 use base64::Engine;
 use serde::Serialize;
 use serde_json::{json, Value};
+use std::os::unix::fs::OpenOptionsExt;
 use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
@@ -49,12 +53,29 @@ pub enum State {
     Stopped,
 }
 
+/// What the mailbox does when its job ends: `Ok`, `Err("stopped")`, or the error word.
+pub type Finish = Box<dyn FnOnce(Result<(), &'static str>) + Send>;
+
 enum Spec {
     /// Sends the local file into `dir` of the shared folder `root`.
     Upload { root: String, dir: String, local: PathBuf },
     /// Saves `path` of the shared folder `root` as the local file `local`.
     /// With `open`, the file opens with its default application once it is saved.
     Download { root: String, path: String, local: PathBuf, open: bool },
+    /// Sends the local file to the mailbox of the device, as the item `item`.
+    MailboxSend { item: String, local: PathBuf, finish: Finish },
+    /// Saves the item `item` of the device's outbox as the local file `part`.
+    MailboxFetch { item: String, size: u64, part: PathBuf, finish: Finish },
+}
+
+impl Spec {
+    /// Tells the mailbox that a job ended before it ran.
+    fn abandon(self, code: &'static str) {
+        match self {
+            Self::MailboxSend { finish, .. } | Self::MailboxFetch { finish, .. } => finish(Err(code)),
+            Self::Upload { .. } | Self::Download { .. } => {}
+        }
+    }
 }
 
 /// One transfer, as the webview reads it. `error` is an error word, never text from outside.
@@ -71,6 +92,9 @@ pub struct Job {
     pub done: u64,
     pub state: State,
     pub error: Option<&'static str>,
+    /// A job of the mailbox, which its own window shows. The files explorer does not list it.
+    #[serde(skip)]
+    mailbox: bool,
     #[serde(skip)]
     spec: Option<Spec>,
     #[serde(skip)]
@@ -140,7 +164,7 @@ pub fn open_folder(base: &Path) -> Result<PathBuf, &'static str> {
 }
 
 /// A name that is free in a folder: `name`, then `name 2`, `name 3`, and so on before the extension.
-fn unique(folder: &Path, name: &str) -> PathBuf {
+pub(crate) fn unique(folder: &Path, name: &str) -> PathBuf {
     let first = folder.join(name);
     if fs::symlink_metadata(&first).is_err() {
         return first;
@@ -240,7 +264,24 @@ impl Transfers {
         Ok(())
     }
 
-    fn push(&self, device: &str, kind: Kind, name: String, total: u64, spec: Spec) {
+    /// Sends a file to the mailbox of a device. `finish` runs once when the job ends. Returns the job id.
+    pub fn queue_mailbox_send(&self, device: &str, item: &str, name: &str, local: PathBuf, finish: Finish) -> u64 {
+        let total = fs::metadata(&local).map_or(0, |meta| meta.len());
+        self.push(device, Kind::Upload, name.to_owned(), total, Spec::MailboxSend { item: item.to_owned(), local, finish })
+    }
+
+    /// Fetches an item of a device's outbox into `part`. `finish` runs once when the job ends. Returns the job id.
+    pub fn queue_mailbox_fetch(&self, device: &str, item: &str, name: &str, size: u64, part: PathBuf, finish: Finish) -> u64 {
+        self.push(device, Kind::Download, name.to_owned(), size, Spec::MailboxFetch { item: item.to_owned(), size, part, finish })
+    }
+
+    /// How far a job is: the bytes done, the bytes in all, and its state.
+    pub fn progress_of(&self, id: u64) -> Option<(u64, u64, State)> {
+        let jobs = self.shared.jobs.lock().unwrap_or_else(|error| error.into_inner());
+        jobs.1.iter().find(|job| job.id == id).map(|job| (job.done, job.total, job.state))
+    }
+
+    fn push(&self, device: &str, kind: Kind, name: String, total: u64, spec: Spec) -> u64 {
         let mut jobs = self.shared.jobs.lock().unwrap_or_else(|error| error.into_inner());
         let id = jobs.0;
         jobs.0 += 1;
@@ -250,6 +291,7 @@ impl Transfers {
             kind,
             name,
             open: matches!(spec, Spec::Download { open: true, .. }),
+            mailbox: matches!(spec, Spec::MailboxSend { .. } | Spec::MailboxFetch { .. }),
             total,
             done: 0,
             state: State::Queued,
@@ -264,23 +306,32 @@ impl Transfers {
         }
         drop(jobs);
         self.shared.wake.notify_one();
+        id
     }
 
     /// The jobs, oldest first, as the webview reads them.
     pub fn list(&self) -> Value {
         let jobs = self.shared.jobs.lock().unwrap_or_else(|error| error.into_inner());
-        serde_json::to_value(&jobs.1).unwrap_or(Value::Null)
+        let shown: Vec<&Job> = jobs.1.iter().filter(|job| !job.mailbox).collect();
+        serde_json::to_value(shown).unwrap_or(Value::Null)
     }
 
     /// Stops a job. One that has not begun never begins, and one that runs stops after its chunk.
     pub fn stop(&self, id: u64) {
-        let mut jobs = self.shared.jobs.lock().unwrap_or_else(|error| error.into_inner());
-        if let Some(job) = jobs.1.iter_mut().find(|job| job.id == id) {
+        let abandoned = {
+            let mut jobs = self.shared.jobs.lock().unwrap_or_else(|error| error.into_inner());
+            let Some(job) = jobs.1.iter_mut().find(|job| job.id == id) else { return };
             job.stop.store(true, Ordering::Release);
             if job.state == State::Queued {
                 job.state = State::Stopped;
-                job.spec = None;
+                job.spec.take()
+            } else {
+                None
             }
+        };
+        // The mailbox hears of it outside the lock, because it may read the queue.
+        if let Some(spec) = abandoned {
+            spec.abandon("stopped");
         }
     }
 
@@ -298,7 +349,7 @@ impl Transfers {
     /// Removes the jobs that have ended.
     pub fn clear(&self) {
         let mut jobs = self.shared.jobs.lock().unwrap_or_else(|error| error.into_inner());
-        jobs.1.retain(|job| matches!(job.state, State::Queued | State::Running));
+        jobs.1.retain(|job| job.mailbox || matches!(job.state, State::Queued | State::Running));
     }
 }
 
@@ -318,23 +369,37 @@ impl Shared {
                 }
             };
             let (id, device, spec, stop) = next;
+            let mut finish: Option<Finish> = None;
             let outcome = match spec {
+                Some(Spec::MailboxSend { item, local, finish: done }) => {
+                    finish = Some(done);
+                    self.mailbox_send(id, &device, &item, &local, &stop)
+                }
+                Some(Spec::MailboxFetch { item, size, part, finish: done }) => {
+                    finish = Some(done);
+                    self.mailbox_fetch(id, &device, &item, size, &part, &stop)
+                }
                 Some(Spec::Upload { root, dir, local }) => self.upload(id, &device, &root, &dir, &local, &stop),
                 Some(Spec::Download { root, path, local, open }) => self
                     .download(id, &device, &root, &path, &local, &stop)
                     .and_then(|()| if open { self.link.open(&local) } else { Ok(()) }),
                 None => Err("filesIo"),
             };
-            let mut jobs = self.jobs.lock().unwrap_or_else(|error| error.into_inner());
-            if let Some(job) = jobs.1.iter_mut().find(|job| job.id == id) {
-                match outcome {
-                    Ok(()) => job.state = State::Done,
-                    Err("stopped") => job.state = State::Stopped,
-                    Err(code) => {
-                        job.state = State::Failed;
-                        job.error = Some(code);
+            {
+                let mut jobs = self.jobs.lock().unwrap_or_else(|error| error.into_inner());
+                if let Some(job) = jobs.1.iter_mut().find(|job| job.id == id) {
+                    match outcome {
+                        Ok(()) => job.state = State::Done,
+                        Err("stopped") => job.state = State::Stopped,
+                        Err(code) => {
+                            job.state = State::Failed;
+                            job.error = Some(code);
+                        }
                     }
                 }
+            }
+            if let Some(finish) = finish {
+                finish(outcome);
             }
         }
     }
@@ -395,6 +460,93 @@ impl Shared {
         }
         self.ask(device, "finishUpload", json!({ "uploadId": upload_id })).map_err(|code| cancel(code))?;
         Ok(())
+    }
+
+    /// Sends one file to the mailbox of a device, with the same chunks as an upload.
+    fn mailbox_send(&self, id: u64, device: &str, item: &str, local: &Path, stop: &AtomicBool) -> Result<(), &'static str> {
+        let mut file = File::open(local).map_err(|_| "filesNotFound")?;
+        let meta = file.metadata().map_err(|_| "filesIo")?;
+        if !meta.is_file() {
+            return Err("filesNotRegular");
+        }
+        let size = meta.len();
+        self.progress(id, Some(size), 0);
+        if stop.load(Ordering::Acquire) {
+            return Err("stopped");
+        }
+        let name = base_name(&local.to_string_lossy());
+        let begun = self.ask(device, "mailboxBegin", json!({ "id": item, "name": name, "size": size }))?;
+        let upload_id = begun
+            .get("uploadId")
+            .and_then(Value::as_str)
+            .filter(|text| text.len() <= 64 && text.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            .ok_or("remoteFailed")?
+            .to_owned();
+        let cancel = |code: &'static str| {
+            let _ = self.ask(device, "mailboxAbort", json!({ "uploadId": upload_id }));
+            code
+        };
+        let mut offset = 0u64;
+        let mut buffer = vec![0u8; CHUNK];
+        while offset < size {
+            if stop.load(Ordering::Acquire) {
+                return Err(cancel("stopped"));
+            }
+            let want = usize::try_from((size - offset).min(CHUNK as u64)).unwrap_or(CHUNK);
+            file.read_exact(&mut buffer[..want]).map_err(|_| cancel("filesChanged"))?;
+            let data = base64::engine::general_purpose::STANDARD.encode(&buffer[..want]);
+            self.ask(device, "mailboxWrite", json!({ "uploadId": upload_id, "offset": offset, "data": data }))
+                .map_err(|code| cancel(code))?;
+            offset += want as u64;
+            self.progress(id, None, offset);
+        }
+        if stop.load(Ordering::Acquire) {
+            return Err(cancel("stopped"));
+        }
+        self.ask(device, "mailboxFinish", json!({ "uploadId": upload_id })).map_err(|code| cancel(code))?;
+        Ok(())
+    }
+
+    /// Saves one item of a device's outbox as `part`. The answers come from another device, so each
+    /// chunk is checked before any byte is kept.
+    fn mailbox_fetch(&self, id: u64, device: &str, item: &str, size: u64, part: &Path, stop: &AtomicBool) -> Result<(), &'static str> {
+        self.progress(id, Some(size), 0);
+        let mut out = OpenOptions::new().write(true).create_new(true).mode(0o600).open(part).map_err(|_| "filesDenied")?;
+        let mut offset = 0u64;
+        let outcome = loop {
+            if stop.load(Ordering::Acquire) {
+                break Err("stopped");
+            }
+            let answer = match self.ask(device, "mailboxRead", json!({ "id": item, "offset": offset })) {
+                Ok(answer) => answer,
+                Err(code) => break Err(code),
+            };
+            if answer.get("size").and_then(Value::as_u64) != Some(size) {
+                break Err("filesChanged");
+            }
+            let Some(text) = answer.get("data").and_then(Value::as_str) else { break Err("remoteFailed") };
+            let Ok(data) = base64::engine::general_purpose::STANDARD.decode(text) else { break Err("remoteFailed") };
+            if data.len() > CHUNK || offset + data.len() as u64 > size {
+                break Err("remoteFailed");
+            }
+            if out.write_all(&data).is_err() {
+                break Err("filesDiskFull");
+            }
+            offset += data.len() as u64;
+            self.progress(id, None, offset);
+            let Some(eof) = answer.get("eof").and_then(Value::as_bool) else { break Err("remoteFailed") };
+            if eof {
+                break if offset == size { Ok(()) } else { Err("filesChanged") };
+            }
+            if data.is_empty() {
+                break Err("remoteFailed");
+            }
+        };
+        let outcome = outcome.and_then(|()| out.sync_all().map_err(|_| "filesIo"));
+        if outcome.is_err() {
+            let _ = fs::remove_file(part);
+        }
+        outcome
     }
 
     fn download(&self, id: u64, device: &str, root: &str, path: &str, local: &Path, stop: &AtomicBool) -> Result<(), &'static str> {

@@ -18,7 +18,7 @@ tauri = { version = "2", features = ["protocol-asset"] }
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAppearance", "NSBezierPath", "NSColor", "NSPasteboard", "NSRunningApplication", "NSSound", "NSStatusBarButton", "NSStatusItem", "NSView", "NSWindow", "NSWorkspace"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSArray", "NSDictionary", "NSEnumerator", "NSError", "NSGeometry", "NSLocale", "NSString"] }
-objc2-user-notifications = { version = "0.3.2", default-features = false, features = ["std", "block2", "UNNotification", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationTrigger", "UNUserNotificationCenter"] }
+objc2-user-notifications = { version = "0.3.2", default-features = false, features = ["std", "block2", "UNNotification", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationSettings", "UNNotificationTrigger", "UNUserNotificationCenter"] }
 block2 = "0.6"
 plist = "1"
 png = "0.18"

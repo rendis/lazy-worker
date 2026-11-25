@@ -1990,15 +1990,12 @@ h1:focus { outline: none; }
 .bell-count[hidden] { display: none; }
 
 .bell-window { grid-template-rows: auto minmax(0, 1fr) auto; width: min(560px, 100%); }
-.bell-window header .bell-read-all { margin-inline-start: auto; }
-.bell-window header .bell-read-all + .icon-button { margin-inline-start: 0; }
-.bell-read-all:disabled { opacity: .45; cursor: default; }
 .bell-body { min-height: 0; overflow: hidden auto; border-top: 1px solid var(--hairline); }
 .bell-list { margin: 0; padding: 0; list-style: none; }
 .bell-list li { border-bottom: 1px solid var(--hairline); }
 .bell-row {
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) 7px var(--bell-age-width, 11ch);
+  grid-template-columns: 30px minmax(0, 1fr) var(--bell-age-width, 11ch);
   align-items: center;
   gap: 11px;
   width: 100%;
@@ -2011,8 +2008,6 @@ h1:focus { outline: none; }
   transition: background-color .16s ease;
 }
 .bell-row:hover { background: var(--glass); }
-.bell-list li[data-unread] .bell-row { background: var(--pending-panel); }
-.bell-list li[data-unread] .bell-row:hover { background: var(--pending-badge); }
 .bell-kind {
   display: grid;
   place-items: center;
@@ -2029,14 +2024,13 @@ h1:focus { outline: none; }
 .bell-text strong { font-size: 13.5px; font-weight: 700; }
 .bell-text span { color: var(--secondary); font-size: 12.5px; }
 .bell-text span[hidden] { display: none; }
-.bell-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--choice); opacity: 0; transition: opacity .16s ease; }
-.bell-list li[data-unread] .bell-dot { opacity: 1; }
 .bell-age { color: var(--secondary); font-size: 12px; font-weight: 600; text-align: end; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .bell-empty { margin: 0; padding: 36px 12px; color: var(--secondary); font-size: 13px; text-align: center; }
 .bell-empty[hidden] { display: none; }
 .bell-footer { border-top: 1px solid var(--hairline); padding-top: 9px; }
 .bell-footer-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; color: var(--secondary); font-size: 12.5px; }
 .bell-footer-line[hidden] { display: none; }
+.bell-footer-idle { justify-content: flex-end; }
 .bell-footer .text-link:disabled { opacity: .45; cursor: default; }
 .bell-confirm-actions { display: flex; flex: none; align-items: center; gap: 12px; }
 .bell-confirm-actions .accessibility-button { margin: 0; }
@@ -2045,6 +2039,140 @@ h1:focus { outline: none; }
 .settings-notifications { grid-column: 1 / -1; padding-top: 12px; border-top: 1px solid var(--line); }
 .settings-notifications > .settings-switch-description { margin: -3px 0 9px; }
 .settings-notifications .segments .lucide { width: 15px; height: 15px; }
-.notification-sound-row { margin-top: 13px; }
-.notification-sound-choice { display: flex; align-items: center; gap: 10px; margin-top: 9px; padding-inline-start: 23px; }
-.notification-sound-choice .segments { flex: 1; max-width: 330px; }
+/* The sound on one line: its name, the sounds, a play button, and the switch at the end. */
+.notification-sound-row { display: flex; align-items: center; gap: 12px; margin-top: 13px; font-size: 14px; font-weight: 700; }
+.notification-sound-row label { display: flex; flex: 1; align-items: center; gap: 7px; min-width: 0; cursor: pointer; }
+.notification-sound-row label .lucide { width: 16px; height: 16px; flex: none; color: var(--secondary); }
+.settings-notifications .notification-sound-row .segments { flex: none; width: 260px; }
+.notification-sound-row .switch { margin-inline-start: 4px; }
+/* macOS keeps banners off until the person allows them there. */
+.notification-permission {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 10px;
+  padding: 8px 10px 8px 12px;
+  border: 1px solid var(--warning-border);
+  border-radius: 9px;
+  background: var(--warning-panel);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 640;
+}
+.notification-permission .lucide { flex: none; width: 17px; height: 17px; color: var(--warning); }
+.notification-permission[data-state="notDetermined"] { border-color: var(--line); background: var(--glass); }
+.notification-permission[data-state="notDetermined"] .lucide { color: var(--secondary); }
+.notification-permission span { flex: 1; min-width: 0; }
+.notification-permission .accessibility-button { flex: none; margin: 0; }
+.notification-permission .accessibility-button[data-attention] { animation: attention-ring 1.8s ease-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .notification-permission .accessibility-button[data-attention] { animation: none; box-shadow: 0 0 0 3px var(--attention); }
+}
+
+/* The mailbox with one device: a conversation, then the composer. Mine on the right, theirs on the left. */
+/* One column no wider than the window. Safari 15 grows an auto column to its widest line, which cut the footer at the right edge. */
+.mailbox-window { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; width: min(620px, 100%); height: min(560px, 100%); }
+.mailbox-window header .mailbox-state { margin-inline-start: 4px; font-size: 12.5px; }
+.mailbox-window header .mailbox-state[hidden] { display: none; }
+.mailbox-window h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The list keeps the same room on both sides, and the end also leaves the room of a scroll bar, so a bubble never touches the edge. */
+.mailbox-body { min-height: 0; overflow: hidden auto; padding-block: 10px 4px; padding-inline: 8px calc(8px + var(--scrollbar)); border-top: 1px solid var(--hairline); }
+/* The note stays at the top of the list while the messages scroll under it. */
+.mailbox-note { position: sticky; z-index: 1; top: -10px; margin: -10px 0 10px; padding: 10px 2px 8px; border-bottom: 1px solid var(--hairline); background: var(--panel); line-height: 1.45; }
+/* The time of the last check takes the room of its longest text, so the sentence never moves when it changes. */
+.mailbox-checked { display: inline-block; min-width: calc(var(--bell-age-width, 11ch) + 8ch); color: var(--secondary); }
+.mailbox-note .text-link { margin-inline-start: 4px; }
+.mailbox-note[hidden] { display: none; }
+.mailbox-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.mailbox-list > li { display: grid; justify-items: start; gap: 4px; max-width: 100%; transition: opacity .2s ease; }
+.mailbox-list > li[data-mine] { justify-items: end; }
+.mailbox-line { display: flex; align-items: center; gap: 4px; max-width: 86%; min-width: 0; }
+.mailbox-list > li[data-mine] .mailbox-line { flex-direction: row-reverse; }
+.mailbox-bubble {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: var(--track);
+  color: var(--text);
+}
+.mailbox-list > li[data-mine] .mailbox-bubble { background: var(--pending-badge); border-color: var(--pending-border); }
+/* What still arrives is a ghost until it is whole. */
+.mailbox-list > li[data-ghost] .mailbox-bubble { border-style: dashed; border-color: var(--line); opacity: .55; }
+.mailbox-list > li[data-failed] .mailbox-status { color: var(--pending-color); }
+.mailbox-text { margin: 0; font-size: 13.5px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.mailbox-text[hidden], .mailbox-file[hidden], .mailbox-bar[hidden] { display: none; }
+.mailbox-file { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.mailbox-file-icon { display: grid; flex: none; place-items: center; width: 30px; height: 30px; color: var(--secondary); }
+.mailbox-file-icon .lucide { width: 22px; height: 22px; }
+/* An icon that is not drawn yet takes the size of the drawn one and shows nothing, so drawing it never moves a row. */
+.mailbox-window i[data-lucide] { display: inline-block; width: 16px; height: 16px; visibility: hidden; }
+.mailbox-file-icon i[data-lucide] { width: 22px; height: 22px; }
+.mailbox-action i[data-lucide] { width: 14px; height: 14px; }
+.mailbox-file-text { display: grid; min-width: 0; gap: 1px; }
+.mailbox-file-text strong { overflow: hidden; font-size: 13.5px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.mailbox-file-text span { color: var(--secondary); font-size: 12px; white-space: nowrap; }
+.mailbox-bar { display: block; width: 100%; min-width: 180px; height: 4px; overflow: hidden; border-radius: 2px; background: var(--track); }
+.mailbox-bar > span { display: block; height: 100%; background: var(--choice); transform-origin: left; transition: transform .3s ease; }
+.mailbox-status { padding-inline: 4px; color: var(--secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.mailbox-actions { display: flex; flex: none; gap: 2px; opacity: .2; transition: opacity .16s ease; }
+.mailbox-list > li:is(:hover, :focus-within) .mailbox-actions { opacity: 1; }
+.mailbox-actions > .tip[hidden] { display: none; }
+.mailbox-action { width: 26px; height: 26px; }
+.mailbox-action .lucide { width: 14px; height: 14px; }
+.mailbox-empty { margin: 0; padding: 40px 12px; color: var(--secondary); font-size: 13px; text-align: center; }
+.mailbox-empty[hidden] { display: none; }
+.mailbox-footer { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 8px; border-top: 1px solid var(--hairline); padding-top: 9px; }
+.mailbox-drop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  color: var(--secondary);
+  font-size: 12.5px;
+  transition: background-color .16s ease, border-color .16s ease;
+}
+.mailbox-drop .lucide { width: 15px; height: 15px; }
+.mailbox-drop > span { min-width: 0; text-align: center; }
+.mailbox-drop[data-over] { border-color: var(--choice); background: var(--pending-panel); color: var(--text); }
+.mailbox-composer { display: flex; align-items: flex-end; gap: 8px; padding: 2px; }
+.mailbox-composer textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 34px;
+  max-height: 96px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--glass);
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.35;
+  resize: none;
+  transition: border-color .16s ease, box-shadow .16s ease;
+}
+/* A quiet focus: the border takes the accent and a thin ring sits inside it, so it never reaches the drop line or the buttons. */
+.mailbox-composer textarea:focus, .mailbox-composer textarea:focus-visible {
+  outline: none;
+  border-color: var(--choice);
+  box-shadow: inset 0 0 0 1px var(--choice);
+}
+.mailbox-composer .icon-button { width: 34px; height: 34px; }
+.mailbox-composer .icon-button.outlined { border: 1px solid var(--line); }
+.mailbox-send { background: var(--choice); color: var(--choice-ink); }
+.mailbox-send:hover:enabled { background: var(--choice-hover); color: var(--choice-ink); }
+.mailbox-error { margin: 0; color: var(--pending-color); font-size: 12.5px; }
+.mailbox-error[hidden] { display: none; }
+.mailbox-footer-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 26px; color: var(--secondary); font-size: 12.5px; }
+.mailbox-footer-line[hidden] { display: none; }
+.mailbox-folder-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mailbox-footer-actions { display: flex; flex: none; align-items: center; gap: 12px; }
+.mailbox-footer-actions .accessibility-button { margin: 0; }
+.mailbox-footer .text-link:disabled { opacity: .45; cursor: default; }

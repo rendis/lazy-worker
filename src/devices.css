@@ -98,10 +98,10 @@
 .device-row-text strong { font-size: 14.5px; }
 /* A controller row keeps its height: its status is one line too. Its chips take the width they need first. */
 .controller-row .device-row-text { min-width: 120px; }
-/* Two lines of three chips. The row is as high as the two lines and keeps that height, so a controller never changes it. */
+/* Two lines of four chips. The row is as high as the two lines and keeps that height, so a controller never changes it. */
 .controller-row { min-height: 76px; }
 .controller-row[data-compact] .chip-label, .permission-chip[data-long] .chip-label { display: none; }
-.controller-row[data-compact] .permission-chips { grid-template-columns: repeat(3, auto); }
+.controller-row[data-compact] .permission-chips { grid-template-columns: repeat(4, auto); }
 .controller-row .device-row-text > .setting-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .action-description { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .action-description[hidden] { display: none; }
@@ -116,7 +116,7 @@
 .app-icon img { display: block; width: 100%; height: 100%; }
 .app-icon .lucide { width: 20px; height: 20px; color: var(--secondary); }
 
-.permission-chips { display: grid; flex: none; grid-template-columns: repeat(3, 132px); gap: 6px; justify-items: stretch; }
+.permission-chips { display: grid; flex: none; grid-template-columns: repeat(4, 120px); gap: 6px; justify-items: stretch; }
 .permission-chips > .tip { display: grid; min-width: 0; }
 /* A tip is as tall as its hint, and a hidden tip still counts for the scroll area. From the third controller on, tips open upward, so
    they stay inside the panel instead of making it scroll or being cut at its bottom edge. */
@@ -632,3 +632,24 @@ strong.files-crumb { color: var(--text); font-weight: 700; cursor: default; }
 .files-bar-track { height: 6px; margin-block-start: 6px; overflow: hidden; border-radius: 3px; background: var(--track); }
 .files-bar-fill { display: block; width: 100%; height: 100%; background: var(--choice); transform: scaleX(0); transform-origin: left; transition: transform .35s linear; }
 @media (prefers-reduced-motion: reduce) { .files-bar-fill, .files-sort .lucide, .files-row, .files-root, .files-drop { transition: none; } }
+
+/* The mailbox button of a row, with the count of what is new. */
+.mailbox-button { position: relative; }
+.tip[data-absent] { visibility: hidden; }
+.mailbox-count {
+  position: absolute;
+  top: -5px;
+  right: -6px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--choice);
+  color: var(--choice-ink);
+  font-size: 10px;
+  font-weight: 760;
+  line-height: 15px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.mailbox-count[hidden] { display: none; }

@@ -391,6 +391,26 @@ impl Service {
         Ok(before.permissions.actions && !actions)
     }
 
+    /// Turns the mailbox of a device on or off. Returns whether it was on.
+    pub fn set_mailbox(&self, id: &str, on: bool) -> Result<bool, &'static str> {
+        DeviceId::parse(id)?;
+        let running = self.running()?;
+        let name = running.peers.get(id).ok_or("notPaired")?.name;
+        let was = running.peers.set_mailbox(id, on)?;
+        if was != on {
+            let _ = running.log.append(&Entry::new(Some(id), Some(&name), "peerPermissions", "ok"));
+        }
+        Ok(was)
+    }
+
+    /// Whether a device is paired and may use the mailbox here.
+    pub fn peer_may_use_mailbox(&self, id: &str) -> bool {
+        self.running()
+            .ok()
+            .and_then(|running| running.peers.get(id))
+            .is_some_and(|peer| peer.permissions.mailbox)
+    }
+
     /// Whether a device is paired and may run actions here.
     pub fn peer_may_run_actions(&self, id: &str) -> bool {
         self.running()
@@ -775,6 +795,7 @@ impl Service {
             applications,
             actions,
             screen,
+            mailbox: false,
             shell: false,
         })
     }

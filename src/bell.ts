@@ -6,7 +6,7 @@ const ageMessages: Record<Exclude<AgeUnit, "seconds">, Message> = {
   minutes: "minutesAgo", hours: "hoursAgo", days: "daysAgo",
 };
 const kindIcons: Record<AppNotification["kind"], string> = {
-  message: "inbox", error: "triangle-alert", update: "download", info: "info",
+  message: "mail", error: "triangle-alert", update: "download", info: "info",
 };
 /** Characters to reserve for the age of a row. Its longest text is `hace 99 min`. */
 export const BELL_AGE_WIDTH = 11;
@@ -19,9 +19,9 @@ function isMessage(key: string): key is Message {
   return Object.prototype.hasOwnProperty.call(messages.en, key);
 }
 
-type Row = { root: HTMLLIElement; button: HTMLButtonElement; title: HTMLElement; detail: HTMLElement; time: HTMLElement; entry: AppNotification };
+type Row = { root: HTMLLIElement; title: HTMLElement; detail: HTMLElement; time: HTMLElement; entry: AppNotification };
 
-/** The bell in the title bar and its window. Text that a device sent is set as text only. */
+/** The bell in the title bar and its window. It lists only what is still new. Text that a device sent is set as text only. */
 export function mountBell({ translate, language, refreshIcons, navigate }: {
   translate: (message: Message) => string;
   language: () => Language;
@@ -36,7 +36,6 @@ export function mountBell({ translate, language, refreshIcons, navigate }: {
   const list = document.getElementById("bell-list")!;
   const empty = document.getElementById("bell-empty")!;
   const close = document.getElementById("bell-close") as HTMLButtonElement;
-  const readAll = document.getElementById("bell-read-all") as HTMLButtonElement;
   const idle = document.getElementById("bell-footer-idle")!;
   const confirm = document.getElementById("bell-footer-confirm")!;
   const clear = document.getElementById("bell-clear") as HTMLButtonElement;
@@ -81,18 +80,16 @@ export function mountBell({ translate, language, refreshIcons, navigate }: {
     text.append(titleNode, detailNode);
     const time = document.createElement("span");
     time.className = "bell-age";
-    const dot = document.createElement("span");
-    dot.className = "bell-dot";
-    dot.setAttribute("aria-hidden", "true");
-    rowButton.append(kind, text, dot, time);
+    rowButton.append(kind, text, time);
     rowButton.addEventListener("click", () => {
       const current = rows.get(entry.id)?.entry ?? entry;
-      if (!current.read) void desktop.markNotificationsRead([current.id]).catch(() => {});
+      // Opened, it is no longer new.
+      void desktop.dismissNotifications([current.id]).catch(() => {});
       setOpen(false);
       if (current.route && current.route !== "bell") navigate(current.route);
     });
     root.append(rowButton);
-    return { root, button: rowButton, title: titleNode, detail: detailNode, time, entry };
+    return { root, title: titleNode, detail: detailNode, time, entry };
   }
 
   function update(row: Row, entry: AppNotification): void {
@@ -101,15 +98,14 @@ export function mountBell({ translate, language, refreshIcons, navigate }: {
     row.detail.textContent = detail(entry);
     row.detail.hidden = row.detail.textContent === "";
     row.time.textContent = elapsed(entry.at);
-    row.root.toggleAttribute("data-unread", !entry.read);
   }
 
   function renderCount(): void {
-    const unread = entries.filter(entry => !entry.read).length;
-    count.hidden = unread === 0;
-    count.textContent = unread > 99 ? "99+" : String(unread);
-    button.setAttribute("aria-label", unread ? fill(translate("notificationsUnread"), { n: unread }) : translate("notifications"));
-    readAll.disabled = unread === 0;
+    // Every entry is still new, so the count is the list.
+    const shown = entries.length;
+    count.hidden = shown === 0;
+    count.textContent = shown > 99 ? "99+" : String(shown);
+    button.setAttribute("aria-label", shown ? fill(translate("notificationsUnread"), { n: shown }) : translate("notifications"));
     clear.disabled = entries.length === 0;
   }
 
@@ -181,7 +177,6 @@ export function mountBell({ translate, language, refreshIcons, navigate }: {
   close.addEventListener("click", () => setOpen(false));
   overlay.addEventListener("click", event => { if (event.target === overlay) setOpen(false); });
   overlay.addEventListener("keydown", event => { if (event.key === "Escape") setOpen(false); });
-  readAll.addEventListener("click", () => void desktop.markNotificationsRead().catch(() => {}));
   clear.addEventListener("click", () => showConfirm(true));
   clearCancel.addEventListener("click", () => showConfirm(false));
   clearYes.addEventListener("click", () => {

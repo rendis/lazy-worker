@@ -537,6 +537,7 @@ fn connection(stream: UnixStream, mut slot: Slot) {
                     applications: peer.permissions.applications,
                     actions: peer.permissions.actions,
                     screen: peer.permissions.screen,
+                    mailbox: peer.permissions.mailbox,
                     files: peer
                         .files_grant
                         .as_ref()
