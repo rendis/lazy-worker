@@ -252,7 +252,11 @@ const onboarding = mountOnboarding({
   translate,
   accessibility: () => accessibility,
   openAccessibility: () => { void openAccessibility("settings"); },
-  onClose: markVersionSeen,
+  onClose: () => {
+    markVersionSeen();
+    // The update notice waits for the setup guide to close.
+    updates.render();
+  },
 });
 const caffeinateCopy = element<HTMLButtonElement>("caffeinate-copy");
 let caffeinateCopied: number | undefined;
@@ -356,6 +360,7 @@ const updates = mountUpdateNotice({
     return queue;
   },
   moveFocus: () => activeView().querySelector("h1")?.focus({ preventScroll: true }),
+  held: () => onboarding.isOpen(),
 });
 
 function quickStartHint(): string {

@@ -8,8 +8,10 @@ const ageMessages: Record<Exclude<AgeUnit, "seconds">, Message> = {
   minutes: "minutesAgo", hours: "hoursAgo", days: "daysAgo",
 };
 
-export function mountUpdateNotice({ translate, setNoticeOpen, beforeRestart, moveFocus }: {
+export function mountUpdateNotice({ translate, setNoticeOpen, beforeRestart, moveFocus, held }: {
   translate: (message: Message) => string;
+  /** True while the notice must wait, such as during the setup guide. */
+  held: () => boolean;
   setNoticeOpen: (notice: HTMLElement, open: boolean) => void;
   beforeRestart: () => Promise<void>;
   moveFocus: () => void;
@@ -54,7 +56,7 @@ export function mountUpdateNotice({ translate, setNoticeOpen, beforeRestart, mov
   }
 
   function render(): void {
-    const open = version !== null && version !== deferred;
+    const open = version !== null && version !== deferred && !held();
     const status = installing ? translate("updateInstalling") : failed ? translate("updateFailed")
       : version ? translate("updateAvailable").replace("{version}", version) : "";
     if ((!open && notice.contains(document.activeElement)) || (!version && settings.contains(document.activeElement))) {

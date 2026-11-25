@@ -149,6 +149,7 @@ export function mountOnboarding({ translate, accessibility, openAccessibility, o
 
   return {
     render,
+    isOpen: () => !root.hidden,
     open(): void {
       // A deferred control starts on. The others show the saved setting.
       for (const mirror of mirrors) mirror.checked = mirror.dataset.mirrorWhen === "leave" || target(mirror).checked;
