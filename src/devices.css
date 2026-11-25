@@ -257,7 +257,12 @@
 .found-row:hover { background: var(--glass); }
 .found-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .pair-field { width: 250px; }
-.found-pairing { display: inline-flex; align-items: center; gap: 6px; color: var(--online); font-weight: 600; }
+.found-pairing { display: inline-flex; flex: none; align-items: center; gap: 6px; color: var(--online); font-weight: 600; white-space: nowrap; opacity: 0; transition: opacity var(--selection-duration) ease; }
+.found-pairing[data-open] { opacity: 1; }
+.found-pairing:not([data-open]) { width: 0; overflow: hidden; }
+/* The kind icon reads like the name, and turns green while the device has its pairing window open. */
+.found-row .device-kind.lucide { color: var(--text); transition: color var(--selection-duration) ease; }
+.found-row[data-pairing] .device-kind.lucide { color: var(--online); }
 .found-pairing .lucide { width: 13px; height: 13px; }
 .pair-account-fixed {
   display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; width: 250px; min-height: 36px;

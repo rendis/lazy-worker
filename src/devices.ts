@@ -1727,12 +1727,13 @@ export function mountDevices(host: Host) {
   function foundRow(device: Found): Row<Found> {
     let latest = device;
     const where = device.port === 22 ? device.host : `${device.host}:${device.port}`;
-    // The line opens and closes when the device opens or closes its pairing window, so the row keeps its element.
-    const open = h("div", { class: "collapse", inert: true },
-      h("div", {}, h("span", { class: "setting-note found-pairing" }, icon("radio"), t("addPairingOpen"))));
+    // The badge fades in and out beside the chevron when the device opens or closes its pairing window,
+    // so the row keeps its element and its height.
+    const open = h("span", { class: "setting-note found-pairing", "aria-hidden": "true" }, icon("radio"), t("addPairingOpen"));
     const root = h("button", { type: "button", class: "device-row found-row" },
       kindIcon("desktop"),
-      h("div", { class: "device-row-text" }, oneLine(h("strong", {}, device.name)), h("span", { class: "setting-note" }, where), open),
+      h("div", { class: "device-row-text" }, oneLine(h("strong", {}, device.name)), h("span", { class: "setting-note" }, where)),
+      open,
       icon("chevron-right"));
     root.addEventListener("click", () => choose({
       name: latest.name, host: latest.host, port: latest.port, pairing: latest.pairing,
@@ -1743,7 +1744,8 @@ export function mountDevices(host: Host) {
         latest = next;
         const announced = next.pairing !== null;
         open.toggleAttribute("data-open", announced);
-        open.toggleAttribute("inert", !announced);
+        open.setAttribute("aria-hidden", String(!announced));
+        root.toggleAttribute("data-pairing", announced);
       },
     };
   }
