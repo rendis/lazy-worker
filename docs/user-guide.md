@@ -8,6 +8,7 @@
 - [AI](#ai): [Proxy](#proxy)
 - [Devices](#devices)
 - [Security](#security)
+- [Notifications](#notifications)
 - [Hide while sharing](#hide-while-sharing)
 - [Accessibility](#accessibility)
 - [Updates](#updates)
@@ -99,7 +100,7 @@ Devices lets you control one device from another. It is not a tool, so it has no
 
 Open **Devices** in the sidebar. **This device** comes first. The devices you control from here follow it. One device is open at a time. Select a device to open it.
 
-Each open device has tabs on one line. **This device** has **Access** (remote access, pairing, and **Cut all access**), **Who controls it**, **Actions**, and **Log**. In **Who controls it**, each device shows its permissions as chips in two lines of three: **Control**, **Applications**, **Actions**, **Files**, **Shell**, and **Screen**. Each row has the height of two lines, and the tab holds three of them before it scrolls. Hover a chip to read what it allows. A device that you control has **Tools**, **Applications**, **Actions**, and **Connect**. A small badge after the name of a tab shows its state, for example **1/3** tools on, the number of applications that are open, the number of actions, or a green dot when a way into the device is on. Every tab of a device has the same height: the tabs of a device that you control hold four rows. A tab with more rows than fit scrolls inside. The title of the view and **Add device** stay at the top while the devices scroll. **Applications** lists your pinned applications first, then the ones you opened last from here, and a count that opens the rest. **Actions** has a search field. **Connect** lists the ways into the device: a terminal, the screen, and files. Use the arrow keys, **Home**, and **End** to move between tabs. Each device remembers its last tab.
+Each open device has tabs on one line. **This device** has **Access** (remote access, pairing, and **Cut all access**), **Permissions**, **Actions**, and **Log**. In **Permissions**, each device shows its permissions as chips in two lines: **Control**, **Applications**, **Actions**, and **Mailbox**, then **Files**, **Shell**, and **Screen**. Each row has the height of two lines, and the tab holds three of them before it scrolls. Hover a chip to read what it allows. A device that you control has **Tools**, **Applications**, **Actions**, and **Connect**. A small badge after the name of a tab shows its state, for example **1/3** tools on, the number of applications that are open, the number of actions, or a green dot when a way into the device is on. Every tab of a device has the same height: the tabs of a device that you control hold four rows. A tab with more rows than fit scrolls inside. The title of the view and **Add device** stay at the top while the devices scroll. **Applications** lists your pinned applications first, then the ones you opened last from here, and a count that opens the rest. **Actions** has a search field. **Connect** lists the ways into the device: a terminal, the screen, and files. Use the arrow keys, **Home**, and **End** to move between tabs. Each device remembers its last tab.
 
 Each device you control shows if it is online. Lazy Worker checks every few seconds while Devices is open, and when you come back to the window. Select **Check this device now** (the circular arrow) to check at once and read its state again.
 
@@ -131,13 +132,14 @@ The code is not sent over the network. Three wrong codes close the window, and a
 
 ### What a device may do
 
-Each device that can control this one has five switches under **Who can control it**. Change them at any time.
+Each device that can control this one has its switches in the **Permissions** tab. Change them at any time.
 
 The pairing window and the tip of each switch say the same in one sentence:
 
 - **Control**: turn tools on and off and change their settings here. It can also see the names of open programs, and update and restart Lazy Worker.
 - **Applications**: open any application installed here, including Terminal. It cannot type into it.
 - **Actions**: run the commands you saved here and see what they print. It cannot see or change the commands.
+- **Mailbox** lets it send you texts, files, and folders, and pick up what you leave for it. It cannot see your folders. You turn it on only at this device.
 - **Files** lets it open the folders you choose, see and copy files, and, if you allow it, add, replace, and delete them. You turn it on only at this device, for a time. Pairing never turns it on, and a remote window cannot turn it on.
 - **Shell** lets it open a full terminal on this device. You turn it on only at this device. Pairing never turns it on, and a remote window cannot turn it on.
 
@@ -176,7 +178,7 @@ An action is a named shell command that you save on a device. Each device keeps 
 
 A full shell lets another device run any command on this device, as your user. Only you can allow it, only at this device.
 
-1. In the **Who controls it** tab, select **Shell** on the row of a device.
+1. In the **Permissions** tab, select **Shell** on the row of a device.
 2. Read the warning. Choose **1 hour**, **2 hours**, **Custom** (1 minute to 24 hours), or **No limit**.
 3. Select **Allow shell**.
 
@@ -190,7 +192,7 @@ The shell turns off by itself when the time ends. Select **Turn off shell** to e
 
 Files lets another device open folders on this device and move files in both directions. Everything goes through the same SSH connection as the rest of Devices. It adds no network service and no sharing in System Settings. Only you can allow it, only at this device.
 
-1. In the **Who controls it** tab, select **Files** on the row of a device.
+1. In the **Permissions** tab, select **Files** on the row of a device.
 2. Under **Where**, choose **Chosen folders**, **My home folder**, or **Whole disk**. For folders, use **Add folder…** and pick each folder. **~/Lazy Worker** is offered first. Lazy Worker creates it the first time you share it. You can share up to 16 folders. **My home folder** shares your whole home folder, and the window shows its exact path, for example `/Users/alex`. **Whole disk** shares `/`.
 3. Under **Permission**, choose **Read only** or **Read and write**.
 4. Under **Duration**, choose **1 hour**, **2 hours**, **Custom** (1 minute to 24 hours), or **No limit**.
@@ -232,6 +234,32 @@ The row then says **Open to your network, protected by this account's password**
 
 To open the screen of a device you control, once it allowed **Screen**, open its **Connect** tab and select **Open screen** on the **Screen** row. The button works only while the row says that screen sharing is on. Screen Sharing opens, and macOS asks for the password of the account.
 
+### Mailbox
+
+The mailbox passes texts, files, and folders between two paired devices, in both directions, like a chat. It does not open any folder of the other device. Only the device that receives turns it on.
+
+To turn it on, open **Permissions** under **This device**, and select **Mailbox** on the row of the device that controls this one. The pairing stays one way: the device that controls connects, and this device never connects out.
+
+To open a mailbox:
+
+- On the device that controls, select the envelope button on the row of the other device. The button is off until the other device turns on **Mailbox**, and its tip says how.
+- On the device that is controlled, select the envelope button on the row of that device in **Permissions**.
+
+The window shows your messages on the right and the other device's on the left. Write in the field and press **Enter** to send. **Shift+Enter** starts a new line. Use **Files** or **Folder**, or drop files and folders on the window, to send them. A folder is always compressed to a `.zip` first.
+
+What you send goes at once from the device that controls. What the controlled device sends waits in its outbox until the other device picks it up. The device that controls asks every minute, and every 10 seconds while its mailbox window is open. Each item says where it is: **Compressing**, **Waiting to send**, **Sending** with a bar under the file, **Waiting for … to pick it up**, **Delivered**, or **Not sent** with the reason and **Try again**. A file that is still arriving shows faded with its bar, and becomes available when it is complete.
+
+The header says whether the other device is reachable and whether its mailbox is on. When it is not, a note says why in plain words, when it was checked, and offers **Check now**. The circular arrow on the row of the device checks the mailbox too.
+
+Where things go:
+
+- Received files go to **Downloads/Lazy Worker/<device name>**. Select **Change…** at the bottom of the window to pick another folder. A name that is taken gets a number, for example **report 2.pdf**. macOS checks a received file the first time you open it.
+- Lazy Worker keeps no copy of a received file. If you move or delete it, its message stays and says **No longer in the folder**.
+- A file you send from the device that controls is read from where it is. What the controlled device sends waits as a copy in Lazy Worker's own folder. The copy goes when it is delivered, or after 7 days if nobody picks it up.
+- A conversation keeps its last 200 items or 30 days, whichever comes first. It keeps text and file details only, never the files. **Clear conversation** empties it after you confirm; files already saved stay where they are.
+
+Limits: a text has up to 8 KB, a file up to 4 GB, and up to 20 items can wait for one device. Turning **Mailbox** off asks first when items are waiting, then deletes them. Removing a device, **Cut all access**, and **Forget this device** delete its conversation.
+
 ### The log
 
 Open the **Log** tab of **This device** to see what other devices asked of this one. It scrolls inside the tab. Each line shows the time, the device, the request in words, and the result. It shows requests, changes, and refusals. It does not show what was inside a request. It does not list a read that worked.
@@ -264,6 +292,7 @@ Devices lets other devices act on yours, so it is built to be safe by default.
 - A new device gets **Control** only. **Applications** and **Actions** start off. **Files** and **Shell** are never on at pairing.
 - Lazy Worker checks each request again, on the device that receives it, against the permissions it has at that moment. Removing a device works at once.
 - Files are shared only in the folders you choose (or your home folder, or the whole disk), for a time. Each path is resolved on this device and must stay inside its shared folder. A link that leaves it, a device file, a socket, and a pipe are refused. Lazy Worker's data and your SSH keys are never shared, also with **My home folder** and **Whole disk**.
+- **Mailbox** starts off and is turned on only at the device that receives. Received files are marked so that macOS checks them before they open, and Lazy Worker keeps no copy.
 - A device never sends the text of its saved commands to another device.
 - Names and text from another device show as plain text. They cannot run anything.
 - The pairing code is not sent. Three wrong codes close the window.
@@ -284,6 +313,23 @@ Devices lets other devices act on yours, so it is built to be safe by default.
 - The pairing key in the app is public on purpose. It opens only the pairing step, and only while a pairing window is open. The 6-digit code is the secret.
 - The code check uses the SPAKE2 method. The library that does it has not had an independent audit.
 - A shell can leave permanent access. Lazy Worker warns you, and it cannot undo it.
+- A device with **Mailbox** can send large files until your disk is full. Turn it on only for a device you trust.
+
+## Notifications
+
+The bell at the right of the title bar shows what is new: messages and files from the mailbox, problems that a view reported, and a new version. Its badge counts them. The menu bar icon shows a small dot, and its menu has a line that opens the bell.
+
+The bell is not a history. An item goes away when you select it, when you open its place in another way (for example the mailbox of that device, or **Settings** for a new version), when its problem is gone, or after 7 days. **Clear all** empties the bell after you confirm. A version that you have seen does not come back.
+
+Choose how Lazy Worker tells you in **Settings → Notifications**:
+
+- **Off**: only the bell.
+- **In the app**: the bell and a sound.
+- **App and macOS**: the bell, a sound, and a macOS notification. Select the notification to open its place in the panel.
+
+The **Sound** line turns the sound on or off and picks **Tink**, **Pop**, or **Glass**. The play button lets you hear it.
+
+macOS asks once whether Lazy Worker may show notifications. If nobody answered, **Settings** shows **Allow notifications** to ask again. If you said no, macOS does not ask again: **Settings** says that macOS is blocking the notifications, and **Open Notification Settings** opens the place to allow them.
 
 ## Hide while sharing
 

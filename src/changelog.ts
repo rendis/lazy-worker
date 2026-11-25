@@ -10,6 +10,22 @@ export type Release = { version: string; date: string; changes: readonly Change[
 
 export const releases: readonly Release[] = [
   {
+    version: "0.8.0",
+    date: "2026-11-25",
+    changes: [
+      { en: "New mailbox in Devices: send texts, files, and folders to another device and get its replies, like a chat.",
+        es: "Nuevo buzón en Dispositivos: envía textos, archivos y carpetas a otro dispositivo y recibe sus respuestas, como en un chat." },
+      { en: "Each device turns the mailbox on for the others in Permissions. Folders are compressed first, and what arrives goes to your Downloads folder.",
+        es: "Cada dispositivo activa el buzón para los demás en Permisos. Las carpetas se comprimen primero, y lo que llega queda en tu carpeta Descargas." },
+      { en: "New bell in the title bar: it shows what is new, and each item goes away once you have seen it.",
+        es: "Nueva campana en la barra de título: muestra lo nuevo, y cada aviso desaparece cuando ya lo viste." },
+      { en: "Choose in Settings how Lazy Worker tells you: only the bell, with a sound, or also with a macOS notification.",
+        es: "Elige en Ajustes cómo te avisa Lazy Worker: solo la campana, con un sonido o también con una notificación de macOS." },
+      { en: "The tab with each device's permissions is now called Permissions.",
+        es: "La pestaña con los permisos de cada dispositivo ahora se llama Permisos." },
+    ],
+  },
+  {
     version: "0.7.0",
     date: "2026-11-24",
     changes: [

@@ -10,7 +10,11 @@ use crate::{
     devices::{FilesMode, FilesScope},
     lid,
     lid::LidMode,
-    preferences::{Language, ManualDuration, Preferences, Schedule, Theme},
+    inbox,
+    preferences::{
+        Language, ManualDuration, NotificationMode, NotificationSettings, Preferences, Schedule,
+        SoundName, Theme,
+    },
     proxy,
     proxy::{ProxyApp, Role},
     Controller, FirstRun, ToolId,
@@ -38,6 +42,8 @@ pub enum Access {
     /// Reaches the files that the person at this device shared with the caller. A request that
     /// `write`s also needs the grant to allow writing.
     Files { write: bool },
+    /// Leaves texts and files in the mailbox of this device and picks up what waits for the caller.
+    Mailbox,
 }
 
 /// The version of the request set that two devices speak. A window that controls a device
@@ -53,6 +59,8 @@ pub struct Permissions {
     pub actions: bool,
     /// Whether the device may see the Screen Sharing state and open the screen.
     pub screen: bool,
+    /// Whether the device may use the mailbox of this device.
+    pub mailbox: bool,
     /// What the files grant of the device allows right now, or nothing while it has none.
     pub files: Option<FilesMode>,
     /// The device that sent the request. A request that belongs to one device, such as a run, uses it.
@@ -118,13 +126,14 @@ impl Origin {
             Access::Applications if permissions.applications => Ok(()),
             Access::Actions if permissions.actions => Ok(()),
             Access::Screen if permissions.screen => Ok(()),
+            Access::Mailbox if permissions.mailbox => Ok(()),
             Access::Files { write } => match permissions.files {
                 Some(FilesMode::ReadWrite) => Ok(()),
                 Some(FilesMode::Read) if !write => Ok(()),
                 _ => Err("notPermitted"),
             },
             Access::LocalOnly => Err("localOnly"),
-            Access::Control | Access::Applications | Access::Actions | Access::Screen => Err("notPermitted"),
+            Access::Control | Access::Applications | Access::Actions | Access::Screen | Access::Mailbox => Err("notPermitted"),
         }
     }
 
@@ -303,6 +312,79 @@ pub enum Request {
     CheckDevice { id: String },
     /// Sends one of a few requests to a paired device, for the Devices view.
     RemoteCall { id: String, request: Value },
+    /// The notifications of the bell, newest first.
+    ListNotifications,
+    /// Removes the named notifications from the bell.
+    DismissNotifications { ids: Vec<String> },
+    /// Removes the notifications that point to a place the person opened, of one kind or of all.
+    DismissNotificationRoute { route: String, kind: Option<inbox::Kind> },
+    ClearNotifications,
+    /// Adds a problem that the panel showed. Only errors and notes come from the webview.
+    RecordNotification {
+        kind: WebNotificationKind,
+        key: String,
+        #[serde(default)]
+        params: std::collections::BTreeMap<String, String>,
+        route: Option<String>,
+    },
+    SetNotificationPreferences { mode: NotificationMode, sound: bool, sound_name: SoundName },
+    PlayNotificationSound { sound_name: SoundName },
+    /// Whether macOS lets this app show banners: `notDetermined`, `denied`, `authorized`, or `unknown`.
+    GetNotificationPermission,
+    /// Asks macOS again. It shows its prompt only while the person has not answered.
+    RequestNotificationPermission,
+    /// Opens the Notifications pane of System Settings at this app.
+    OpenNotificationSettings,
+    /// Turns the mailbox of a device that controls this one on or off. Only the person here decides.
+    SetPeerMailbox { id: String, on: bool },
+    // The mailbox, as a device that controls this one asks it. They run here, for that device.
+    /// A text from the caller.
+    MailboxPut { id: String, text: String },
+    /// The caller begins to send a file of `size` bytes, and gets its upload id.
+    MailboxBegin { id: String, name: String, size: u64 },
+    /// The next chunk of that file. `offset` must be the bytes written so far, and `data` is base64 text.
+    MailboxWrite { upload_id: String, offset: u64, data: String },
+    MailboxFinish { upload_id: String },
+    MailboxAbort { upload_id: String },
+    /// What waits in the outbox for the caller.
+    MailboxPoll,
+    /// A chunk of a file of that outbox.
+    MailboxRead { id: String, offset: u64 },
+    /// The caller has these items now.
+    MailboxAck { ids: Vec<String> },
+    // The mailbox, as the person at this device uses it.
+    MailboxList { party: MailboxParty },
+    MailboxSummary,
+    /// Asks a device that this one controls for its outbox now.
+    MailboxCheck { party: MailboxParty },
+    MailboxSendText { party: MailboxParty, text: String },
+    /// Sends files and folders that the person chose here. A folder is compressed first.
+    MailboxSendPaths { party: MailboxParty, paths: Vec<String> },
+    MailboxCancel { party: MailboxParty, id: String },
+    MailboxRetry { party: MailboxParty, id: String },
+    MailboxRemove { party: MailboxParty, id: String },
+    MailboxClear { party: MailboxParty },
+    MailboxMarkRead { party: MailboxParty },
+    MailboxReveal { party: MailboxParty, id: String },
+    MailboxOpen { party: MailboxParty, id: String },
+    /// Where files that arrive are saved. Nothing goes back to the default folder.
+    MailboxSetFolder { folder: Option<String> },
+}
+
+/// The other side of a mailbox conversation: a device that this one controls, or a device that controls this one.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MailboxParty {
+    Device(String),
+    Peer(String),
+}
+
+/// The kinds of notification that the webview may add.
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WebNotificationKind {
+    Error,
+    Info,
 }
 
 impl Request {
@@ -439,7 +521,40 @@ impl Request {
             | Self::GetTransfers
             | Self::StopTransfer { .. }
             | Self::ClearTransfers
+            // The bell belongs to the person at this device.
+            | Self::ListNotifications
+            | Self::DismissNotifications { .. }
+            | Self::DismissNotificationRoute { .. }
+            | Self::ClearNotifications
+            | Self::RecordNotification { .. }
+            | Self::SetNotificationPreferences { .. }
+            | Self::PlayNotificationSound { .. }
+            | Self::GetNotificationPermission
+            | Self::RequestNotificationPermission
+            | Self::OpenNotificationSettings
+            | Self::SetPeerMailbox { .. }
+            | Self::MailboxList { .. }
+            | Self::MailboxSummary
+            | Self::MailboxCheck { .. }
+            | Self::MailboxSendText { .. }
+            | Self::MailboxSendPaths { .. }
+            | Self::MailboxCancel { .. }
+            | Self::MailboxRetry { .. }
+            | Self::MailboxRemove { .. }
+            | Self::MailboxClear { .. }
+            | Self::MailboxMarkRead { .. }
+            | Self::MailboxReveal { .. }
+            | Self::MailboxOpen { .. }
+            | Self::MailboxSetFolder { .. }
             | Self::RequestActivityAccessibility => Access::LocalOnly,
+            Self::MailboxPut { .. }
+            | Self::MailboxBegin { .. }
+            | Self::MailboxWrite { .. }
+            | Self::MailboxFinish { .. }
+            | Self::MailboxAbort { .. }
+            | Self::MailboxPoll
+            | Self::MailboxRead { .. }
+            | Self::MailboxAck { .. } => Access::Mailbox,
         }
     }
 }
@@ -477,7 +592,9 @@ impl Request {
             | Self::ListFiles { .. }
             | Self::StatFile { .. }
             | Self::ReadFileChunk { .. }
-            | Self::GetTransfers => true,
+            | Self::GetTransfers
+            | Self::ListNotifications
+            | Self::GetNotificationPermission => true,
             Self::CheckForUpdate
             | Self::RestartToUpdate
             | Self::SetLanguage { .. }
@@ -551,13 +668,43 @@ impl Request {
             | Self::OpenRemoteFile { .. }
             | Self::StopTransfer { .. }
             | Self::ClearTransfers
-            | Self::RemoteCall { .. } => false,
+            | Self::RemoteCall { .. }
+            | Self::DismissNotifications { .. }
+            | Self::DismissNotificationRoute { .. }
+            | Self::ClearNotifications
+            | Self::RecordNotification { .. }
+            | Self::SetNotificationPreferences { .. }
+            | Self::PlayNotificationSound { .. }
+            | Self::RequestNotificationPermission
+            | Self::OpenNotificationSettings
+            | Self::SetPeerMailbox { .. }
+            | Self::MailboxPut { .. }
+            | Self::MailboxBegin { .. }
+            | Self::MailboxWrite { .. }
+            | Self::MailboxFinish { .. }
+            | Self::MailboxAbort { .. }
+            | Self::MailboxAck { .. }
+            | Self::MailboxCheck { .. }
+            | Self::MailboxSendText { .. }
+            | Self::MailboxSendPaths { .. }
+            | Self::MailboxCancel { .. }
+            | Self::MailboxRetry { .. }
+            | Self::MailboxRemove { .. }
+            | Self::MailboxClear { .. }
+            | Self::MailboxMarkRead { .. }
+            | Self::MailboxReveal { .. }
+            | Self::MailboxOpen { .. }
+            | Self::MailboxSetFolder { .. } => false,
+            Self::MailboxPoll | Self::MailboxRead { .. } | Self::MailboxList { .. } | Self::MailboxSummary => true,
         }
     }
 
     /// True for a chunk of a file, of which a transfer sends hundreds. A chunk that works is not logged.
     pub fn is_file_chunk(&self) -> bool {
-        matches!(self, Self::ReadFileChunk { .. } | Self::WriteFileChunk { .. })
+        matches!(
+            self,
+            Self::ReadFileChunk { .. } | Self::WriteFileChunk { .. } | Self::MailboxRead { .. } | Self::MailboxWrite { .. }
+        )
     }
 
     /// True for a request that is about the person at this window, not about a device. It always
@@ -665,7 +812,41 @@ impl Request {
             | Self::GetTransfers
             | Self::StopTransfer { .. }
             | Self::ClearTransfers
-            | Self::RemoteCall { .. } => false,
+            | Self::RemoteCall { .. }
+            // The bell is hidden in a window that controls a device, and a device never reads another's bell.
+            | Self::ListNotifications
+            | Self::DismissNotifications { .. }
+            | Self::DismissNotificationRoute { .. }
+            | Self::ClearNotifications
+            | Self::RecordNotification { .. }
+            | Self::SetNotificationPreferences { .. }
+            | Self::PlayNotificationSound { .. }
+            | Self::GetNotificationPermission
+            | Self::RequestNotificationPermission
+            | Self::OpenNotificationSettings
+            | Self::SetPeerMailbox { .. }
+            // The mailbox of this device, or of a device that this one controls, as the person here uses it.
+            | Self::MailboxPut { .. }
+            | Self::MailboxBegin { .. }
+            | Self::MailboxWrite { .. }
+            | Self::MailboxFinish { .. }
+            | Self::MailboxAbort { .. }
+            | Self::MailboxPoll
+            | Self::MailboxRead { .. }
+            | Self::MailboxAck { .. }
+            | Self::MailboxList { .. }
+            | Self::MailboxSummary
+            | Self::MailboxCheck { .. }
+            | Self::MailboxSendText { .. }
+            | Self::MailboxSendPaths { .. }
+            | Self::MailboxCancel { .. }
+            | Self::MailboxRetry { .. }
+            | Self::MailboxRemove { .. }
+            | Self::MailboxClear { .. }
+            | Self::MailboxMarkRead { .. }
+            | Self::MailboxReveal { .. }
+            | Self::MailboxOpen { .. }
+            | Self::MailboxSetFolder { .. } => false,
         }
     }
 
@@ -693,6 +874,29 @@ impl Request {
                 | Self::GetTransfers
                 | Self::StopTransfer { .. }
                 | Self::ClearTransfers
+                // A window that controls a device has no mailbox. The app itself sends the device's part.
+                | Self::SetPeerMailbox { .. }
+                | Self::MailboxPut { .. }
+                | Self::MailboxBegin { .. }
+                | Self::MailboxWrite { .. }
+                | Self::MailboxFinish { .. }
+                | Self::MailboxAbort { .. }
+                | Self::MailboxPoll
+                | Self::MailboxRead { .. }
+                | Self::MailboxAck { .. }
+                | Self::MailboxList { .. }
+                | Self::MailboxSummary
+                | Self::MailboxCheck { .. }
+                | Self::MailboxSendText { .. }
+                | Self::MailboxSendPaths { .. }
+                | Self::MailboxCancel { .. }
+                | Self::MailboxRetry { .. }
+                | Self::MailboxRemove { .. }
+                | Self::MailboxClear { .. }
+                | Self::MailboxMarkRead { .. }
+                | Self::MailboxReveal { .. }
+                | Self::MailboxOpen { .. }
+                | Self::MailboxSetFolder { .. }
         )
     }
 
@@ -1283,6 +1487,113 @@ async fn run(
             }
         }
         Request::CopyText { text } => crate::clipboard::write(&text).map(|()| Value::Null),
+        Request::ListNotifications => json(app.state::<inbox::Inbox>().list()),
+        Request::DismissNotifications { ids } => {
+            inbox::validate_ids(&ids)?;
+            if app.state::<inbox::Inbox>().dismiss(&ids)? {
+                inbox::changed(app);
+            }
+            Ok(Value::Null)
+        }
+        Request::DismissNotificationRoute { route, kind } => {
+            inbox::validate_route(&route)?;
+            inbox::dismiss_route(app, &route, kind);
+            Ok(Value::Null)
+        }
+        Request::ClearNotifications => {
+            if app.state::<inbox::Inbox>().clear()? {
+                inbox::changed(app);
+            }
+            Ok(Value::Null)
+        }
+        Request::RecordNotification { kind, key, params, route } => {
+            let entry = inbox::validate(inbox::NewEntry {
+                kind: match kind {
+                    WebNotificationKind::Error => inbox::Kind::Error,
+                    WebNotificationKind::Info => inbox::Kind::Info,
+                },
+                key,
+                params,
+                route,
+            })?;
+            // The panel already shows it, so it neither sounds nor shows a banner.
+            inbox::record(app, entry, inbox::Alert::No, inbox::Repeat::Allow);
+            Ok(Value::Null)
+        }
+        Request::SetNotificationPreferences { mode, sound, sound_name } => update(app, controller, |p| {
+            p.notifications = NotificationSettings { mode, sound, sound_name };
+        }),
+        request @ (Request::SetPeerMailbox { .. }
+        | Request::MailboxPut { .. }
+        | Request::MailboxBegin { .. }
+        | Request::MailboxWrite { .. }
+        | Request::MailboxFinish { .. }
+        | Request::MailboxAbort { .. }
+        | Request::MailboxPoll
+        | Request::MailboxRead { .. }
+        | Request::MailboxAck { .. }
+        | Request::MailboxList { .. }
+        | Request::MailboxSummary
+        | Request::MailboxCheck { .. }
+        | Request::MailboxSendText { .. }
+        | Request::MailboxSendPaths { .. }
+        | Request::MailboxCancel { .. }
+        | Request::MailboxRetry { .. }
+        | Request::MailboxRemove { .. }
+        | Request::MailboxClear { .. }
+        | Request::MailboxMarkRead { .. }
+        | Request::MailboxReveal { .. }
+        | Request::MailboxOpen { .. }
+        | Request::MailboxSetFolder { .. }) => {
+            #[cfg(unix)]
+            {
+                let app = app.clone();
+                return tauri::async_runtime::spawn_blocking(move || crate::remote::mailbox::run(&app, origin, request))
+                    .await
+                    .map_err(|_| "workerUnavailable")?;
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = request;
+                Err("unsupported")
+            }
+        }
+        Request::GetNotificationPermission => {
+            #[cfg(target_os = "macos")]
+            return tauri::async_runtime::spawn_blocking(crate::notifications::permission)
+                .await
+                .map(|status| Value::String(status.into()))
+                .map_err(|_| "workerUnavailable");
+            #[cfg(not(target_os = "macos"))]
+            Ok(Value::String("unknown".into()))
+        }
+        Request::RequestNotificationPermission => {
+            #[cfg(target_os = "macos")]
+            {
+                crate::notifications::request_permission(app);
+                return Ok(Value::Null);
+            }
+            #[cfg(not(target_os = "macos"))]
+            Err("unsupported")
+        }
+        Request::OpenNotificationSettings => {
+            #[cfg(target_os = "macos")]
+            return crate::notifications::open_settings(&app.config().identifier).map(|()| Value::Null);
+            #[cfg(not(target_os = "macos"))]
+            Err("unsupported")
+        }
+        Request::PlayNotificationSound { sound_name } => {
+            #[cfg(target_os = "macos")]
+            {
+                crate::notifications::play(app, sound_name);
+                return Ok(Value::Null);
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = sound_name;
+                Err("unsupported")
+            }
+        }
         Request::CheckDevice { id } => {
             #[cfg(unix)]
             return tauri::async_runtime::spawn_blocking({
@@ -1500,6 +1811,8 @@ async fn run(
                     let removed = app.state::<crate::remote::service::Service>().remove_peer(&id);
                     // The schedules of a device go with its access, even when its line could not be removed.
                     crate::actions::forget_peer(&app, Some(&id));
+                    // So does its mailbox.
+                    crate::remote::mailbox::forget(&app, &crate::remote::mailbox::Party::Peer(id.clone()));
                     removed
                 }
             })
@@ -1573,7 +1886,8 @@ async fn run(
                             .forget_device(&id);
                         // The window of a device that is forgotten has nothing left to talk to.
                         crate::remote::window::close(&app, &id);
-                        // So are the transfers that were on their way to it.
+                        // So are the transfers that were on their way to it, and its mailbox.
+                        crate::remote::mailbox::forget(&app, &crate::remote::mailbox::Party::Device(id.clone()));
                         app.state::<crate::remote::transfers::Transfers>().stop_device(&id);
                         forgotten
                     }
@@ -1592,8 +1906,12 @@ async fn run(
             return tauri::async_runtime::spawn_blocking({
                 let app = app.clone();
                 move || {
+                    let peers: Vec<String> = app.state::<crate::remote::service::Service>().controllers().into_iter().map(|peer| peer.id).collect();
                     let cut = app.state::<crate::remote::service::Service>().cut_all();
                     crate::actions::forget_peer(&app, None);
+                    for peer in peers {
+                        crate::remote::mailbox::forget(&app, &crate::remote::mailbox::Party::Peer(peer));
+                    }
                     cut
                 }
             })
@@ -1725,6 +2043,7 @@ async fn session(app: &AppHandle, origin: Origin) -> Result<Value, &'static str>
             applications: true,
             actions: true,
             screen: true,
+            mailbox: true,
             files: None,
             peer: None,
         },
@@ -1793,6 +2112,7 @@ mod tests {
         applications: false,
         actions: false,
         screen: false,
+        mailbox: false,
         files: None,
         peer: None,
     });
@@ -1801,6 +2121,7 @@ mod tests {
         applications: false,
         actions: false,
         screen: false,
+        mailbox: false,
         files: None,
         peer: None,
     });
@@ -1809,6 +2130,7 @@ mod tests {
         applications: true,
         actions: false,
         screen: false,
+        mailbox: false,
         files: None,
         peer: None,
     });
@@ -1817,6 +2139,7 @@ mod tests {
         applications: false,
         actions: true,
         screen: false,
+        mailbox: false,
         files: None,
         peer: None,
     });
@@ -1826,6 +2149,7 @@ mod tests {
         applications: false,
         actions: false,
         screen: false,
+        mailbox: false,
         files: Some(FilesMode::Read),
         peer: None,
     });
@@ -1834,6 +2158,7 @@ mod tests {
         applications: false,
         actions: false,
         screen: false,
+        mailbox: false,
         files: Some(FilesMode::ReadWrite),
         peer: None,
     });
@@ -1940,6 +2265,108 @@ mod tests {
     }
 
     #[test]
+    fn the_mailbox_needs_its_own_permission_and_its_local_side_stays_local() {
+        let preferences = Preferences::default();
+        let id = "0123456789abcdef0123456789abcdef";
+        let mailbox = Origin::Remote(Permissions {
+            control: false,
+            applications: false,
+            actions: false,
+            screen: false,
+            mailbox: true,
+            files: None,
+            peer: PeerId::parse(id),
+        });
+        assert!(!crate::remote::peers::PeerPermissions::default().mailbox);
+        let device = || json!({ "device": id });
+        let remote = [
+            (json!({"command": "mailboxPut", "args": {"id": id, "text": "hi"}}), false),
+            (json!({"command": "mailboxBegin", "args": {"id": id, "name": "a", "size": 1}}), false),
+            (json!({"command": "mailboxWrite", "args": {"uploadId": id, "offset": 0, "data": ""}}), false),
+            (json!({"command": "mailboxFinish", "args": {"uploadId": id}}), false),
+            (json!({"command": "mailboxAbort", "args": {"uploadId": id}}), false),
+            (json!({"command": "mailboxPoll"}), true),
+            (json!({"command": "mailboxRead", "args": {"id": id, "offset": 0}}), true),
+            (json!({"command": "mailboxAck", "args": {"ids": [id]}}), false),
+        ];
+        for (value, read) in remote {
+            let parsed = request(value.clone());
+            assert_eq!(parsed.access(&preferences), Access::Mailbox, "{value}");
+            for origin in [NONE, CONTROL, ACTIONS, FILES_WRITE] {
+                assert_eq!(allowed(origin, &parsed, &preferences), Err("notPermitted"), "{value}");
+            }
+            assert_eq!(allowed(mailbox, &parsed, &preferences), Ok(()), "{value}");
+            assert_eq!(parsed.is_read(), read, "{value}");
+            assert!(!parsed.runs_on_viewer());
+            // A window that controls a device never sends them: only the app does, for its own mailbox.
+            assert!(parsed.is_controller_side());
+        }
+        let local = [
+            (json!({"command": "setPeerMailbox", "args": {"id": id, "on": true}}), false),
+            (json!({"command": "mailboxList", "args": {"party": device()}}), true),
+            (json!({"command": "mailboxSummary"}), true),
+            (json!({"command": "mailboxCheck", "args": {"party": device()}}), false),
+            (json!({"command": "mailboxSendText", "args": {"party": {"peer": id}, "text": "hi"}}), false),
+            (json!({"command": "mailboxSendPaths", "args": {"party": device(), "paths": ["/tmp/x"]}}), false),
+            (json!({"command": "mailboxCancel", "args": {"party": device(), "id": id}}), false),
+            (json!({"command": "mailboxRetry", "args": {"party": device(), "id": id}}), false),
+            (json!({"command": "mailboxRemove", "args": {"party": device(), "id": id}}), false),
+            (json!({"command": "mailboxClear", "args": {"party": device()}}), false),
+            (json!({"command": "mailboxMarkRead", "args": {"party": device()}}), false),
+            (json!({"command": "mailboxReveal", "args": {"party": device(), "id": id}}), false),
+            (json!({"command": "mailboxOpen", "args": {"party": device(), "id": id}}), false),
+            (json!({"command": "mailboxSetFolder", "args": {"folder": null}}), false),
+        ];
+        for (value, read) in local {
+            let parsed = request(value.clone());
+            assert_eq!(allowed(mailbox, &parsed, &preferences), Err("localOnly"), "{value}");
+            assert_eq!(allowed(CONTROL, &parsed, &preferences), Err("localOnly"), "{value}");
+            assert_eq!(allowed(Origin::Local, &parsed, &preferences), Ok(()), "{value}");
+            assert_eq!(parsed.is_read(), read, "{value}");
+            assert!(!parsed.runs_on_viewer());
+            assert!(parsed.is_controller_side());
+            assert_eq!(plan(&Route::Device(id.into()), &parsed), Plan::Refuse);
+        }
+        assert!(request(json!({"command": "mailboxWrite", "args": {"uploadId": id, "offset": 0, "data": ""}})).is_file_chunk());
+        assert!(request(json!({"command": "mailboxRead", "args": {"id": id, "offset": 0}})).is_file_chunk());
+    }
+
+    #[test]
+    fn the_bell_and_its_settings_are_local_only() {
+        let preferences = Preferences::default();
+        for value in [
+            json!({"command": "listNotifications"}),
+            json!({"command": "dismissNotifications", "args": {"ids": ["1-2-3"]}}),
+            json!({"command": "dismissNotificationRoute", "args": {"route": "settings", "kind": "update"}}),
+            json!({"command": "clearNotifications"}),
+            json!({"command": "recordNotification", "args": {"kind": "error", "key": "caffeinate", "route": "caffeinate"}}),
+            json!({"command": "setNotificationPreferences", "args": {"mode": "app", "sound": true, "soundName": "glass"}}),
+            json!({"command": "playNotificationSound", "args": {"soundName": "tink"}}),
+            json!({"command": "getNotificationPermission"}),
+            json!({"command": "requestNotificationPermission"}),
+            json!({"command": "openNotificationSettings"}),
+        ] {
+            let request = request(value);
+            assert_eq!(allowed(CONTROL, &request, &preferences), Err("localOnly"));
+            assert_eq!(allowed(Origin::Local, &request, &preferences), Ok(()));
+            assert!(!request.runs_on_viewer());
+            assert!(!request.is_controller_side());
+        }
+        assert!(request(json!({"command": "listNotifications"})).is_read());
+        assert!(request(json!({"command": "getNotificationPermission"})).is_read());
+        assert!(!request(json!({"command": "openNotificationSettings"})).is_read());
+        assert!(!request(json!({"command": "clearNotifications"})).is_read());
+    }
+
+    #[test]
+    fn the_webview_may_add_only_errors_and_notes() {
+        for kind in ["message", "update"] {
+            let value = json!({"command": "recordNotification", "args": {"kind": kind, "key": "x", "route": null}});
+            assert!(serde_json::from_value::<Request>(value).is_err());
+        }
+    }
+
+    #[test]
     fn every_device_management_request_is_local_only() {
         let preferences = Preferences::default();
         let id = "0123456789abcdef0123456789abcdef";
@@ -1962,7 +2389,7 @@ mod tests {
             json!({"command": "openScreen", "args": {"id": id}}),
         ] {
             let parsed = request(value);
-            for origin in [NONE, CONTROL, ACTIONS, Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, files: None, peer: None })] {
+            for origin in [NONE, CONTROL, ACTIONS, Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, mailbox: false, files: None, peer: None })] {
                 assert_eq!(allowed(origin, &parsed, &preferences), Err("localOnly"));
             }
             assert_eq!(allowed(Origin::Local, &parsed, &preferences), Ok(()));
@@ -1981,7 +2408,7 @@ mod tests {
             json!({"command": "getProxyLog"}),
         ] {
             let parsed = request(value);
-            let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, files: None, peer: None });
+            let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, mailbox: false, files: None, peer: None });
             assert_eq!(allowed(CONTROL, &parsed, &preferences), Err("localOnly"));
             assert_eq!(allowed(both, &parsed, &preferences), Err("localOnly"));
             assert_eq!(allowed(Origin::Local, &parsed, &preferences), Ok(()));
@@ -2162,7 +2589,7 @@ mod tests {
     #[test]
     fn copying_is_local_only_runs_on_the_viewer_and_has_a_size_cap() {
         let preferences = Preferences::default();
-        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, files: None, peer: None });
+        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, mailbox: false, files: None, peer: None });
         let id = "0123456789abcdef0123456789abcdef";
         for value in [
             json!({"command": "copyText", "args": {"text": "hello"}}),
@@ -2201,7 +2628,7 @@ mod tests {
     #[test]
     fn the_viewer_and_the_windows_are_not_something_a_remote_device_may_ask() {
         let preferences = Preferences::default();
-        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, files: None, peer: None });
+        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, mailbox: false, files: None, peer: None });
         for value in [
             json!({"command": "getViewer"}),
             json!({"command": "openRemoteWindow", "args": {"id": DEVICE}}),
@@ -2239,7 +2666,7 @@ mod tests {
     #[test]
     fn applications_need_their_own_permission_and_control_alone_is_refused() {
         let preferences = Preferences::default();
-        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, files: None, peer: None });
+        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, mailbox: false, files: None, peer: None });
         for value in application_requests() {
             let parsed = request(value);
             assert_eq!(parsed.access(&preferences), Access::Applications);
@@ -2339,7 +2766,7 @@ mod tests {
     #[test]
     fn remote_control_is_refused_for_every_action_request() {
         let preferences = Preferences::default();
-        let all = Origin::Remote(Permissions { control: true, applications: true, actions: false, screen: false, files: None, peer: None });
+        let all = Origin::Remote(Permissions { control: true, applications: true, actions: false, screen: false, mailbox: false, files: None, peer: None });
         for value in actions_requests().into_iter().chain(writing_requests()) {
             let parsed = request(value.clone());
             for origin in [NONE, CONTROL, APPLICATIONS, all] {
@@ -2361,7 +2788,7 @@ mod tests {
         for value in writing_requests() {
             let parsed = request(value.clone());
             assert_eq!(parsed.access(&preferences), Access::LocalOnly, "{value}");
-            let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, files: None, peer: None });
+            let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, mailbox: false, files: None, peer: None });
             for origin in [NONE, CONTROL, ACTIONS, both] {
                 assert_eq!(allowed(origin, &parsed, &preferences), Err("localOnly"), "{value}");
             }
@@ -2399,7 +2826,7 @@ mod tests {
         let preferences = Preferences::default();
         let on = request(json!({"command": "setStartToolsOnLaunch", "args": {"enabled": true}}));
         let off = request(json!({"command": "setStartToolsOnLaunch", "args": {"enabled": false}}));
-        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, files: None, peer: None });
+        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, mailbox: false, files: None, peer: None });
         for origin in [NONE, CONTROL, ACTIONS, both] {
             assert_eq!(allowed(origin, &on, &preferences), Err("localOnly"));
         }
@@ -2447,7 +2874,7 @@ mod tests {
     fn no_shell_request_is_accepted_from_any_remote_origin() {
         let preferences = Preferences::default();
         let id = "0123456789abcdef0123456789abcdef";
-        let all = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, files: None, peer: PeerId::parse(id) });
+        let all = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, mailbox: false, files: None, peer: PeerId::parse(id) });
         for value in [
             json!({"command": "grantShell", "args": {"id": id, "minutes": 60}}),
             json!({"command": "grantShell", "args": {"id": id, "minutes": null}}),
@@ -2474,7 +2901,7 @@ mod tests {
         let preferences = Preferences::default();
         let id = "0123456789abcdef0123456789abcdef";
         let read = request(json!({"command": "getScreenSharing"}));
-        let screen = Origin::Remote(Permissions { control: false, applications: false, actions: false, screen: true, files: None, peer: None });
+        let screen = Origin::Remote(Permissions { control: false, applications: false, actions: false, screen: true, mailbox: false, files: None, peer: None });
         assert_eq!(read.access(&preferences), Access::Screen);
         assert_eq!(allowed(screen, &read, &preferences), Ok(()));
         // Control alone does not show the screen.
@@ -2548,7 +2975,7 @@ mod tests {
     #[test]
     fn each_files_request_declares_its_access_and_only_a_matching_grant_passes() {
         let preferences = Preferences::default();
-        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, files: None, peer: None });
+        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, mailbox: false, files: None, peer: None });
         for (value, access) in files_requests() {
             let parsed = request(value.clone());
             assert_eq!(parsed.access(&preferences), access, "{value}");
@@ -2581,7 +3008,7 @@ mod tests {
     fn granting_files_and_the_helpers_of_the_person_are_local_only_and_never_sent_to_a_device() {
         let preferences = Preferences::default();
         let id = "0123456789abcdef0123456789abcdef";
-        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, files: Some(FilesMode::ReadWrite), peer: None });
+        let both = Origin::Remote(Permissions { control: true, applications: true, actions: true, screen: false, mailbox: false, files: Some(FilesMode::ReadWrite), peer: None });
         let local_only = [
             json!({"command": "grantFiles", "args": {"id": id, "scope": "folders", "folders": ["~/Lazy Worker"], "mode": "read", "minutes": 60}}),
             json!({"command": "grantFiles", "args": {"id": id, "scope": "disk", "folders": [], "mode": "readWrite", "minutes": null}}),

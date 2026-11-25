@@ -107,13 +107,14 @@ See the [user guide](docs/user-guide.md#devices) for the steps.
 
 - Turns on remote access with one button. It lets only keys log in over SSH, and nothing is reachable before that.
 - Pairs two devices with a 6-digit code that works once. The code is never sent over the network.
-- Gives each device five permissions: Control, Applications, Actions, Files, and Shell. A new device gets Control only.
+- Gives each device its own permissions: Control, Applications, Actions, Mailbox, Files, Shell, and Screen. A new device gets Control only.
 - Opens a window for another device. Every request runs there, and that device checks it.
 - Shows whether each device is online, checks again every few seconds, and has a button to check one now.
 - Lists the applications of another device, and opens them.
 - Runs saved actions on another device, and schedules them once, daily, or weekly.
 - Allows a full shell for a limited time, and only at the device that is shared. Pairing never turns it on.
 - Shares files with another device, in the folders you choose or on the whole disk, read only or read and write, for a time you set. It sends and saves files over the same SSH connection, with progress and a Stop button. Only the device itself turns it on.
+- Sends texts, files, and folders to another device, and receives its replies, in a mailbox. Only the device itself turns it on. Folders are compressed first, and received files go to your Downloads folder.
 - Opens the screen of another device with macOS Screen Sharing. Only the device itself turns it on, and macOS asks for the account password.
 - Keeps a log of what other devices asked, and cuts all access at once.
 
@@ -161,6 +162,11 @@ Every tool gets the same support from the toolbox.
     <td valign="top"><strong>Hidden while sharing</strong><br>The icon and the panel disappear when you share your screen.</td>
     <td valign="top"><strong>Your look and language</strong><br>Light or dark. English or Spanish. Or follow your system.</td>
     <td valign="top"><strong>Updates in place</strong><br>A new version appears in the menu. Restart to install it.</td>
+  </tr>
+  <tr>
+    <td valign="top"><strong>Notifications</strong><br>A bell shows what is new, with a soft sound and a macOS notification if you want them.</td>
+    <td valign="top"></td>
+    <td valign="top"></td>
   </tr>
 </table>
 

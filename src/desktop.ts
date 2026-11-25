@@ -59,6 +59,21 @@ export type LidStatus = { supported: boolean; external: boolean };
 /** `checked` is the time of the last check that got an answer, in seconds since the Unix epoch. */
 export type UpdateStatus = { version: string | null; checked: number | null };
 export type ProxyInstalls = { claudeCode: boolean; claudeApp: boolean; codexCode: boolean; codexApp: boolean };
+export type NotificationMode = "off" | "app" | "system";
+export type SoundName = "tink" | "pop" | "glass";
+export type NotificationSettings = { mode: NotificationMode; sound: boolean; soundName: SoundName };
+/** Whether macOS lets the app show banners. `unknown` when macOS does not answer. */
+export type NotificationPermission = "notDetermined" | "denied" | "authorized" | "unknown";
+/** One notification of the bell: something still new. `key` and `params.detail` are message keys. Other params fill them and are text only. */
+export type AppNotification = {
+  id: string;
+  /** Seconds since the Unix epoch. */
+  at: number;
+  kind: "message" | "error" | "update" | "info";
+  key: string;
+  params: Record<string, string>;
+  route: string | null;
+};
 export type Preferences = {
   language: Language | "system";
   theme: Theme;
@@ -75,6 +90,8 @@ export type Preferences = {
   pinned: ToolId[];
   /** The version whose changes the user has seen. `null` until the setup or What’s new closes. */
   seenVersion: string | null;
+  /** Where the app tells the person about something new. */
+  notifications: NotificationSettings;
 };
 export type Status = {
   mode: "off" | "manual" | "scheduled";
@@ -87,7 +104,32 @@ export type Statuses = Record<ToolId, Status>;
 export type ActivityAccessibility = "granted" | "required" | "unsupported" | "unavailable";
 
 export type DeviceKind = "laptop" | "desktop";
-export type ControllerPermission = "control" | "applications" | "actions" | "screen" | "shell" | "files";
+/** The other side of a mailbox conversation: a device that this one controls, or one that controls this one. */
+export type MailboxParty = { device: string } | { peer: string };
+export type MailboxStatus = "compressing" | "queued" | "sending" | "delivered" | "waiting" | "pickingUp" | "arriving"
+  | "saved" | "received" | "expired" | "failed" | "stopped";
+/** One message. Its text and name came from a device and are shown as text only. */
+export type MailboxItem = {
+  id: string;
+  at: number;
+  mine: boolean;
+  text: string | null;
+  name: string | null;
+  size: number;
+  folder: boolean;
+  status: MailboxStatus;
+  error: string | null;
+  read: boolean;
+  done: number;
+  missing: boolean;
+  place: string | null;
+};
+/** The last mailbox check of a device that this one controls: when, and what came back. */
+export type MailboxCheck = { at: number; outcome: "allowed" | "off" | "unreachable"; reason: string | null };
+export type MailboxConversation = { items: MailboxItem[]; folder: string; granted: boolean | null; check: MailboxCheck | null };
+export type MailboxSummary = { party: MailboxParty; unread: number; pending: number; granted: boolean | null; check: MailboxCheck | null };
+
+export type ControllerPermission = "control" | "applications" | "actions" | "screen" | "mailbox" | "shell" | "files";
 /** When a full shell ends: seconds since the Unix epoch, or `"untilOff"` while it lasts until the person turns it off. */
 export type ShellUntil = number | "untilOff";
 /** A full shell that a device granted, or `null` while it is off. */
@@ -222,6 +264,7 @@ export const defaults: Preferences = {
   lidAwake: "sleep",
   pinned: [],
   seenVersion: null,
+  notifications: { mode: "system", sound: true, soundName: "pop" },
   caffeinate: {
     mode: "untilStopped",
     flags: { i: false, d: false, m: false, s: true, u: false },
@@ -280,6 +323,7 @@ function loadPreviewPreferences(): Preferences {
     ...defaults,
     ...saved,
     quickStart: { ...defaults.quickStart, ...saved.quickStart },
+    notifications: { ...defaults.notifications, ...saved.notifications },
     proxy: {
       ...defaults.proxy,
       ...saved.proxy,
@@ -458,12 +502,60 @@ function settlePreviewPairing(now: number): void {
   if (previewQuery.has("pair-in") && now - previewPairingOpened >= 6) {
     previewControllerList().push({
       id: "mini", name: "Mac mini de la sala", kind: "desktop", lastAccess: null, connected: false,
-      permissions: { control: true, applications: false, actions: false, screen: false, shell: false, files: false }, shell: null, files: null,
+      permissions: { control: true, applications: false, actions: false, screen: false, mailbox: false, shell: false, files: false }, shell: null, files: null,
     });
     Object.assign(previewPairing, { open: false, expires: null, attemptsLeft: 0 });
   } else if (previewPairing.expires !== null && previewPairing.expires <= now) {
     Object.assign(previewPairing, { open: false, expires: null, attemptsLeft: 0 });
   }
+}
+/** The mailbox of a preview: the frames of the design, with sample texts and files. */
+const previewMailbox = new Map<string, MailboxItem[]>();
+const mailboxListeners = new Set<(party: MailboxParty) => void>();
+function mailboxKey(party: MailboxParty): string {
+  return "device" in party ? `device:${party.device}` : `peer:${party.peer}`;
+}
+function previewMailboxItems(party: MailboxParty): MailboxItem[] {
+  const key = mailboxKey(party);
+  let items = previewMailbox.get(key);
+  if (!items) {
+    const now = Math.floor(Date.now() / 1000);
+    const base = { text: null, name: null, size: 0, folder: false, error: null, read: true, done: 0, missing: false, place: null };
+    items = "device" in party
+      ? [
+        { ...base, id: "d1", at: now - 130, mine: true, text: "Here is the staging key note and the clips.", status: "delivered" },
+        { ...base, id: "d2", at: now - 100, mine: true, name: "Clips.zip", size: 1_800_000_000, folder: true, status: "sending", done: 720_000_000 },
+        { ...base, id: "d3", at: now - 90, mine: true, name: "report-q3.pdf", size: 4_200_000, status: "queued" },
+        { ...base, id: "d4", at: now - 60, mine: false, text: "Got it, thanks", status: "received", read: false },
+        { ...base, id: "d5", at: now - 10, mine: false, name: "screenshot.png", size: 320_000, status: "saved", read: false, place: "~/Downloads/Lazy Worker/iMac del estudio" },
+        { ...base, id: "d6", at: now - 5, mine: true, text: "Are you there?", status: "failed", error: "mailboxOffline" },
+      ]
+      : [
+        { ...base, id: "p1", at: now - 130, mine: false, text: "Here is the staging key note and the clips.", status: "received" },
+        { ...base, id: "p2", at: now - 100, mine: false, name: "Clips.zip", size: 1_800_000_000, folder: true, status: "arriving", done: 720_000_000, read: false },
+        { ...base, id: "p3", at: now - 90, mine: false, name: "report-q3.pdf", size: 4_200_000, status: "saved", read: false, place: "~/Downloads/Lazy Worker/MacBook Pro" },
+        { ...base, id: "p4", at: now - 60, mine: true, text: "Got it, thanks", status: "delivered" },
+        { ...base, id: "p5", at: now - 40, mine: true, name: "screenshot.png", size: 320_000, status: "waiting" },
+        { ...base, id: "p6", at: now - 3 * 86400, mine: false, name: "old-notes.txt", size: 1_200, status: "saved", missing: true, place: "~/Downloads/Lazy Worker/MacBook Pro" },
+      ];
+    if (previewQuery.has("mailbox-empty")) items = [];
+    previewMailbox.set(key, items);
+  }
+  return items;
+}
+/** A preview shows a mailbox off there with `?mailbox-off`, and a device not reached with `?mailbox-away`. */
+function previewMailboxCheck(party: MailboxParty): MailboxCheck | null {
+  if (!("device" in party)) return null;
+  const at = Math.floor(Date.now() / 1000) - 75;
+  if (previewQuery.has("mailbox-off")) return { at, outcome: "off", reason: null };
+  if (previewQuery.has("mailbox-away")) return { at, outcome: "unreachable", reason: "sshTimeout" };
+  return { at, outcome: "allowed", reason: null };
+}
+function previewMailboxGranted(party: MailboxParty): boolean | null {
+  return "device" in party ? previewMailboxCheck(party)?.outcome !== "off" : null;
+}
+function previewMailboxChanged(party: MailboxParty): void {
+  for (const listener of mailboxListeners) listener(party);
 }
 /** Devices that a preview paired with, so the list shows them. */
 const previewDeviceAdditions: RemoteDevice[] = [];
@@ -478,7 +570,7 @@ function sampleControllers(now: number): Controller[] {
     const far = previewQuery.get("stress") === "far";
     return [{
       id: "studio", name: "Estación de trabajo del estudio de diseño del tercer piso 1B", kind: "desktop", lastAccess: now - 5 * 60, connected: true,
-      permissions: { control: true, applications: true, actions: true, screen: true, shell: true, files: true },
+      permissions: { control: true, applications: true, actions: true, screen: true, mailbox: false, shell: true, files: true },
       shell: { until: far ? Math.floor(tomorrow.getTime() / 1000) : now + 3600 },
       files: { scope: "folders", folders: ["~/Lazy Worker"], mode: "read", until: far ? Math.floor(tomorrow.getTime() / 1000) : "untilOff" },
     }];
@@ -486,15 +578,15 @@ function sampleControllers(now: number): Controller[] {
   return [
     {
       id: "studio", name: "iMac del estudio", kind: "desktop", lastAccess: now - 5 * 60, connected: true,
-      permissions: { control: true, applications: true, actions: true, screen: true, shell: false, files: false }, shell: null, files: null,
+      permissions: { control: true, applications: true, actions: true, screen: true, mailbox: true, shell: false, files: false }, shell: null, files: null,
     },
     {
       id: "office", name: "MacBook Air de la oficina", kind: "laptop", lastAccess: now - 26 * 3600, connected: false,
-      permissions: { control: true, applications: false, actions: false, screen: false, shell: false, files: false }, shell: null, files: null,
+      permissions: { control: true, applications: false, actions: false, screen: false, mailbox: false, shell: false, files: false }, shell: null, files: null,
     },
     {
       id: "new", name: "Mac mini", kind: "desktop", lastAccess: null, connected: false,
-      permissions: { control: false, applications: false, actions: false, screen: false, shell: false, files: false }, shell: null, files: null,
+      permissions: { control: false, applications: false, actions: false, screen: false, mailbox: false, shell: false, files: false }, shell: null, files: null,
     },
   ];
 }
@@ -773,6 +865,18 @@ function previewRemoteStatuses(id: string): Statuses {
   return { activity: status("activity"), caffeinate: status("caffeinate"), proxy: status("proxy") };
 }
 
+/** The bell of a browser preview: a sample of each kind, some read. `?bell-empty` starts it empty. */
+const previewNow = Math.floor(Date.now() / 1000);
+let previewNotifications: AppNotification[] = previewQuery.has("bell-empty") ? [] : [
+  { id: "p1", at: previewNow - 10, kind: "update", key: "notifyUpdate", params: { version: "0.7.1", detail: "restartToUpdate" }, route: "settings" },
+  { id: "p2", at: previewNow - 480, kind: "error", key: "caffeinate", params: { detail: "workerUnavailable" }, route: "caffeinate" },
+  { id: "p4", at: previewNow - 3 * 86400, kind: "error", key: "devices", params: { detail: "remoteChangeFailed" }, route: "devices" },
+];
+const notificationListeners = new Set<() => void>();
+function previewNotificationsChanged(): void {
+  for (const listener of notificationListeners) listener();
+}
+
 export const desktop = {
   /** The device that this window controls, or `null` in the panel. */
   remote: remoteId === null ? null : { id: remoteId },
@@ -979,6 +1083,167 @@ export const desktop = {
   async saveHideWhileSharing(enabled: boolean): Promise<void> {
     if (native) return call("setHideWhileSharing", { enabled });
     savePreview(current => ({ ...current, hideWhileSharing: enabled }));
+  },
+  async saveNotifications(settings: NotificationSettings): Promise<void> {
+    if (native) return call("setNotificationPreferences", settings);
+    savePreview(current => ({ ...current, notifications: { ...settings } }));
+  },
+  /** Plays a notification sound. A browser preview has none. */
+  async playNotificationSound(soundName: SoundName): Promise<void> {
+    if (macApp) await call("playNotificationSound", { soundName });
+  },
+  /** Whether macOS lets the app show banners. A preview shows a blocked app with `?notify-denied` and an unasked one with `?notify-ask`. */
+  async getNotificationPermission(): Promise<NotificationPermission> {
+    if (macApp) return call("getNotificationPermission");
+    return previewQuery.has("notify-denied") ? "denied" : previewQuery.has("notify-ask") ? "notDetermined" : "authorized";
+  },
+  /** Asks macOS again. It shows its prompt only while the person has not answered. */
+  async requestNotificationPermission(): Promise<void> {
+    if (macApp) await call("requestNotificationPermission");
+  },
+  /** Opens the Notifications pane of System Settings at this app. */
+  async openNotificationSettings(): Promise<void> {
+    if (macApp) await call("openNotificationSettings");
+  },
+  /** Calls `refresh` when the person answers the macOS prompt. */
+  async onNotificationPermission(refresh: () => void): Promise<void> {
+    if (macApp) await listen("notification-permission-changed", refresh);
+  },
+  /** The notifications of the bell, newest first. */
+  async listNotifications(): Promise<AppNotification[]> {
+    if (native) return call("listNotifications");
+    return previewNotifications.map(entry => ({ ...entry, params: { ...entry.params } }));
+  },
+  /** Removes the named notifications from the bell. */
+  async dismissNotifications(ids: string[]): Promise<void> {
+    if (native) return call("dismissNotifications", { ids });
+    previewNotifications = previewNotifications.filter(entry => !ids.includes(entry.id));
+    previewNotificationsChanged();
+  },
+  /** Removes the notifications that point to a place the person opened, of one kind or of all. */
+  async dismissNotificationRoute(route: string, kind: AppNotification["kind"] | null = null): Promise<void> {
+    if (native) return call("dismissNotificationRoute", { route, kind });
+    const before = previewNotifications.length;
+    previewNotifications = previewNotifications.filter(entry => entry.route !== route || (kind !== null && entry.kind !== kind));
+    if (previewNotifications.length !== before) previewNotificationsChanged();
+  },
+  async clearNotifications(): Promise<void> {
+    if (native) return call("clearNotifications");
+    previewNotifications = [];
+    previewNotificationsChanged();
+  },
+  /** Adds a problem that the panel showed to the bell. */
+  async recordNotification(kind: "error" | "info", key: string, params: Record<string, string>, route: string | null): Promise<void> {
+    if (native) return call("recordNotification", { kind, key, params, route });
+    const at = Math.floor(Date.now() / 1000);
+    previewNotifications = [{ id: `p${at}-${previewNotifications.length}`, at, kind, key, params, route }, ...previewNotifications].slice(0, 100);
+    previewNotificationsChanged();
+  },
+  /** Calls `refresh` when the list of the bell changes. */
+  async onNotificationsChanged(refresh: () => void): Promise<void> {
+    if (native) await listen("notifications-changed", refresh);
+    else notificationListeners.add(refresh);
+  },
+  /** One conversation of the mailbox, newest last. */
+  async mailboxList(party: MailboxParty): Promise<MailboxConversation> {
+    if (native) return call("mailboxList", { party });
+    const items = previewMailboxItems(party).map(item => ({ ...item }));
+    // The file that arrives grows in a preview, so its bar moves.
+    for (const item of previewMailboxItems(party)) {
+      if ((item.status === "sending" || item.status === "arriving") && item.done < item.size) item.done = Math.min(item.size, item.done + 9_000_000);
+    }
+    const folder = "device" in party ? "~/Downloads/Lazy Worker/iMac del estudio" : "~/Downloads/Lazy Worker/MacBook Pro";
+    return { items, folder, granted: previewMailboxGranted(party), check: previewMailboxCheck(party) };
+  },
+  /** The unread count of every conversation, and whether each device allows the mailbox. */
+  async mailboxSummary(): Promise<MailboxSummary[]> {
+    if (native) return call("mailboxSummary");
+    return [{ device: "studio" }, { peer: "studio" }].map(party => ({
+      party, unread: previewMailboxItems(party).filter(item => !item.read).length,
+      pending: previewMailboxItems(party).filter(item => ["waiting", "compressing", "queued", "sending", "arriving", "pickingUp"].includes(item.status)).length,
+      granted: previewMailboxGranted(party),
+      check: previewMailboxCheck(party),
+    }));
+  },
+  /** Asks a device that this one controls for what waits for this one, now. */
+  async mailboxCheck(party: MailboxParty): Promise<void> {
+    if (native) return call("mailboxCheck", { party });
+  },
+  async mailboxSendText(party: MailboxParty, text: string): Promise<void> {
+    if (native) return call("mailboxSendText", { party, text });
+    const trimmed = text.trim();
+    if (!trimmed) throw "mailboxTextEmpty";
+    previewMailboxItems(party).push({
+      id: `t${Date.now()}`, at: Math.floor(Date.now() / 1000), mine: true, text: trimmed, name: null, size: 0, folder: false,
+      status: "device" in party ? "delivered" : "waiting", error: null, read: true, done: 0, missing: false, place: null,
+    });
+    previewMailboxChanged(party);
+  },
+  /** Sends files and folders that the person chose. A folder is compressed first. */
+  async mailboxSendPaths(party: MailboxParty, paths: string[]): Promise<void> {
+    if (native) return call("mailboxSendPaths", { party, paths });
+    for (const path of paths) {
+      const name = path.split("/").pop() || "file";
+      previewMailboxItems(party).push({
+        id: `f${Date.now()}${name}`, at: Math.floor(Date.now() / 1000), mine: true, text: null, name, size: 2_000_000, folder: false,
+        status: "device" in party ? "sending" : "waiting", error: null, read: true, done: 0, missing: false, place: null,
+      });
+    }
+    previewMailboxChanged(party);
+  },
+  async mailboxCancel(party: MailboxParty, id: string): Promise<void> {
+    if (native) return call("mailboxCancel", { party, id });
+    const item = previewMailboxItems(party).find(entry => entry.id === id);
+    if (item) item.status = "stopped";
+    previewMailboxChanged(party);
+  },
+  async mailboxRetry(party: MailboxParty, id: string): Promise<void> {
+    if (native) return call("mailboxRetry", { party, id });
+    const item = previewMailboxItems(party).find(entry => entry.id === id);
+    if (item) Object.assign(item, { status: item.mine ? "sending" : "arriving", error: null, done: 0 });
+    previewMailboxChanged(party);
+  },
+  async mailboxRemove(party: MailboxParty, id: string): Promise<void> {
+    if (native) return call("mailboxRemove", { party, id });
+    previewMailbox.set(mailboxKey(party), previewMailboxItems(party).filter(entry => entry.id !== id));
+    previewMailboxChanged(party);
+  },
+  async mailboxClear(party: MailboxParty): Promise<void> {
+    if (native) return call("mailboxClear", { party });
+    previewMailbox.set(mailboxKey(party), []);
+    previewMailboxChanged(party);
+  },
+  async mailboxMarkRead(party: MailboxParty): Promise<void> {
+    if (native) return call("mailboxMarkRead", { party });
+    for (const item of previewMailboxItems(party)) item.read = true;
+    previewMailboxChanged(party);
+  },
+  /** Shows a file that arrived in Finder. A preview has no Finder. */
+  async mailboxReveal(party: MailboxParty, id: string): Promise<void> {
+    if (native) return call("mailboxReveal", { party, id });
+  },
+  async mailboxOpen(party: MailboxParty, id: string): Promise<void> {
+    if (native) return call("mailboxOpen", { party, id });
+  },
+  /** Where files that arrive are saved. `null` goes back to Downloads. */
+  async mailboxSetFolder(folder: string | null): Promise<void> {
+    if (native) return call("mailboxSetFolder", { folder });
+  },
+  /** Turns the mailbox of a device that controls this one on or off. Only the person here decides. */
+  async setPeerMailbox(id: string, on: boolean): Promise<void> {
+    if (native) return call("setPeerMailbox", { id, on });
+    const controller = previewControllerList().find(item => item.id === id);
+    if (!controller) throw "notPaired";
+    controller.permissions = { ...controller.permissions, mailbox: on };
+  },
+  /** Calls `changed` with the conversation that changed. */
+  async onMailboxChanged(changed: (party: MailboxParty) => void): Promise<void> {
+    if (native) await listen<MailboxParty>("mailbox-changed", event => changed(event.payload));
+    else mailboxListeners.add(changed);
+  },
+  /** Calls `open` with the place that a click on a macOS banner or the menu bar asks for. */
+  async onNotificationOpen(open: (route: string) => void): Promise<void> {
+    if (native) await listen<string>("notification-open", event => open(event.payload));
   },
   async savePinnedTools(tools: ToolId[]): Promise<void> {
     if (native) return call("setPinnedTools", { tools });

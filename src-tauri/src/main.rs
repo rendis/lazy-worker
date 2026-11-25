@@ -8,6 +8,7 @@ mod caffeinate;
 mod clipboard;
 mod devices;
 mod dispatch;
+mod inbox;
 mod lid;
 mod preferences;
 mod proxy;
@@ -17,6 +18,8 @@ mod resume;
 
 #[cfg(target_os = "macos")]
 mod login_launch;
+#[cfg(target_os = "macos")]
+mod notifications;
 #[cfg(target_os = "macos")]
 mod panel;
 #[cfg(target_os = "macos")]
@@ -202,10 +205,24 @@ fn main() {
             let controller = Arc::new(Mutex::new(tools));
             let clock = Arc::downgrade(&controller);
             app.manage(controller);
+            app.manage(inbox::Inbox::open(directory.join("notifications.json")));
             #[cfg(unix)]
             {
                 app.manage(remote::service::Service::start(app.handle(), &directory));
                 app.manage(remote::transfers::Transfers::new(remote::transfers::AppLink(app.handle().clone())));
+                // The mailbox needs the transfers and the service. A folder that cannot be opened leaves it off.
+                match remote::mailbox::Mailbox::open(
+                    directory.join("mailbox"),
+                    app.path().home_dir().ok(),
+                    app.path().download_dir().ok(),
+                    remote::mailbox::AppHost(app.handle().clone()),
+                ) {
+                    Ok(mailbox) => {
+                        app.manage::<remote::mailbox::Shared>(mailbox);
+                        remote::mailbox::start(app.handle());
+                    }
+                    Err(code) => eprintln!("Lazy Worker: the mailbox is off ({code})"),
+                }
                 // The actions come after the service, because their runs are written in its log.
                 let handle = app.handle().clone();
                 let sink: actions::Sink = std::sync::Arc::new(move |entry| {
@@ -237,6 +254,7 @@ fn main() {
                 app.manage(Mutex::new(presentation::Presentation::default()));
                 presentation::refresh(app.handle());
                 updates::start(app.handle());
+                notifications::install(app.handle());
                 app.handle().clone()
             };
             thread::spawn(move || loop {

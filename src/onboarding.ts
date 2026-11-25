@@ -116,6 +116,7 @@ export function mountOnboarding({ translate, accessibility, openAccessibility, o
     steps.forEach(leave);
     root.hidden = true;
     delete workspace.dataset.onboarding;
+    delete document.documentElement.dataset.onboarding;
     covered().forEach(element => { (element as HTMLElement).inert = false; });
     window.clearInterval(watch);
     clips.forEach(clip => clip.pause());
@@ -153,6 +154,8 @@ export function mountOnboarding({ translate, accessibility, openAccessibility, o
       for (const mirror of mirrors) mirror.checked = mirror.dataset.mirrorWhen === "leave" || target(mirror).checked;
       watch = window.setInterval(sync, 500);
       workspace.dataset.onboarding = "";
+      // The title bar sits outside the workspace. Its bell waits until the setup is done.
+      document.documentElement.dataset.onboarding = "";
       covered().forEach(element => { (element as HTMLElement).inert = true; });
       root.hidden = false;
       show(0);

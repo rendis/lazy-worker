@@ -228,6 +228,7 @@ pub struct ControllerPermissions {
     pub applications: bool,
     pub actions: bool,
     pub screen: bool,
+    pub mailbox: bool,
     pub shell: bool,
     pub files: bool,
 }
@@ -256,6 +257,7 @@ impl Controller {
                 applications: peer.permissions.applications,
                 actions: peer.permissions.actions,
                 screen: peer.permissions.screen,
+                mailbox: peer.permissions.mailbox,
                 shell: peer.permissions.shell,
                 files: files.is_some(),
             },

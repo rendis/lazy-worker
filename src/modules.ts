@@ -207,6 +207,16 @@ export function updateQuickStartMode(mode: "start" | "stop" | "mixed"): void {
 }
 
 /** Mounts every tool. `onPin` saves the pins; the returned function applies saved pins and the language. */
+/**
+ * Closes every floating window when the view changes. Each one closes through its own close button, so its cleanup runs.
+ * The new view then takes the focus, so it is never left on a hidden element.
+ */
+function closeWindows(): void {
+  for (const overlay of document.querySelectorAll<HTMLElement>(".log-overlay[data-open]")) {
+    overlay.querySelector<HTMLButtonElement>('header [data-label="close"]')?.click();
+  }
+}
+
 export function mountTools(onPin: (pinned: ToolId[]) => void): (translate: (message: Message) => string, pinned: readonly ToolId[]) => void {
   const navigation = document.getElementById("tool-navigation")!;
   const catalog = document.getElementById("tool-catalog")!;
@@ -337,6 +347,7 @@ export function mountTools(onPin: (pinned: ToolId[]) => void): (translate: (mess
 
   function open(view: string, focus: boolean): void {
     if (openHelp) showHelp(openHelp, false);
+    closeWindows();
     for (const section of views) {
       section.toggleAttribute("hidden", section.dataset.moduleView !== view);
       if (focus && !section.hidden) section.querySelector("h1")?.focus();

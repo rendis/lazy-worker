@@ -70,13 +70,32 @@ async fn check(app: &AppHandle) -> tauri_plugin_updater::Result<()> {
             .map(|time| time.as_secs());
         let changed = state.available.as_ref().map(|update| &update.version)
             != available.as_ref().map(|update| &update.version);
+        let found = changed
+            .then(|| available.as_ref().map(|update| update.version.clone()))
+            .flatten();
         state.available = available;
-        changed
+        (changed, found)
     } else {
-        false
+        (false, None)
     };
+    let (changed, found) = changed;
     if changed {
         let _ = app.emit_to("main", "available-update-changed", ());
+    }
+    // The bell lists each new version once, also after a restart.
+    if let Some(version) = found {
+        crate::inbox::record(
+            app,
+            crate::inbox::NewEntry {
+                kind: crate::inbox::Kind::Update,
+                key: "notifyUpdate".into(),
+                params: [("version".to_owned(), version), ("detail".to_owned(), "restartToUpdate".to_owned())]
+                    .into(),
+                route: Some("settings".into()),
+            },
+            crate::inbox::Alert::Yes,
+            crate::inbox::Repeat::Once,
+        );
     }
     Ok(())
 }

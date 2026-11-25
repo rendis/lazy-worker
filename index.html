@@ -12,6 +12,12 @@
     <header id="window-titlebar" class="window-titlebar" data-tauri-drag-region hidden>
       <img src="/src/assets/logo.png" width="23" height="23" alt="" draggable="false" />
       <span>Lazy Worker</span>
+      <!-- The bell of this device. A window that controls another device has none. -->
+      <span class="tip bell-tip" data-tip-text="notifications" hidden>
+        <button type="button" class="icon-button bell-button" id="bell-button" aria-label="Notifications" aria-haspopup="dialog" aria-controls="bell-window">
+          <i data-lucide="bell"></i><span class="bell-count" id="bell-count" aria-hidden="true" hidden></span>
+        </button>
+      </span>
     </header>
     <div class="workspace" data-booting>
       <!-- Only a window that controls another device shows this banner. -->
@@ -454,6 +460,46 @@
                 <p class="settings-switch-description" id="start-tools-on-launch-description" data-text="startToolsOnLaunchDescription">Starts the tools marked for Quick start with their saved settings.</p>
               </div>
             </div>
+            <div class="settings-group settings-notifications" data-local-only>
+              <p class="control-label" id="notifications-label"><i data-lucide="bell"></i><span data-text="notifications">Notifications</span></p>
+              <p class="settings-switch-description" id="notifications-description" data-text="notificationsDescription">Where the app tells you about messages, problems and updates.</p>
+              <div class="segments" role="group" aria-labelledby="notifications-label" aria-describedby="notifications-description">
+                <button type="button" data-notification-mode="off" aria-pressed="false"><i data-lucide="bell-off"></i><span data-text="notificationsOff">Off</span></button>
+                <button type="button" data-notification-mode="app" aria-pressed="false"><i data-lucide="app-window"></i><span data-text="notificationsApp">In the app</span></button>
+                <button type="button" data-notification-mode="system" aria-pressed="true"><i data-lucide="bell"></i><span data-text="notificationsSystem">App and macOS</span></button>
+                <span class="segment-indicator" aria-hidden="true"></span>
+              </div>
+              <div class="collapse" id="notification-permission" inert>
+                <div>
+                  <div class="notification-permission" id="notification-permission-box" role="status">
+                    <i data-lucide="triangle-alert"></i>
+                    <span id="notification-permission-text"></span>
+                    <button type="button" class="accessibility-button" id="notification-permission-action"></button>
+                  </div>
+                </div>
+              </div>
+              <div class="collapse" id="notification-sound-section" data-open>
+                <div>
+                  <div class="notification-sound-row">
+                    <label for="notification-sound"><i data-lucide="volume-2"></i><span data-text="notificationSound">Sound</span></label>
+                    <div class="segments" role="group" data-label="notificationSoundName" aria-label="Notification sound">
+                      <button type="button" data-sound-name="tink" aria-pressed="false">Tink</button>
+                      <button type="button" data-sound-name="pop" aria-pressed="true">Pop</button>
+                      <button type="button" data-sound-name="glass" aria-pressed="false">Glass</button>
+                      <span class="segment-indicator" aria-hidden="true"></span>
+                    </div>
+                    <span class="tip" data-tip-text="notificationSoundPlay">
+                      <button type="button" class="icon-button notification-sound-play" id="notification-sound-play" data-label="notificationSoundPlay" aria-label="Play"><i data-lucide="play"></i></button>
+                    </span>
+                    <span class="switch">
+                      <input id="notification-sound" type="checkbox" switch role="switch" aria-describedby="notification-sound-description" disabled />
+                      <span aria-hidden="true"></span>
+                    </span>
+                  </div>
+                  <p class="settings-switch-description" id="notification-sound-description" data-text="notificationSoundDescription">A soft sound when something arrives.</p>
+                </div>
+              </div>
+            </div>
             <div class="settings-presentation" id="settings-presentation" hidden>
               <div class="settings-switch-row">
                 <div class="permission-heading-title">
@@ -813,6 +859,75 @@
             <button type="button" class="icon-button" id="changelog-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
           </header>
           <div class="changelog" id="changelog-list" tabindex="0" aria-labelledby="changelog-title"></div>
+        </section>
+      </div>
+      <div class="log-overlay" id="bell-window" inert>
+        <section class="log-window bell-window" role="dialog" aria-labelledby="bell-title">
+          <header>
+            <i data-lucide="bell"></i>
+            <h2 id="bell-title" data-text="notifications">Notifications</h2>
+            <button type="button" class="icon-button" id="bell-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
+          </header>
+          <div class="bell-body">
+            <ul class="bell-list" id="bell-list" aria-labelledby="bell-title"></ul>
+            <p class="bell-empty" id="bell-empty" data-text="notificationsEmpty" hidden>Nothing new. New messages, problems and updates show here.</p>
+          </div>
+          <footer class="bell-footer">
+            <div class="bell-footer-line bell-footer-idle" id="bell-footer-idle">
+              <button type="button" class="text-link" id="bell-clear" data-text="notificationsClear">Clear all</button>
+            </div>
+            <div class="bell-footer-line" id="bell-footer-confirm" role="alert" hidden>
+              <span data-text="notificationsClearConfirm">Clear all notifications? This cannot be undone.</span>
+              <span class="bell-confirm-actions">
+                <button type="button" class="text-link" id="bell-clear-cancel" data-text="cancel">Cancel</button>
+                <button type="button" class="accessibility-button" id="bell-clear-yes" data-text="notificationsClearYes">Clear</button>
+              </span>
+            </div>
+          </footer>
+        </section>
+      </div>
+      <!-- The mailbox with one device. What the device sent is set as text only. -->
+      <div class="log-overlay" id="mailbox-window" inert>
+        <section class="log-window mailbox-window" role="dialog" aria-labelledby="mailbox-title">
+          <header>
+            <i data-lucide="mail"></i>
+            <h2 id="mailbox-title"></h2>
+            <span class="device-state mailbox-state" id="mailbox-state"></span>
+            <button type="button" class="icon-button" id="mailbox-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
+          </header>
+          <div class="mailbox-body" id="mailbox-body">
+            <div class="setting-note mailbox-note" id="mailbox-note" role="status" hidden>
+              <span id="mailbox-note-text"></span>
+              <span class="mailbox-checked" id="mailbox-checked"></span>
+              <button type="button" class="text-link" id="mailbox-check-now" data-text="mailboxCheckNow">Check now</button>
+            </div>
+            <ol class="mailbox-list" id="mailbox-list" aria-labelledby="mailbox-title"></ol>
+            <p class="mailbox-empty" id="mailbox-empty" data-text="mailboxEmpty" hidden>Nothing here yet. Write a message or drop files to send them.</p>
+          </div>
+          <footer class="mailbox-footer">
+            <p class="mailbox-drop" id="mailbox-drop"><i data-lucide="upload"></i><span id="mailbox-drop-text" data-text="mailboxDrop">Drop files or folders. Folders are compressed before sending.</span></p>
+            <div class="mailbox-composer">
+              <textarea id="mailbox-input" rows="1" maxlength="8192" data-placeholder="mailboxWrite" aria-label="Write a message"></textarea>
+              <span class="tip" data-tip-text="mailboxFiles"><button type="button" class="icon-button outlined" id="mailbox-files" data-label="mailboxFiles" aria-label="Files"><i data-lucide="paperclip"></i></button></span>
+              <span class="tip" data-tip-text="mailboxFolder"><button type="button" class="icon-button outlined" id="mailbox-folder" data-label="mailboxFolder" aria-label="Folder"><i data-lucide="folder-up"></i></button></span>
+              <span class="tip" data-tip-text="mailboxSend"><button type="button" class="icon-button mailbox-send" id="mailbox-send" data-label="mailboxSend" aria-label="Send"><i data-lucide="send"></i></button></span>
+            </div>
+            <p class="mailbox-error" id="mailbox-error" role="alert" hidden></p>
+            <div class="mailbox-footer-line" id="mailbox-footer-idle">
+              <span class="mailbox-folder-text" id="mailbox-folder-text"></span>
+              <span class="mailbox-footer-actions">
+                <button type="button" class="text-link" id="mailbox-change-folder" data-text="mailboxChangeFolder">Change…</button>
+                <button type="button" class="text-link" id="mailbox-clear" data-text="mailboxClear">Clear conversation</button>
+              </span>
+            </div>
+            <div class="mailbox-footer-line" id="mailbox-footer-confirm" role="alert" hidden>
+              <span data-text="mailboxClearConfirm">Clear this conversation? Files already saved stay where they are. This cannot be undone.</span>
+              <span class="mailbox-footer-actions">
+                <button type="button" class="text-link" id="mailbox-clear-cancel" data-text="cancel">Cancel</button>
+                <button type="button" class="accessibility-button" id="mailbox-clear-yes" data-text="mailboxClearYes">Clear</button>
+              </span>
+            </div>
+          </footer>
         </section>
       </div>
       <div class="notification-stack">
