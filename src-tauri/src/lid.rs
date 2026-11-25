@@ -69,6 +69,11 @@ impl Lid {
         }
     }
 
+    /// True when the one-time permission is in place.
+    pub fn is_authorized() -> bool {
+        platform::authorized()
+    }
+
     /// Asks macOS for the one-time permission when it is missing.
     pub fn authorize() -> Result<(), &'static str> {
         if platform::authorized() {
@@ -242,7 +247,7 @@ fn parse_sleep_disabled(settings: &str) -> bool {
 
 /// A short user name can enter the sudoers rule as it is.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn safe_user(user: &str) -> bool {
+pub(crate) fn safe_user(user: &str) -> bool {
     !user.is_empty()
         && user.chars().all(|character| {
             character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.')

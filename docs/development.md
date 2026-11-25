@@ -72,6 +72,47 @@ The command needs [uv](https://docs.astral.sh/uv/) on your `PATH`. Its `uvx` run
 
 The command reads local names from `.release.local.json`, which git ignores. Copy `scripts/release.local.example.json` and fill in the Developer ID identity, the `notarytool` keychain profile, and the keychain item that holds the updater key as JSON with `privateKey` and `publicKey`. Set `rustHome` when the release uses its own Rust toolchain. Keep the Tauri private key outside the repository and use the same key for every release.
 
+## Remote control
+
+Devices lets one device control another over the system SSH server. [Devices](user-guide.md#devices) in the user guide shows the steps, and [Security](user-guide.md#security) lists the risks.
+
+### Module map
+
+| Path | Holds |
+| --- | --- |
+| `src-tauri/src/dispatch.rs` | The `Request` enum and the one `dispatch` command. `access`, `is_read`, and `runs_on_viewer` declare what each request needs, with no default arm. `Route` decides from the window label where a request runs. |
+| `src-tauri/src/remote/access.rs` | The state of Remote Login, and the one administrator script that limits SSH to keys. |
+| `src-tauri/src/remote/ssh.rs`, `destination.rs`, `known_hosts.rs` | The hardened system ssh client: our own `-F` file, a validated `Destination`, and pinned host keys. |
+| `src-tauri/src/remote/client.rs` | The controller side: one line out and one line back over one long link. |
+| `src-tauri/src/remote/helper.rs`, `wire.rs` | What sshd starts as `remote --peer <id>` or `remote --pair`. It relays bounded lines to the app socket. `main.rs` calls `run_if_requested` before any window code. |
+| `src-tauri/src/remote/server.rs` | The socket in the app, and the one place where a remote request meets the dispatcher. |
+| `src-tauri/src/remote/peers.rs`, `controlled.rs`, `authorized_keys.rs` | The devices that control this one, the devices this one controls, and the managed `authorized_keys` lines. |
+| `src-tauri/src/remote/pairing.rs`, `pair_client.rs`, `pake.rs`, `pairing_key.rs` | Pairing on both sides, and the SPAKE2 messages. |
+| `src-tauri/src/remote/service.rs` | What the app uses: it keeps the peers, the log, the lines, and the server in step. |
+| `src-tauri/src/remote/shell.rs`, `log.rs`, `icons.rs`, `window.rs`, `discovery.rs`, `identity.rs` | The full shell, the log, the application icons, the remote window, Bonjour discovery, and the device identity. |
+| `src-tauri/src/actions.rs`, `actions/`, `apps.rs`, `apps/` | Saved actions with their schedules, and the application list of a device. |
+| `src/devices.ts`, `device-actions.ts`, `remote.ts`, `remote-banner.ts` | The Devices view, the action forms, the rules that say why a control is off, and the banner of a remote window. |
+
+### How a remote request flows
+
+1. A window of the controller sends a request through `dispatch`. Its label, `remote-<device id>`, decides the route. Nothing in the request does.
+2. `Route::of_window` accepts the label only for a device this one controls. `plan` keeps `runs_on_viewer` requests and forwards the others.
+3. `Service::forward` sends the request through `remote::client` to the system `ssh` with our config. One long session carries all requests of a device.
+4. On the target, sshd runs the helper that the peer's `authorized_keys` line names. The helper relays lines to the app socket and nothing else.
+5. `remote::server` reads the peer from the peers store, builds `Origin::Remote` with its permissions, and calls the same `handle` as the webview. `authorize` checks `access`.
+6. The answer goes back the same way. A write, or a refused read, adds a line to the log.
+
+### Test on two devices
+
+1. On each device, open **Devices** and select **Turn on remote access**.
+2. On the device to control, select **Pair** under **Add a device**. On the other one, select **Add device** and enter the code.
+3. Select **Open interface** to open the remote window. Turn a tool on, open an application, and run an action.
+4. Check **Open the log** on the controlled device.
+
+Use two devices. A device cannot pair with itself.
+
+The in-process tests need no second device. `cargo test --manifest-path src-tauri/Cargo.toml` runs the dispatcher routing and access tests, the pairing exchange, the socket server with a fake helper, the client with a fake transport, and the managed `authorized_keys` lines.
+
 ## Add Windows support
 
 Build the project on Windows using the [Windows development prerequisites](https://v2.tauri.app/start/prerequisites/#windows). The shared UI, scheduling rules, and preferences already have a platform boundary. Activity and Caffeinate display an unavailable state on Windows until Windows adapters are added. Proxy detects and opens its clients only on macOS, in `src-tauri/src/proxy/apps.rs`.

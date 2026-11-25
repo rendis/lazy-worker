@@ -14,6 +14,23 @@
       <span>Lazy Worker</span>
     </header>
     <div class="workspace" data-booting>
+      <!-- Only a window that controls another device shows this banner. -->
+      <div class="remote-banner" id="remote-banner" data-state="connected" hidden>
+        <div class="remote-banner-line">
+          <span class="remote-banner-device" aria-hidden="true">
+            <span data-kind="desktop"><i data-lucide="monitor"></i></span><span data-kind="laptop" hidden><i data-lucide="laptop"></i></span>
+          </span>
+          <strong id="remote-banner-text"></strong>
+          <span class="remote-banner-shell tip" id="remote-banner-shell"><i data-lucide="terminal"></i><span id="remote-banner-shell-text"></span></span>
+          <span class="remote-banner-link" role="status"><span class="remote-banner-dot" aria-hidden="true"></span><span id="remote-banner-link"></span></span>
+        </div>
+        <div class="collapse" id="remote-banner-update" inert>
+          <div class="remote-banner-update">
+            <span id="remote-banner-update-text"></span>
+            <button class="accessibility-button" id="remote-update" type="button"></button>
+          </div>
+        </div>
+      </div>
       <aside class="sidebar">
         <nav id="tool-navigation" aria-label="Tools">
           <button class="nav-button" type="button" data-view="tools">
@@ -21,6 +38,10 @@
           </button>
         </nav>
         <span id="tool-running-description" data-text="toolRunning" hidden>Running</span>
+
+        <button class="nav-button devices-button" type="button" data-view="devices" data-local-only>
+          <i data-lucide="monitor-smartphone"></i><span data-text="devices">Devices</span>
+        </button>
 
         <button id="settings-button" class="nav-button settings-button" type="button" data-view="settings">
           <i data-lucide="settings"></i><span data-text="settings">Settings</span>
@@ -373,10 +394,23 @@
           </section>
         </div>
 
+        <div data-module-view="devices" hidden>
+          <header class="module-header devices-header">
+            <h1 data-text="devices" tabindex="-1">Devices</h1>
+            <span class="tip" id="add-device-tip">
+              <button class="add-device-button" id="add-device" type="button">
+                <i data-lucide="plus"></i><span data-text="addDevice">Add device</span>
+              </button>
+            </span>
+            <p class="module-description" data-text="devicesDescription">This device and the ones you control from here.</p>
+          </header>
+          <div class="device-list" id="device-list"></div>
+        </div>
+
         <div data-module-view="settings" hidden>
           <h1 data-text="settings" tabindex="-1">Settings</h1>
           <div class="settings-preferences" id="settings-preferences">
-            <div class="settings-group">
+            <div class="settings-group" data-local-only>
               <p class="control-label" id="language-label"><i data-lucide="globe"></i><span data-text="language">Language</span></p>
               <div class="segments" role="group" aria-labelledby="language-label">
                 <button type="button" data-language="en" lang="en" aria-pressed="false">English</button>
@@ -385,7 +419,7 @@
                 <span class="segment-indicator" aria-hidden="true"></span>
               </div>
             </div>
-            <div class="settings-group">
+            <div class="settings-group" data-local-only>
               <p class="control-label" id="appearance-label"><i data-lucide="contrast"></i><span data-text="appearance">Appearance</span></p>
               <div class="segments" role="group" aria-labelledby="appearance-label">
                 <button type="button" data-theme-choice="light" aria-pressed="false"><i data-lucide="sun"></i><span data-text="light">Light</span></button>
@@ -494,7 +528,7 @@
               <p>
                 <span data-text="appVersion">Version</span> <span id="app-version"></span><span id="update-check-status" role="status"></span>
               </p>
-              <span class="settings-version-actions">
+              <span class="settings-version-actions" data-local-only>
                 <button class="text-link" id="changelog-open" type="button" data-text="whatsNew">What’s new</button>
                 <button class="text-link" id="update-check" type="button" data-text="checkForUpdates" hidden>Check for updates</button>
               </span>
@@ -654,6 +688,121 @@
           </header>
           <ol class="proxy-log" id="proxy-log" tabindex="0" aria-labelledby="proxy-log-title"></ol>
           <p class="setting-note" id="proxy-window-note"></p>
+        </section>
+      </div>
+      <div class="log-overlay" id="device-apps-window" inert>
+        <section class="log-window apps-window" role="dialog" aria-labelledby="device-apps-title">
+          <header>
+            <i data-lucide="app-window"></i>
+            <h2 id="device-apps-title" data-text="sectionApplications">Applications</h2>
+            <span class="setting-note" id="device-apps-count"></span>
+            <button type="button" class="icon-button" id="device-apps-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
+          </header>
+          <div class="apps-search">
+            <i data-lucide="search"></i>
+            <input class="field" id="device-apps-search" type="search" autocomplete="off" spellcheck="false" />
+          </div>
+          <ul class="apps-list" id="device-apps-list" tabindex="0" aria-labelledby="device-apps-title"></ul>
+        </section>
+      </div>
+      <div class="log-overlay" id="remote-guide-window" inert>
+        <section class="log-window guide-window" role="dialog" aria-labelledby="remote-guide-title">
+          <header>
+            <i data-lucide="shield-check"></i>
+            <h2 id="remote-guide-title">Turn on Remote Login</h2>
+            <button type="button" class="icon-button" id="remote-guide-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
+          </header>
+          <div class="remote-guide" id="remote-guide-body" tabindex="0" aria-labelledby="remote-guide-title"></div>
+          <div class="guide-actions">
+            <button type="button" class="access-action" id="remote-guide-open"><i data-lucide="square-arrow-out-up-right"></i><span data-text="openSharingSettings">Open Sharing settings</span></button>
+          </div>
+        </section>
+      </div>
+      <div class="log-overlay" id="add-device-window" inert>
+        <section class="log-window pair-window" role="dialog" aria-labelledby="add-device-title">
+          <header>
+            <button type="button" class="icon-button" id="add-device-back" data-label="back" aria-label="Back" hidden><i data-lucide="arrow-left"></i></button>
+            <i data-lucide="plus"></i>
+            <h2 id="add-device-title" data-text="addDevice">Add device</h2>
+            <button type="button" class="icon-button" id="add-device-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
+          </header>
+          <div class="pair-body" id="add-device-body"></div>
+        </section>
+      </div>
+      <div class="log-overlay" id="pair-device-window" inert>
+        <section class="log-window pair-window" role="dialog" aria-labelledby="pair-device-title">
+          <header>
+            <i data-lucide="lock-keyhole-open"></i>
+            <h2 id="pair-device-title" data-text="pairDeviceTitle">Pair a device</h2>
+            <button type="button" class="icon-button" id="pair-device-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
+          </header>
+          <div class="pair-body" id="pair-device-body"></div>
+        </section>
+      </div>
+      <div class="log-overlay" id="action-form-window" inert>
+        <section class="log-window action-window" role="dialog" aria-labelledby="action-form-title">
+          <header>
+            <i data-lucide="square-terminal"></i>
+            <h2 id="action-form-title"></h2>
+            <button type="button" class="icon-button" id="action-form-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
+          </header>
+          <form class="action-body" id="action-form-body" novalidate></form>
+        </section>
+      </div>
+      <div class="log-overlay" id="action-schedule-window" inert>
+        <section class="log-window action-window" role="dialog" aria-labelledby="action-schedule-title">
+          <header>
+            <i data-lucide="calendar-clock"></i>
+            <div class="action-heading">
+              <h2 id="action-schedule-title"></h2>
+              <p class="setting-note" id="action-schedule-subtitle"></p>
+            </div>
+            <button type="button" class="icon-button" id="action-schedule-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
+          </header>
+          <form class="action-body" id="action-schedule-body" novalidate></form>
+        </section>
+      </div>
+      <div class="log-overlay" id="shell-grant-window" inert>
+        <section class="log-window action-window shell-window" role="dialog" aria-labelledby="shell-grant-title">
+          <header>
+            <i data-lucide="triangle-alert"></i>
+            <h2 id="shell-grant-title"></h2>
+            <button type="button" class="icon-button" id="shell-grant-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
+          </header>
+          <form class="action-body" id="shell-grant-body" novalidate></form>
+        </section>
+      </div>
+      <div class="log-overlay" id="files-grant-window" inert>
+        <section class="log-window action-window shell-window files-window" role="dialog" aria-labelledby="files-grant-title">
+          <header>
+            <i data-lucide="folder-key"></i>
+            <h2 id="files-grant-title"></h2>
+            <button type="button" class="icon-button" id="files-grant-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
+          </header>
+          <form class="action-body" id="files-grant-body" novalidate></form>
+        </section>
+      </div>
+      <div class="log-overlay" id="files-explorer-window" inert>
+        <section class="log-window files-explorer-window" role="dialog" aria-labelledby="files-explorer-title">
+          <header>
+            <i data-lucide="folder-open"></i>
+            <h2 id="files-explorer-title"></h2>
+            <button type="button" class="icon-button" id="files-explorer-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
+          </header>
+          <div class="files-explorer" id="files-explorer-body"></div>
+        </section>
+      </div>
+      <div class="log-overlay" id="action-run-window" inert>
+        <section class="log-window action-window action-run-window" role="dialog" aria-labelledby="action-run-title">
+          <header>
+            <i data-lucide="play"></i>
+            <div class="action-heading">
+              <h2 id="action-run-title"></h2>
+              <p class="setting-note" id="action-run-subtitle"></p>
+            </div>
+            <button type="button" class="icon-button" id="action-run-close" data-label="close" aria-label="Close"><i data-lucide="x"></i></button>
+          </header>
+          <div class="action-body" id="action-run-body"></div>
         </section>
       </div>
       <div class="log-overlay" id="changelog-window" inert>

@@ -2,6 +2,7 @@ use std::{env, fs, path::PathBuf, process::Command};
 
 fn main() {
     println!("cargo:rerun-if-changed=native/main.swift");
+    println!("cargo:rerun-if-changed=native/AppIcon.swift");
     println!("cargo:rerun-if-changed=native/IdleGate.swift");
     println!("cargo:rerun-if-changed=native/Presentation.swift");
 
@@ -23,6 +24,7 @@ fn main() {
             .arg(module_cache)
             .args([
                 "native/main.swift",
+                "native/AppIcon.swift",
                 "native/IdleGate.swift",
                 "native/Presentation.swift",
                 "-o",
@@ -36,5 +38,10 @@ fn main() {
         );
     }
 
-    tauri_build::build();
+    // App commands are allowed per window through capabilities, not for every window.
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .app_manifest(tauri_build::AppManifest::new().commands(&["dispatch"])),
+    )
+    .expect("Could not run the Tauri build");
 }

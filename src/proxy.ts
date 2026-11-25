@@ -57,10 +57,12 @@ type Host = {
   update(apply: (settings: ProxySettings) => ProxySettings): void;
   fail(message: Message): void;
   refreshIcons(): void;
+  /** The reason that the settings of the server and the client commands cannot change here, or nothing when they can. */
+  lockTip?(): string | undefined;
 };
-type Child = Node | string | false | undefined;
+export type Child = Node | string | false | undefined;
 
-function h<K extends keyof HTMLElementTagNameMap>(
+export function h<K extends keyof HTMLElementTagNameMap>(
   tag: K, attributes: Record<string, string | boolean | undefined> = {}, ...children: Child[]
 ): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -72,7 +74,7 @@ function h<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-function icon(name: string): HTMLElement {
+export function icon(name: string): HTMLElement {
   return h("i", { "data-lucide": name });
 }
 
@@ -128,6 +130,20 @@ export function mountProxy(host: Host) {
 
   let settings: ProxySettings | undefined;
   let running = false;
+  /** Set while this window controls another device: its address list, port, role, and commands stay with the person there. */
+  let locked: string | undefined;
+  /** Turns off a control of the proxy that this window may not change, or back on, and gives the reason as its tip. */
+  function lock(control: HTMLElement, label?: string): void {
+    control.classList.toggle("reason", locked !== undefined && label === undefined);
+    if (locked !== undefined) {
+      control.setAttribute("data-tip", locked);
+      control.setAttribute("data-blocked", "");
+    } else if (control.hasAttribute("data-blocked")) {
+      control.removeAttribute("data-blocked");
+      if (label === undefined) control.removeAttribute("data-tip");
+      else control.setAttribute("data-tip", label);
+    }
+  }
   let network: ProxyNetwork = { hostname: null, addresses: [] };
   let peers: ProxyPeer[] = [];
   let log: ProxyLogEntry[] = [];
@@ -364,7 +380,8 @@ export function mountProxy(host: Host) {
   function renderWindow(): void {
     const count = !running ? "" : host.translate("proxyLogCount").replace("{count}", String(log.length));
     logCount.textContent = count;
-    logTip.dataset.tip = host.translate("proxyLogShow");
+    logTip.dataset.tip = locked ?? host.translate("proxyLogShow");
+    logToggle.disabled = locked !== undefined;
     const mode = windowMode;
     if (!mode) return;
     const items = { log, access: settings!.allowed, peers }[mode];
@@ -413,8 +430,9 @@ export function mountProxy(host: Host) {
       "aria-label": host.translate("proxyCommand"), autocomplete: "off", spellcheck: "false",
     });
     const restore = !custom && tipButton("restore", app, "rotate-ccw", "restore");
-    const viewLinks = h("span", { class: "proxy-app-links" },
-      tipButton("edit", app, "pencil", "edit"), restore, custom && tipButton("delete", app, "trash-2", "remove", "danger"));
+    const edit = tipButton("edit", app, "pencil", "edit");
+    const remove = custom && tipButton("delete", app, "trash-2", "remove", "danger");
+    const viewLinks = h("span", { class: "proxy-app-links" }, edit, restore, remove);
     const editLinks = h("span", { class: "proxy-app-links", hidden: true },
       tipButton("save", app, "check", "save", "confirm"), tipButton("cancel", app, "x", "cancel"));
     // Deleting asks first, in the same place, because it cannot be undone.
@@ -453,7 +471,13 @@ export function mountProxy(host: Host) {
           host.refreshIcons();
         }
         quick.input.checked = current.quickStart;
-        quick.input.disabled = !present;
+        quick.input.disabled = !present || locked !== undefined;
+        for (const input of variantInputs) input.disabled = locked !== undefined;
+        for (const [button, name] of [[edit, "edit"], [restore, "restore"], [remove, "remove"]] as const) {
+          if (!button) continue;
+          button.disabled = locked !== undefined || (button === restore && current.command === null);
+          lock(button, host.translate(name));
+        }
         open.update(current);
         copy.disabled = needsServer(current);
         copyTip.dataset.tip = host.translate(needsServer(current) ? "proxyNeedsServer" : "copyCommand");
@@ -470,7 +494,6 @@ export function mountProxy(host: Host) {
         editLinks.hidden = !editing;
         confirmLinks.hidden = !deleting;
         hint.hidden = !editing;
-        if (restore) restore.disabled = current.command === null;
       },
     };
   }
@@ -587,7 +610,7 @@ export function mountProxy(host: Host) {
       log = [];
       return;
     }
-    if (view.hidden || settings?.role !== "server" || performance.now() - peersRequested < 900) return;
+    if (locked || view.hidden || settings?.role !== "server" || performance.now() - peersRequested < 900) return;
     peersRequested = performance.now();
     void desktop.getProxyPeers().catch(() => []).then(current => {
       peers = current;
@@ -624,6 +647,8 @@ export function mountProxy(host: Host) {
     const control = event.target as HTMLInputElement;
     // A switch or radio reports its new value in `change`. Rendering on its click would undo it first.
     if (event.type === "click" && (action === "quick" || action === "variant")) return;
+    // Every one of these saves the list of clients, which only the person at that device may change.
+    if (locked && ["quick", "variant", "edit", "restore", "delete", "confirm-delete", "save"].includes(action)) return;
     if (event.type === "change") {
       if (action === "quick") updateApp(app.id, current => ({ ...current, quickStart: control.checked }));
       // The saved command belongs to the variant it was written for.
@@ -634,7 +659,7 @@ export function mountProxy(host: Host) {
     }
     if (action === "open") void launch(app);
     if (action === "copy") {
-      void navigator.clipboard.writeText(resolved(app)).then(() => {
+      void desktop.copyText(resolved(app)).then(() => {
         copiedApp = app.id;
         renderLists();
         window.setTimeout(() => {
@@ -726,7 +751,7 @@ export function mountProxy(host: Host) {
   addresses.addEventListener("click", event => {
     const target = (event.target as Element).closest<HTMLElement>("[data-copy]")?.dataset.copy;
     if (!target) return;
-    void navigator.clipboard.writeText(target).then(() => {
+    void desktop.copyText(target).then(() => {
       copied = target;
       renderLists();
       window.setTimeout(() => {
@@ -820,7 +845,7 @@ export function mountProxy(host: Host) {
   /** Rows and the window share these actions, so a list behaves the same in both places. */
   function listAction(event: Event): void {
     const control = (event.target as Element).closest<HTMLElement>("[data-remove], [data-allow], [data-window]");
-    if (!control) return;
+    if (!control || (locked && !control.dataset.window)) return;
     const { remove, allow: address, window: mode } = control.dataset;
     if (remove) host.update(current => ({ ...current, allowed: current.allowed.filter(entry => entry !== remove) }));
     if (address) allowAddress(address);
@@ -842,7 +867,7 @@ export function mountProxy(host: Host) {
   });
   // The server's card in Tools leads to the server, whatever role was showing last.
   serverCard.addEventListener("click", event => {
-    if (!(event.target as Element).closest(".tool-row-link") || settings?.role === "server") return;
+    if (!(event.target as Element).closest(".tool-row-link") || settings?.role === "server" || locked) return;
     host.update(current => ({ ...current, role: "server" }));
   });
   refreshEnvironment();
@@ -852,18 +877,23 @@ export function mountProxy(host: Host) {
     render(current: ProxySettings, quickStart: boolean, active: boolean, enabled: boolean): void {
       settings = current;
       running = active;
+      locked = host.lockTip?.();
       view.dataset.role = current.role;
       roles.dataset.selection = current.role;
       for (const input of roleInputs) {
         input.checked = input.value === current.role;
-        input.disabled = !enabled;
+        input.disabled = !enabled || locked !== undefined;
       }
+      lock(roles);
+      for (const field of [port, allow, serverAddress]) lock(field.closest<HTMLElement>(".setting-row")!);
+      lock(addButton);
+      serverPanel.toggleAttribute("data-locked", locked !== undefined);
       roleCaption.textContent = host.translate(current.role === "server" ? "roleServerCaption" : "roleClientCaption");
       addName.placeholder = host.translate("proxyName");
       addCommand.placeholder = host.translate("proxyCommand");
       serverPanel.hidden = current.role !== "server";
       clientPanel.hidden = current.role !== "client";
-      for (const field of [port, allow, serverAddress, addButton]) field.disabled = !enabled;
+      for (const field of [port, allow, serverAddress, addButton]) field.disabled = !enabled || locked !== undefined;
       if (document.activeElement !== port) port.value = String(current.port);
       if (document.activeElement !== serverAddress && addressDelay === undefined) serverAddress.value = current.server;
       checkServer();

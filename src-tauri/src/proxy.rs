@@ -1,7 +1,7 @@
 mod apps;
 mod server;
 
-pub use apps::{check_server, detect, launch, network, Installs, Network};
+pub use apps::{check_server, detect, launch, network};
 pub use server::{LogEntry, Peer};
 
 use serde::{Deserialize, Serialize};

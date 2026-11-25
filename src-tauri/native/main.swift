@@ -12,6 +12,8 @@ switch CommandLine.arguments.dropFirst().first {
 case "--accessibility-status":
     respond(AXIsProcessTrusted() ? "granted" : "required")
     exit(EXIT_SUCCESS)
+case "--app-icon":
+    exit(writeAppIcon(CommandLine.arguments.dropFirst(2).first))
 case "--monitor-presentation":
     monitorPresentation()
 default:

@@ -36,14 +36,12 @@ fn agent_path(app: &AppHandle) -> Result<PathBuf, &'static str> {
         .join(format!("{}.login.plist", app.config().identifier)))
 }
 
-#[tauri::command]
 pub fn get_login_launch(app: AppHandle) -> Result<bool, &'static str> {
     agent_path(&app)?
         .try_exists()
         .map_err(|_| "loginLaunchCheckFailed")
 }
 
-#[tauri::command]
 pub fn set_login_launch(app: AppHandle, enabled: bool) -> Result<(), &'static str> {
     let path = agent_path(&app).map_err(|_| "loginLaunchSaveFailed")?;
     if !enabled {

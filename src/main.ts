@@ -1,14 +1,15 @@
 import "./style.css";
 import {
-  Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
-  Cpu, createIcons, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Infinity as InfinityIcon, Info, Laptop, LaptopMinimal, LayoutGrid, Link, LockKeyhole, LockKeyholeOpen,
-  Maximize2, Megaphone, MessageSquare, Monitor, Moon, MousePointer2, Pencil, Pin, PinOff, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
-  Shield, Sparkles, Square, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserRound, X, Zap,
+  Activity, AppWindow, ArrowLeft, ArrowRight, Bell, Bot, Box, Brain, Calendar, CalendarClock, CalendarDays, Check, ChevronDown, ChevronRight, CircleCheck, CircleHelp, CircleMinus, CircleStop, CircleX, Clock, Cloud, Code, Coffee, Contrast, Copy,
+  Cpu, createIcons, Database, Download, ExternalLink, Eye, EyeOff, File as FileIcon, FileImage, FileText, Folder, FolderKey, FolderOpen, FolderPlus, Globe, HardDrive, Hand, Hash, Hourglass, House, Infinity as InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LoaderCircle, LockKeyhole, LockKeyholeOpen,
+  Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, MonitorUp, Moon, MousePointer2, Network, Pencil, Pin, PinOff, Play, PlugZap, Plus, Power, Radio, RefreshCw, Repeat, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
+  Shield, ShieldCheck, ShieldOff, Sparkles, Square, SquareArrowOutUpRight, SquareTerminal, Sun, Sunrise, Sunset, Tag, Terminal, Timer, Trash2, TriangleAlert, Upload, UserMinus, UserRound, X, Zap,
 } from "lucide";
 import { mountCaffeinateForm } from "./caffeinate-form";
+import { mountDevices } from "./devices";
 import {
   defaults, desktop, offStatus, type ActivityAccessibility, type LidMode, type LidStatus, type CaffeinateSettings, type Duration, type Preferences,
-  type Statuses, type Theme,
+  type ProxySettings, type Statuses, type Theme,
 } from "./desktop";
 import { messages, type Language, type Message } from "./messages";
 import { mountTools, tools, updateQuickStartMode, updateToolStatus, type ToolId } from "./modules";
@@ -16,6 +17,8 @@ import { mountOperationProgress } from "./operation-progress";
 import { mountChangelog, releasesSince } from "./changelog";
 import { mountOnboarding } from "./onboarding";
 import { mountProxy } from "./proxy";
+import { mountRemoteBanner } from "./remote-banner";
+import { isLinkError, refusal, type Reason, type Session } from "./remote";
 import { formatSession, SESSION_WIDTH } from "./time";
 import { mountUpdateNotice } from "./update-notice";
 
@@ -24,6 +27,14 @@ function element<T extends HTMLElement = HTMLElement>(id: string): T {
 }
 
 element("window-titlebar").hidden = !desktop.showWindowTitlebar;
+/** The device that this window controls, or `null` in the panel. Rust decides it by the window label, and this only shapes the interface. */
+const remote = desktop.remote;
+let remoteName = "";
+let session: Session | undefined;
+if (remote) {
+  document.querySelector<HTMLElement>(".workspace")!.dataset.remote = "";
+  for (const node of document.querySelectorAll<HTMLElement>("[data-local-only]")) node.hidden = true;
+}
 document.documentElement.style.setProperty("--session-width", `${SESSION_WIDTH}ch`);
 const updateToolOrder = mountTools(pinned => updatePreference("tools", {
   key: "pinned",
@@ -32,10 +43,10 @@ const updateToolOrder = mountTools(pinned => updatePreference("tools", {
 function renderIcons(): void {
   createIcons({
     icons: {
-      Activity, AppWindow, ArrowRight, Bot, Box, Brain, CalendarClock, Check, ChevronRight, CircleHelp, Clock, Cloud, Code, Coffee, Contrast, Copy,
-      Cpu, Database, ExternalLink, EyeOff, Globe, Hash, Hourglass, Infinity: InfinityIcon, Info, Laptop, LaptopMinimal, LayoutGrid, Link, LockKeyhole, LockKeyholeOpen,
-      Maximize2, Megaphone, MessageSquare, Monitor, Moon, MousePointer2, Pencil, Pin, PinOff, Play, PlugZap, Plus, Power, Rocket, RotateCcw, ScrollText, Search, Server,
-      Settings, Shield, Sparkles, Square, SquareTerminal, Sun, Sunrise, Sunset, Terminal, Timer, Trash2, TriangleAlert, UserRound, X, Zap,
+      Activity, AppWindow, ArrowLeft, ArrowRight, Bell, Bot, Box, Brain, Calendar, CalendarClock, CalendarDays, Check, ChevronDown, ChevronRight, CircleCheck, CircleHelp, CircleMinus, CircleStop, CircleX, Clock, Cloud, Code, Coffee, Contrast, Copy,
+      Cpu, Database, Download, ExternalLink, Eye, EyeOff, File: FileIcon, FileImage, FileText, Folder, FolderKey, FolderOpen, FolderPlus, Globe, HardDrive, Hand, Hash, Hourglass, House, Infinity: InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LoaderCircle, LockKeyhole, LockKeyholeOpen,
+      Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, MonitorUp, Moon, MousePointer2, Network, Pencil, Pin, PinOff, Play, PlugZap, Plus, Power, Radio, RefreshCw, Repeat, Rocket, RotateCcw, ScrollText, Search, Server,
+      Settings, Shield, ShieldCheck, ShieldOff, Sparkles, Square, SquareArrowOutUpRight, SquareTerminal, Sun, Sunrise, Sunset, Tag, Terminal, Timer, Trash2, TriangleAlert, Upload, UserMinus, UserRound, X, Zap,
     },
     attrs: { "aria-hidden": "true", "stroke-width": 1.75 },
   });
@@ -44,6 +55,16 @@ renderIcons();
 
 const caffeinate = mountCaffeinateForm();
 const progress = mountOperationProgress(element("operation-progress"));
+const banner = mountRemoteBanner({ translate: key => translate(key), language: preferredLanguage });
+if (remote) {
+  let wasLost = false;
+  desktop.onLink(error => {
+    banner.setLink(error);
+    // The link came back, possibly after the other device restarted. Its version and settings may have changed.
+    if (error === undefined && wasLost) void reloadRemote();
+    wasLost = error !== undefined;
+  });
+}
 const activityModes = element("activity-modes");
 const modeChoices = activityModes.querySelectorAll<HTMLInputElement>('input[name="activity-mode"]');
 const activityDuration = element("activity-duration");
@@ -101,13 +122,17 @@ element("settings-presentation").hidden = !desktop.showPresentationPrivacy;
 element("login-launch-setting").hidden = !desktop.macApp;
 
 type ActivityMode = "duration" | "schedule";
-type FeedbackTarget = ToolId | "tools" | "settings";
+type FeedbackTarget = ToolId | "tools" | "settings" | "devices";
 type FeedbackLine = { message: Message; tool?: ToolId };
 type PreferenceChoice = "duration" | "language" | "theme" | "hideWhileSharing" | "startToolsOnLaunch" | "seenVersion";
 type PreferenceChange = {
   key: PreferenceChoice | ToolId | "proxySettings" | "pinned";
   apply: (current: Preferences) => Preferences;
 };
+/** The notices that report no failure: a saved change, and a request that another device keeps for itself. */
+const calmMessages = new Set<Message>([
+  "saved", "forgetRemoveThere", "localOnly", "notPermitted", "lidNeedsLocalPermission", "remoteLost",
+]);
 const accessibilityLabels: Record<ActivityAccessibility, Message> = {
   granted: "accessibilityGranted",
   required: "accessibilityRequired",
@@ -158,10 +183,13 @@ function preferredLanguage(): Language {
 }
 
 function translate(key: Message): string {
-  return messages[preferredLanguage()][key];
+  const text = messages[preferredLanguage()][key];
+  // In a window that controls a device, `{name}` is that device. No other text has one there.
+  return remote ? text.split("{name}").join(remoteName) : text;
 }
 
 function errorMessage(error: unknown, fallback: Message): Message {
+  if (remote && isLinkError(error)) return "remoteLost";
   return typeof error === "string" && Object.prototype.hasOwnProperty.call(messages.en, error)
     ? error as Message : fallback;
 }
@@ -209,7 +237,7 @@ const onboarding = mountOnboarding({
 const caffeinateCopy = element<HTMLButtonElement>("caffeinate-copy");
 let caffeinateCopied: number | undefined;
 caffeinateCopy.addEventListener("click", () => {
-  void navigator.clipboard.writeText(element("caffeinate-preview").textContent ?? "").then(() => {
+  void desktop.copyText(element("caffeinate-preview").textContent ?? "").then(() => {
     // The check mark confirms the copy for a moment.
     caffeinateCopy.setAttribute("data-copied", "");
     window.clearTimeout(caffeinateCopied);
@@ -269,7 +297,7 @@ element("changelog-open").addEventListener("click", event => changelog.open(unde
 let runningVersion: string | undefined;
 /** Records that the user saw the setup or the changes of the running version. */
 function markVersionSeen(): void {
-  if (runningVersion) updateChoice("settings", "seenVersion", runningVersion);
+  if (runningVersion && !remote) updateChoice("settings", "seenVersion", runningVersion);
 }
 const updates = mountUpdateNotice({
   translate,
@@ -298,6 +326,22 @@ const proxy = mountProxy({
     renderFeedback();
   },
   refreshIcons: renderIcons,
+  // The proxy's role, port, address list, and client commands are kept by the person at the device.
+  lockTip: () => remote ? translate(refusal("setProxyRole", undefined, session?.permissions) ?? "localOnly") : undefined,
+});
+
+const devices = mountDevices({
+  translate,
+  language: preferredLanguage,
+  refreshIcons: renderIcons,
+  fail(error) {
+    feedback.devices = errorMessage(error, "remoteChangeFailed");
+    renderFeedback();
+  },
+  notify(message) {
+    feedback.devices = message;
+    renderFeedback();
+  },
 });
 
 function renderFeedback(): void {
@@ -324,7 +368,7 @@ function renderFeedback(): void {
   const explicit = feedback[target];
   const applying = workerAction?.running && workerAction.target === target;
   const message = applying ? undefined
-    : explicit ?? (target !== "tools" && target !== "settings" ? toolError(target) : undefined);
+    : explicit ?? (target !== "tools" && target !== "settings" && target !== "devices" ? toolError(target) : undefined);
   const toolActionFailure = !applying && target === "tools" && !explicit && toolFailures.length > 0;
   const lines: FeedbackLine[] = toolActionFailure ? [...toolFailures] : message ? [{ message }] : [];
   if (accessibilityRequestIssue === target) lines.push({ message: "accessibilityRequestFailed" });
@@ -339,7 +383,7 @@ function renderFeedback(): void {
     const titleText = translate(title);
     const canOpenAccessibility = !unsupported && lines.some(({ message }) =>
       message === "permissionRequired" || message === "accessibilityRequestFailed");
-    const informational = lines.every(({ message }) => message === "saved");
+    const informational = lines.every(({ message }) => calmMessages.has(message));
     if (!canOpenAccessibility && document.activeElement === noticeAccessibility) view.querySelector("h1")?.focus();
     noticeAccessibility.toggleAttribute("hidden", !canOpenAccessibility);
     setAttribute(noticeRegion, "data-tone", informational ? "info" : "error");
@@ -353,6 +397,34 @@ function renderFeedback(): void {
     visibleNotice = undefined;
   }
   setNoticeOpen(noticeRegion, open);
+  renderBlocks();
+}
+
+/** Turns off a control with the reason as its tip. The reason shows on hover and focus, so the control keeps its place. */
+function setBlock(control: HTMLElement, reason: Reason | undefined): void {
+  if (reason) {
+    const tip = translate(reason);
+    control.classList.add("reason");
+    setAttribute(control, "data-blocked", "");
+    setAttribute(control, "data-tip", tip);
+    setAttribute(control, "aria-description", tip);
+    setAttribute(control, "aria-disabled", "true");
+  } else if (control.hasAttribute("data-blocked")) {
+    control.classList.remove("reason");
+    for (const name of ["data-blocked", "data-tip", "aria-description"]) control.removeAttribute(name);
+  }
+}
+
+/** The controls that the controlled device will refuse, so the window says so before the click. */
+function renderBlocks(): void {
+  if (!remote) return;
+  for (const power of powerButtons) {
+    const tool = power.dataset.toolPower as ToolId;
+    setBlock(power, refusal("setToolActive", { tool, active: statuses[tool].mode === "off" }, session?.permissions));
+  }
+  for (const button of [settingsAccessibility, noticeAccessibility, permissionAccessibility]) {
+    setBlock(button, refusal("requestActivityAccessibility", undefined, session?.permissions));
+  }
 }
 
 function renderPermissionNotice(view = activeView()): void {
@@ -527,6 +599,7 @@ function renderControls(): void {
   }
   for (const hint of quickStartHints) setAttribute(hint, "data-quick-start-hint", quickStartHint());
   proxy.render(preferences.proxy, preferences.quickStart.proxy, statuses.proxy.mode !== "off", loaded);
+  devices.render();
   updateToolOrder(translate, preferences.pinned);
   if (!workerAction?.keepQuickStartLayout) {
     const canStartSelected = !unavailable &&
@@ -546,6 +619,7 @@ function renderControls(): void {
   setDisabled(startToolsOnLaunch, !loaded);
   for (const button of [...languageButtons, ...themeButtons]) setDisabled(button, !loaded);
   caffeinate.setDisabled(unavailable || !statuses.caffeinate.supported);
+  renderBlocks();
 }
 
 function renderTheme(animate: boolean): void {
@@ -601,6 +675,7 @@ function renderPreferences(previous?: Preferences): void {
     setAttribute(activityPower, "aria-label", translate("activitySession"));
     progress.renderLabel();
     updates.render();
+    if (remote) banner.render();
     onboarding.render();
     changelog.render();
     renderLid();
@@ -660,7 +735,8 @@ function refreshPermissions(pendingOnly = false): void {
 }
 
 async function openAccessibility(target: FeedbackTarget): Promise<void> {
-  if (accessibilityOpening || accessibility === "unsupported") return;
+  // Only the person at the device can answer its system prompt.
+  if (remote || accessibilityOpening || accessibility === "unsupported") return;
   accessibilityOpening = true;
   renderFeedback();
   try {
@@ -676,19 +752,28 @@ async function openAccessibility(target: FeedbackTarget): Promise<void> {
   }
 }
 
+/** True while a status request waits. The next tick skips, so a slow link never piles requests up. */
+let statusPending = false;
+
 async function refreshStatus(): Promise<void> {
-  if (workerAction?.running || caffeinateSaving) return;
+  if (workerAction?.running || caffeinateSaving || statusPending) return;
   const revision = ++statusRevision;
+  statusPending = true;
   try {
     const current = await desktop.getStatuses();
     if (revision !== statusRevision) return;
     setStatuses(current);
-    if (!ready && feedback.tools === "workerUnavailable") delete feedback.tools;
+    if (!ready && (feedback.tools === "workerUnavailable" || feedback.tools === "notPermitted")) delete feedback.tools;
     ready = true;
-  } catch {
+  } catch (error) {
     if (revision !== statusRevision) return;
     ready = false;
-    feedback.tools = "workerUnavailable";
+    // A lost link shows in the banner. A device that refuses shows a calm note.
+    if (!remote) feedback.tools = "workerUnavailable";
+    else if (isLinkError(error)) delete feedback.tools;
+    else feedback.tools = errorMessage(error, "workerUnavailable");
+  } finally {
+    statusPending = false;
   }
   renderStatus();
 }
@@ -720,9 +805,52 @@ async function updateLoginLaunch(enabled?: boolean): Promise<void> {
   }
 }
 
+type SaveStep = { changed: boolean; send: () => Promise<void>; done: (saved: Preferences) => Preferences };
+
+/** Sends each changed setting as its own request, in a fixed order, and keeps what was saved if a later one fails. */
 async function save(next: Preferences): Promise<void> {
-  await desktop.savePreferences(next);
-  savedPreferences = next;
+  const before = savedPreferences;
+  const differs = (pick: (preferences: Preferences) => unknown) =>
+    JSON.stringify(pick(next)) !== JSON.stringify(pick(before));
+  const choice = <Key extends PreferenceChoice | "schedule" | "pinned">(
+    key: Key, send: (value: Preferences[Key]) => Promise<void>,
+  ): SaveStep => ({
+    changed: differs(preferences => preferences[key]),
+    send: () => send(next[key]),
+    done: saved => ({ ...saved, [key]: next[key] }),
+  });
+  const proxyPart = <Key extends keyof ProxySettings>(
+    key: Key, send: (value: ProxySettings[Key]) => Promise<void>,
+  ): SaveStep => ({
+    changed: differs(preferences => preferences.proxy[key]),
+    send: () => send(next.proxy[key]),
+    done: saved => ({ ...saved, proxy: { ...saved.proxy, [key]: next.proxy[key] } }),
+  });
+  const steps: SaveStep[] = [
+    choice("language", desktop.saveLanguage),
+    choice("theme", desktop.saveTheme),
+    choice("duration", desktop.saveDuration),
+    choice("schedule", desktop.saveSchedule),
+    ...tools.map(({ id }): SaveStep => ({
+      changed: next.quickStart[id] !== before.quickStart[id],
+      send: () => desktop.saveQuickStart(id, next.quickStart[id]),
+      done: saved => ({ ...saved, quickStart: { ...saved.quickStart, [id]: next.quickStart[id] } }),
+    })),
+    choice("startToolsOnLaunch", desktop.saveStartToolsOnLaunch),
+    choice("hideWhileSharing", desktop.saveHideWhileSharing),
+    choice("pinned", desktop.savePinnedTools),
+    choice("seenVersion", desktop.saveSeenVersion),
+    proxyPart("role", desktop.saveProxyRole),
+    proxyPart("port", desktop.saveProxyPort),
+    proxyPart("server", desktop.saveProxyServer),
+    proxyPart("allowed", desktop.saveProxyAllowed),
+    proxyPart("apps", desktop.saveProxyApps),
+  ];
+  for (const { changed, send, done } of steps) {
+    if (!changed) continue;
+    await send();
+    savedPreferences = done(savedPreferences);
+  }
 }
 
 function updatePreference(target: FeedbackTarget, change: PreferenceChange): void {
@@ -943,6 +1071,7 @@ for (const button of [startSelected, stopSelected, ...powerButtons]) {
 }
 
 powerButtons.forEach(button => button.addEventListener("click", () => {
+  if (button.hasAttribute("data-blocked")) return;
   const id = button.dataset.toolPower as ToolId;
   const active = statuses[id].mode === "off";
   const target = button.closest('[data-module-view="tools"]') ? "tools" : id;
@@ -1072,6 +1201,8 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-view]")
       refreshPermissions();
       void updateLoginLaunch();
     }
+    if (button.dataset.view === "devices") void devices.refresh();
+    else devices.reset();
   });
 }
 async function refreshSystemLanguage(): Promise<void> {
@@ -1085,27 +1216,98 @@ systemAppearance.addEventListener("change", () => renderTheme(true));
 window.addEventListener("languagechange", () => { void refreshSystemLanguage(); });
 desktop.onFocus(() => {
   proxy.refresh();
+  if (!remote && activeView().dataset.moduleView === "devices") void devices.refresh();
   refreshPermissions();
   void refreshLid();
   if (activeView().dataset.moduleView === "settings") void updateLoginLaunch();
   void refreshSystemLanguage();
-  void updates.refresh();
+  if (remote) void refreshViewer();
+  else void updates.refresh();
 });
+
+/** What the device keeps and what the viewer sees. The language and theme are the viewer's, whatever the device has saved. */
+async function readRemote(): Promise<void> {
+  const [next, device, viewer] = await Promise.all([
+    desktop.getSession(),
+    desktop.getPreferences().catch((error: unknown) => {
+      if (isLinkError(error)) throw error;
+      // A device that does not share its settings still lets this window show its tools.
+      return defaults;
+    }),
+    desktop.getViewer(),
+  ]);
+  session = next;
+  remoteName = next.device.name;
+  banner.setSession(next);
+  savedPreferences = { ...device, language: viewer.language, theme: viewer.theme };
+  setText(element("app-version"), next.version);
+  element("settings-version").hidden = false;
+  if (document.title !== `${remoteName} — Lazy Worker`) document.title = `${remoteName} — Lazy Worker`;
+}
+
+/** Reads the session and the settings again after the link came back. A change in progress keeps the settings it has. */
+async function reloadRemote(): Promise<void> {
+  try {
+    const keep = pendingPreferences.length > 0 || caffeinateSaveDelay !== undefined;
+    const before = savedPreferences;
+    await readRemote();
+    if (keep) savedPreferences = before;
+    preferences = pendingPreferences.reduce((current, change) => change.apply(current), savedPreferences);
+    renderPreferences(before);
+  } catch {
+    // The link failed again. The banner says so, and the next return tries again.
+  }
+}
+
+/** Follows the language and theme of the person here, which can change in the panel while this window is open. */
+async function refreshViewer(): Promise<void> {
+  const viewer = await desktop.getViewer().catch(() => undefined);
+  if (!viewer || (viewer.language === savedPreferences.language && viewer.theme === savedPreferences.theme)) return;
+  savedPreferences = { ...savedPreferences, ...viewer };
+  renderPendingPreferences();
+}
+
+/** Opens the window of a device: the first read waits for the link, which can take a few seconds or fail. */
+async function loadRemote(): Promise<void> {
+  remoteName = await desktop.remoteName();
+  banner.render();
+  // The window shows at once, with its banner, so a device that does not answer is seen and not a blank panel.
+  delete element("onboarding").closest<HTMLElement>(".workspace")!.dataset.booting;
+  systemLanguage = await desktop.getSystemLanguage();
+  for (;;) {
+    try {
+      await readRemote();
+      preferences = savedPreferences;
+      loaded = true;
+      return;
+    } catch {
+      // The banner shows the lost link. The window keeps trying until the device answers.
+      await new Promise(resolve => window.setTimeout(resolve, 5000));
+    }
+  }
+}
 
 async function initialize(): Promise<void> {
   renderTheme(false);
   renderStatus();
-  void desktop.getVersion().then(version => {
-    setText(element("app-version"), version);
-    element("settings-version").hidden = false;
-  }).catch(() => {});
+  if (!remote) {
+    void desktop.getVersion().then(version => {
+      setText(element("app-version"), version);
+      element("settings-version").hidden = false;
+    }).catch(() => {});
+  }
   try {
-    [savedPreferences, systemLanguage] = await Promise.all([
-      desktop.getPreferences(),
-      desktop.getSystemLanguage(),
-    ]);
-    preferences = savedPreferences;
-    loaded = true;
+    if (remote) {
+      void desktop.getVersion().then(version => banner.setLocalVersion(version)).catch(() => {});
+      await loadRemote();
+    } else {
+      [savedPreferences, systemLanguage] = await Promise.all([
+        desktop.getPreferences(),
+        desktop.getSystemLanguage(),
+      ]);
+      preferences = savedPreferences;
+      loaded = true;
+    }
     selectActivityMode(preferences.schedule.enabled ? "schedule" : "duration");
     start.value = preferences.schedule.start;
     end.value = preferences.schedule.end;
@@ -1116,16 +1318,20 @@ async function initialize(): Promise<void> {
   }
   renderPreferences();
   void refreshLid();
-  runningVersion = await desktop.getVersion().catch(() => undefined);
-  if (await desktop.getFirstRun().catch(() => false)) onboarding.open();
-  else if (loaded && runningVersion && preferences.seenVersion !== runningVersion) {
-    const news = releasesSince(preferences.seenVersion, runningVersion);
-    if (news.length) changelog.open(news);
-    else markVersionSeen();
+  // The setup guide, What’s new, and the update notice belong to this app, so a window of a device shows none of them.
+  if (!remote) {
+    void devices.refresh();
+    runningVersion = await desktop.getVersion().catch(() => undefined);
+    if (await desktop.getFirstRun().catch(() => false)) onboarding.open();
+    else if (loaded && runningVersion && preferences.seenVersion !== runningVersion) {
+      const news = releasesSince(preferences.seenVersion, runningVersion);
+      if (news.length) changelog.open(news);
+      else markVersionSeen();
+    }
   }
   // The panel stays hidden until here, so a new installation never shows the tools before the setup guide.
   delete element("onboarding").closest<HTMLElement>(".workspace")!.dataset.booting;
-  void updates.start();
+  if (!remote) void updates.start();
   await refreshStatus();
   refreshPermissions();
   window.setInterval(() => { void refreshStatus(); }, 1000);

@@ -28,6 +28,12 @@ export function formatSession(seconds: number): string {
 /** Characters to reserve for `formatSession`. It holds a session of up to 99 days. */
 export const SESSION_WIDTH = 9;
 
+/** The time left of a window that lasts minutes, such as pairing: `08:42`. Its longest text has 5 characters (`10:00`). */
+export function formatCountdown(seconds: number): string {
+  const total = Math.max(0, Math.ceil(seconds));
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
 export type AgeUnit = "seconds" | "minutes" | "hours" | "days";
 
 /** The largest whole unit of an elapsed time, so the number stays under three digits for months. */
@@ -56,4 +62,63 @@ export function formatMoment(epochSeconds: number, locale: string, now = new Dat
   return today
     ? moment.toLocaleTimeString(locale, { hour12: false })
     : moment.toLocaleString(locale, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+/** True when the moment falls on the same calendar day as `now`. `now` exists for tests. */
+export function isToday(epochSeconds: number, now = new Date()): boolean {
+  const moment = new Date(epochSeconds * 1000);
+  return moment.getFullYear() === now.getFullYear() && moment.getMonth() === now.getMonth() &&
+    moment.getDate() === now.getDate();
+}
+
+/**
+ * A time of day that is still to come or just passed, such as when a shell ends or an action runs next:
+ * the time alone when it falls today, and the date with the time otherwise. Its longest text has 12 characters.
+ * `now` exists for tests.
+ */
+export function formatClock(epochSeconds: number, locale: string, now = new Date()): string {
+  const moment = new Date(epochSeconds * 1000);
+  const today = moment.getFullYear() === now.getFullYear() && moment.getMonth() === now.getMonth() &&
+    moment.getDate() === now.getDate();
+  return today
+    ? moment.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hour12: false })
+    : moment.toLocaleString(locale, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+/**
+ * When a file last changed: the time alone when it was today, the day and month within this year, and the date with the
+ * year before that. A file can be years old. Its longest text has 10 characters (`24/11/2025`): reserve `MODIFIED_WIDTH`.
+ * `now` exists for tests.
+ */
+export function formatModified(epochSeconds: number, locale: string, now = new Date()): string {
+  const moment = new Date(epochSeconds * 1000);
+  if (isToday(epochSeconds, now)) return moment.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hour12: false });
+  const sameYear = moment.getFullYear() === now.getFullYear();
+  return moment.toLocaleDateString(locale, sameYear
+    ? { day: "2-digit", month: "2-digit" } : { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+export const MODIFIED_WIDTH = 10;
+
+/**
+ * How long a run took: `12 s` under a minute, `4 min 05 s` under an hour, and `1 h 05 min` from one hour on.
+ * Its longest text has 11 characters (`59 min 59 s`) for a run that ends within an hour, as every run does.
+ * A run of 100 hours or more shows whole hours, so the text stays short. Reserve `DURATION_WIDTH` characters.
+ */
+export function formatDuration(seconds: number): string {
+  const total = whole(seconds);
+  if (total < MINUTE) return `${total} s`;
+  if (total < HOUR) return `${Math.floor(total / MINUTE)} min ${pad(total % MINUTE)} s`;
+  const hours = Math.floor(total / HOUR);
+  return hours >= 100 ? `${hours} h` : `${hours} h ${pad(Math.floor(total / MINUTE) % 60)} min`;
+}
+
+/** Characters to reserve for `formatDuration`. */
+export const DURATION_WIDTH = 11;
+
+/** A limit of time in the largest whole unit: `30 s`, `5 min`, `1 h`. A number that does not divide stays in seconds, so no text lies. */
+export function formatLimit(seconds: number): string {
+  const total = whole(seconds);
+  if (total >= HOUR && total % HOUR === 0) return `${total / HOUR} h`;
+  if (total >= MINUTE && total % MINUTE === 0) return `${total / MINUTE} min`;
+  return `${total} s`;
 }

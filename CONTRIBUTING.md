@@ -41,7 +41,8 @@ A new tool touches the same places every time. Use this list, and see [AGENTS.md
 5. **Make its clip.** Build an episode in the [clay workshop](docs/design/clay-workshop/README.md), run `npm run export -- <tool>` there, and add the clip and poster to the tool's help in `src/modules.ts`.
 6. **Document it.** Add a section to the [user guide](docs/user-guide.md) with the clip at its top. Copy a tool card in the [README](README.md), with the poster of the clip, and link it to the new section. List what the tool can do under **What each tool can do** there, one line for each function. A change that adds a function to a tool adds its line too.
 7. **Announce it.** Add the tool to the next release in `src/changelog.ts` with its `tool`, so What’s new links to it. Add its card to the tools step of the setup guide in `index.html` when a new user should meet it there.
-8. **Record what you learned.** Add one line to [AGENTS.md](AGENTS.md) for each new project rule.
+8. **Work from another device.** Every new request runs on the device of the window that sent it. Declare its `access`, `is_read`, and `runs_on_viewer` in `src-tauri/src/dispatch.rs`, show its data as text, and keep a control that the device will not take from a remote window off with a reason (`src/remote.ts`). The tool must work when its data comes from another device.
+9. **Record what you learned.** Add one line to [AGENTS.md](AGENTS.md) for each new project rule.
 
 ### Where a tool is registered
 
@@ -51,10 +52,10 @@ Step 1 touches these places. The TypeScript and Rust compilers report most of th
 | --- | --- |
 | `src/modules.ts` | The tool's ID in `ToolId` and its entry in `tools`: title, description, icon, and help. Add `section` when it sits under a broader sidebar entry, and `row` when its card in Tools needs its own name. |
 | `index.html` | A `data-module-view="<id>"` block that holds a `.module-body`. The shared header mounts before that body. |
-| `src/desktop.ts` | The tool in `defaults.quickStart`, in `previewStatuses`, and in the list `startPreviewTools` walks. Give each new native call a browser-preview result. |
+| `src/desktop.ts` | The tool in `defaults.quickStart`, in `previewStatuses`, and in the list `startPreviewTools` walks. Send each new native call through `call`, which uses the one `dispatch` command, and give it a browser-preview result. |
 | `src/main.ts` | The tool in the initial `statuses`, in `startFailures`, and in `unsupportedTools`. Import each new icon and add it to `renderIcons`. |
 | `src-tauri/src/<tool>.rs` | The tool itself: its settings, its status, and its worker behind a platform adapter. |
-| `src-tauri/src/main.rs` | The tool in `ToolId`, `Statuses`, and `Tools`, in `set_active` and `start_selected`, in the one-second clock, and in the stop on exit. Register each new command in `generate_handler!`. |
+| `src-tauri/src/main.rs` | The tool in `ToolId`, `Statuses`, and `Tools`, in `set_active` and `start_selected`, in the one-second clock, and in the stop on exit. Add each new native operation to `Request` in `src-tauri/src/dispatch.rs` and declare its access in `access`; `generate_handler!` registers only `dispatch`. |
 | `src-tauri/src/preferences.rs` | The tool's flag in `QuickStart`, and its settings in `Preferences` when it has any. |
 | `src-tauri/src/tray.rs` | The tool's state, its start and stop labels in both languages, its menu item, and its action. |
 

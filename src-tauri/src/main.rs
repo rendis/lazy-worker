@@ -1,10 +1,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(unix)]
+mod actions;
 mod activity;
+mod apps;
 mod caffeinate;
+mod clipboard;
+mod devices;
+mod dispatch;
 mod lid;
 mod preferences;
 mod proxy;
+#[cfg(unix)]
+mod remote;
 mod resume;
 
 #[cfg(target_os = "macos")]
@@ -21,8 +29,7 @@ mod tray;
 mod updates;
 
 use activity::Activity;
-use caffeinate::{Caffeinate, CaffeinateSettings, RunningProcess};
-use preferences::Preferences;
+use caffeinate::Caffeinate;
 use proxy::Proxy;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -31,7 +38,7 @@ use std::{
     thread,
     time::Duration,
 };
-use tauri::{Manager, RunEvent, State};
+use tauri::{Manager, RunEvent};
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -103,7 +110,7 @@ impl Tools {
 
     fn save_caffeinate_settings(
         &mut self,
-        settings: CaffeinateSettings,
+        settings: caffeinate::CaffeinateSettings,
     ) -> Result<Statuses, &'static str> {
         settings.validate()?;
         let mut preferences = self.activity.preferences();
@@ -140,11 +147,6 @@ type Controller = Arc<Mutex<Tools>>;
 /// True when this launch found no saved preferences, so it is a new installation.
 struct FirstRun(bool);
 
-#[tauri::command]
-fn get_first_run(first_run: State<'_, FirstRun>) -> bool {
-    first_run.0
-}
-
 /// Records the running tools, so the launch after an update starts them again.
 #[cfg(target_os = "macos")]
 fn remember_running(app: &tauri::AppHandle) {
@@ -156,195 +158,18 @@ fn remember_running(app: &tauri::AppHandle) {
     };
 }
 
-#[tauri::command]
-fn get_preferences(controller: State<'_, Controller>) -> Result<Preferences, &'static str> {
-    Ok(controller
-        .lock()
-        .map_err(|_| "workerUnavailable")?
-        .activity
-        .preferences())
-}
-
-#[tauri::command]
-fn get_system_language() -> Option<preferences::Language> {
-    #[cfg(target_os = "macos")]
-    return Some(preferences::system_language());
-
-    #[cfg(not(target_os = "macos"))]
-    None
-}
-
-#[tauri::command]
-fn save_preferences(
-    app: tauri::AppHandle,
-    controller: State<'_, Controller>,
-    mut preferences: Preferences,
-) -> Result<(), &'static str> {
-    let mut tools = controller.lock().map_err(|_| "saveFailed")?;
-    preferences.caffeinate = tools.activity.preferences().caffeinate;
-    preferences.lid_awake = tools.activity.preferences().lid_awake;
-    preferences.proxy.sanitize();
-    let proxy = preferences.proxy.clone();
-    #[cfg(target_os = "macos")]
-    let presentation_changed =
-        preferences.hide_while_sharing != tools.activity.preferences().hide_while_sharing;
-    tools.activity.save_preferences(preferences)?;
-    tools.proxy.apply_settings(&proxy);
-    drop(tools);
-    #[cfg(target_os = "macos")]
-    if presentation_changed {
-        presentation::refresh(&app);
-    }
-    #[cfg(not(target_os = "macos"))]
-    let _ = app;
-    Ok(())
-}
-
-#[tauri::command]
-fn save_caffeinate_settings(
-    controller: State<'_, Controller>,
-    settings: CaffeinateSettings,
-) -> Result<Statuses, &'static str> {
-    controller
-        .lock()
-        .map_err(|_| "saveFailed")?
-        .save_caffeinate_settings(settings)
-}
-
-#[tauri::command]
-async fn list_caffeinate_processes() -> Result<Vec<RunningProcess>, &'static str> {
-    tauri::async_runtime::spawn_blocking(caffeinate::list_processes)
-        .await
-        .map_err(|_| "caffeinateProcessListFailed")?
-}
-
-#[tauri::command]
-fn get_statuses(controller: State<'_, Controller>) -> Result<Statuses, &'static str> {
-    Ok(controller
-        .lock()
-        .map_err(|_| "workerUnavailable")?
-        .statuses())
-}
-
-#[tauri::command]
-async fn get_activity_accessibility() -> &'static str {
-    tauri::async_runtime::spawn_blocking(activity::accessibility_status)
-        .await
-        .unwrap_or("unavailable")
-}
-
-#[tauri::command]
-async fn request_activity_accessibility() -> Result<(), &'static str> {
-    tauri::async_runtime::spawn_blocking(activity::request_accessibility)
-        .await
-        .map_err(|_| "accessibilityRequestFailed")?
-}
-
-#[tauri::command]
-async fn get_proxy_network() -> Result<proxy::Network, &'static str> {
-    tauri::async_runtime::spawn_blocking(proxy::network)
-        .await
-        .map_err(|_| "workerUnavailable")
-}
-
-#[tauri::command]
-fn get_proxy_peers(controller: State<'_, Controller>) -> Result<Vec<proxy::Peer>, &'static str> {
-    Ok(controller
-        .lock()
-        .map_err(|_| "workerUnavailable")?
-        .proxy
-        .peers())
-}
-
-#[tauri::command]
-fn get_proxy_log(controller: State<'_, Controller>) -> Result<Vec<proxy::LogEntry>, &'static str> {
-    Ok(controller
-        .lock()
-        .map_err(|_| "workerUnavailable")?
-        .proxy
-        .log())
-}
-
-#[tauri::command]
-async fn detect_proxy_apps() -> Result<proxy::Installs, &'static str> {
-    tauri::async_runtime::spawn_blocking(proxy::detect)
-        .await
-        .map_err(|_| "workerUnavailable")
-}
-
-#[tauri::command]
-async fn check_proxy_server(address: String) -> bool {
-    tauri::async_runtime::spawn_blocking(move || proxy::check_server(&address))
-        .await
-        .unwrap_or(false)
-}
-
-#[tauri::command]
-async fn launch_proxy_app(
-    controller: State<'_, Controller>,
-    id: String,
-) -> Result<(), &'static str> {
-    let settings = controller
-        .lock()
-        .map_err(|_| "proxyLaunchFailed")?
-        .activity
-        .preferences()
-        .proxy;
-    tauri::async_runtime::spawn_blocking(move || proxy::launch(&settings, &id))
-        .await
-        .map_err(|_| "proxyLaunchFailed")?
-}
-
-#[tauri::command]
-fn set_tool_active(
-    controller: State<'_, Controller>,
-    tool: ToolId,
-    active: bool,
-) -> Result<Statuses, &'static str> {
-    let mut tools = controller.lock().map_err(|_| "workerUnavailable")?;
-    tools.set_active(tool, active);
-    Ok(tools.statuses())
-}
-
-#[tauri::command]
-fn get_lid_status(controller: State<'_, Controller>) -> Result<lid::Status, &'static str> {
-    Ok(controller.lock().map_err(|_| "workerUnavailable")?.lid.status())
-}
-
-/// Saves the closed-lid choice. A choice that changes the system asks for the one-time permission first.
-#[tauri::command]
-async fn set_lid_mode(
-    controller: State<'_, Controller>,
-    mode: lid::LidMode,
-) -> Result<lid::Status, &'static str> {
-    // A choice of Sleep still changes the system when the switch is on, by the user or by this app.
-    let changes_system = {
-        let tools = controller.lock().map_err(|_| "workerUnavailable")?;
-        mode != lid::LidMode::Sleep || tools.lid.status().external || tools.lid.managed()
-    };
-    if changes_system {
-        // The administrator prompt can stay open for a long time, so it runs without the lock.
-        tauri::async_runtime::spawn_blocking(lid::Lid::authorize)
-            .await
-            .map_err(|_| "lidAuthorizationFailed")??;
-    }
-    let mut tools = controller.lock().map_err(|_| "workerUnavailable")?;
-    let mut preferences = tools.activity.preferences();
-    preferences.lid_awake = mode;
-    tools.activity.save_preferences(preferences)?;
-    tools.lid.adopt();
-    if !tools.reconcile_lid() {
-        return Err("lidChangeFailed");
-    }
-    Ok(tools.lid.status())
-}
-
 fn main() {
+    // Started by sshd as `remote --peer <id>` or `remote --pair`: relay lines and exit, before any window code.
+    #[cfg(unix)]
+    if let Some(code) = remote::helper::run_if_requested() {
+        std::process::exit(code);
+    }
     let builder = tauri::Builder::default();
     #[cfg(target_os = "macos")]
     let builder = builder
         .plugin(single_instance::plugin())
-        .plugin(tauri_plugin_updater::Builder::new().build());
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init());
     let app = builder
         .setup(|app| {
             let directory = app.path().app_config_dir()?;
@@ -377,6 +202,34 @@ fn main() {
             let controller = Arc::new(Mutex::new(tools));
             let clock = Arc::downgrade(&controller);
             app.manage(controller);
+            #[cfg(unix)]
+            {
+                app.manage(remote::service::Service::start(app.handle(), &directory));
+                app.manage(remote::transfers::Transfers::new(remote::transfers::AppLink(app.handle().clone())));
+                // The actions come after the service, because their runs are written in its log.
+                let handle = app.handle().clone();
+                let sink: actions::Sink = std::sync::Arc::new(move |entry| {
+                    if let Some(service) = handle.try_state::<remote::service::Service>() {
+                        service.record(entry);
+                    }
+                });
+                // A file that cannot be read leaves the actions off, and the panel says so. It is never replaced.
+                let allowed: actions::PeerCheck = {
+                    let handle = app.handle().clone();
+                    std::sync::Arc::new(move |id| {
+                        handle
+                            .try_state::<remote::service::Service>()
+                            .is_some_and(|service| service.peer_may_run_actions(id))
+                    })
+                };
+                match actions::Actions::open(directory.join("actions.json"), sink, allowed) {
+                    Ok(actions) => {
+                        actions.start_scheduler();
+                        app.manage(actions);
+                    }
+                    Err(code) => eprintln!("Lazy Worker: the actions are off ({code})"),
+                }
+            }
             #[cfg(target_os = "macos")]
             let tray_app = {
                 panel::install(app)?;
@@ -408,36 +261,7 @@ fn main() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            get_preferences,
-            get_first_run,
-            get_lid_status,
-            set_lid_mode,
-            get_system_language,
-            save_preferences,
-            save_caffeinate_settings,
-            list_caffeinate_processes,
-            get_statuses,
-            get_activity_accessibility,
-            request_activity_accessibility,
-            set_tool_active,
-            get_proxy_network,
-            get_proxy_peers,
-            get_proxy_log,
-            detect_proxy_apps,
-            check_proxy_server,
-            launch_proxy_app,
-            #[cfg(target_os = "macos")]
-            login_launch::get_login_launch,
-            #[cfg(target_os = "macos")]
-            login_launch::set_login_launch,
-            #[cfg(target_os = "macos")]
-            updates::get_update_status,
-            #[cfg(target_os = "macos")]
-            updates::check_for_update,
-            #[cfg(target_os = "macos")]
-            updates::restart_to_update
-        ])
+        .invoke_handler(tauri::generate_handler![dispatch::dispatch])
         .build(tauri::generate_context!())
         .expect("Could not build Lazy Worker");
     #[cfg(target_os = "macos")]
@@ -450,6 +274,14 @@ fn main() {
         RunEvent::Exit => {
             #[cfg(target_os = "macos")]
             presentation::stop(app);
+            #[cfg(unix)]
+            if let Some(actions) = app.try_state::<actions::Actions>() {
+                actions.stop();
+            }
+            #[cfg(unix)]
+            if let Some(service) = app.try_state::<remote::service::Service>() {
+                service.stop();
+            }
             let controller = app.state::<Controller>();
             if let Ok(mut tools) = controller.lock() {
                 tools.set_active(ToolId::Activity, false);

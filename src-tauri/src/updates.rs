@@ -86,7 +86,6 @@ pub fn has_update(app: &AppHandle) -> bool {
         .is_some_and(|state| state.lock().is_ok_and(|state| state.available.is_some()))
 }
 
-#[tauri::command]
 pub fn get_update_status(app: AppHandle) -> UpdateStatus {
     let state = app.try_state::<Mutex<Updates>>();
     let state = state.as_ref().and_then(|state| state.lock().ok());
@@ -99,13 +98,11 @@ pub fn get_update_status(app: AppHandle) -> UpdateStatus {
     }
 }
 
-#[tauri::command]
 pub async fn check_for_update(app: AppHandle) -> Result<UpdateStatus, &'static str> {
     check(&app).await.map_err(|_| "updateCheckFailed")?;
     Ok(get_update_status(app))
 }
 
-#[tauri::command]
 pub async fn restart_to_update(app: AppHandle) -> Result<(), &'static str> {
     // A newer release can appear after the app found this one. Look again first, so one restart reaches the latest.
     // Without an answer, for example with no network, the update the app already found is installed.
