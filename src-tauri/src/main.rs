@@ -8,6 +8,7 @@ mod caffeinate;
 mod clipboard;
 mod devices;
 mod dispatch;
+mod inbox;
 mod lid;
 mod preferences;
 mod proxy;
@@ -17,6 +18,8 @@ mod resume;
 
 #[cfg(target_os = "macos")]
 mod login_launch;
+#[cfg(target_os = "macos")]
+mod notifications;
 #[cfg(target_os = "macos")]
 mod panel;
 #[cfg(target_os = "macos")]
@@ -202,6 +205,7 @@ fn main() {
             let controller = Arc::new(Mutex::new(tools));
             let clock = Arc::downgrade(&controller);
             app.manage(controller);
+            app.manage(inbox::Inbox::open(directory.join("notifications.json")));
             #[cfg(unix)]
             {
                 app.manage(remote::service::Service::start(app.handle(), &directory));
@@ -237,6 +241,7 @@ fn main() {
                 app.manage(Mutex::new(presentation::Presentation::default()));
                 presentation::refresh(app.handle());
                 updates::start(app.handle());
+                notifications::install(app.handle());
                 app.handle().clone()
             };
             thread::spawn(move || loop {

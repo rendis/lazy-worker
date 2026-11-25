@@ -1962,3 +1962,89 @@ h1:focus { outline: none; }
 .tool-pin:hover { background: var(--glass); color: var(--text); }
 .tool-pin[aria-pressed="true"] { opacity: 1; color: var(--choice); transform: rotate(-35deg); }
 .tool-pin-tip[data-tip]::after { right: -4px; }
+
+/* The bell of this device, at the end of the title bar. Its tip opens below it, over the panel. */
+.window-titlebar { position: relative; z-index: 5; }
+.window-titlebar > .bell-tip { position: absolute; top: 50%; right: 12px; transform: translateY(-50%); pointer-events: auto; }
+.window-titlebar > .bell-tip[hidden] { display: none; }
+/* The setup guide covers the app, so the bell shows only after it. */
+:root[data-onboarding] .window-titlebar > .bell-tip { display: none; }
+.bell-button { position: relative; width: 28px; height: 28px; }
+.bell-button[aria-expanded="true"] { background: var(--glass); color: var(--text); }
+.bell-count {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--choice);
+  color: var(--choice-ink);
+  font-size: 10px;
+  font-weight: 760;
+  line-height: 15px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.bell-count[hidden] { display: none; }
+
+.bell-window { grid-template-rows: auto minmax(0, 1fr) auto; width: min(560px, 100%); }
+.bell-window header .bell-read-all { margin-inline-start: auto; }
+.bell-window header .bell-read-all + .icon-button { margin-inline-start: 0; }
+.bell-read-all:disabled { opacity: .45; cursor: default; }
+.bell-body { min-height: 0; overflow: hidden auto; border-top: 1px solid var(--hairline); }
+.bell-list { margin: 0; padding: 0; list-style: none; }
+.bell-list li { border-bottom: 1px solid var(--hairline); }
+.bell-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 7px var(--bell-age-width, 11ch);
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 9px 8px 9px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  text-align: start;
+  transition: background-color .16s ease;
+}
+.bell-row:hover { background: var(--glass); }
+.bell-list li[data-unread] .bell-row { background: var(--pending-panel); }
+.bell-list li[data-unread] .bell-row:hover { background: var(--pending-badge); }
+.bell-kind {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--secondary);
+}
+.bell-kind[data-kind="error"] { color: var(--pending-color); }
+.bell-kind .lucide { width: 16px; height: 16px; }
+.bell-text { display: grid; min-width: 0; gap: 2px; }
+.bell-text strong, .bell-text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bell-text strong { font-size: 13.5px; font-weight: 700; }
+.bell-text span { color: var(--secondary); font-size: 12.5px; }
+.bell-text span[hidden] { display: none; }
+.bell-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--choice); opacity: 0; transition: opacity .16s ease; }
+.bell-list li[data-unread] .bell-dot { opacity: 1; }
+.bell-age { color: var(--secondary); font-size: 12px; font-weight: 600; text-align: end; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bell-empty { margin: 0; padding: 36px 12px; color: var(--secondary); font-size: 13px; text-align: center; }
+.bell-empty[hidden] { display: none; }
+.bell-footer { border-top: 1px solid var(--hairline); padding-top: 9px; }
+.bell-footer-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; color: var(--secondary); font-size: 12.5px; }
+.bell-footer-line[hidden] { display: none; }
+.bell-footer .text-link:disabled { opacity: .45; cursor: default; }
+.bell-confirm-actions { display: flex; flex: none; align-items: center; gap: 12px; }
+.bell-confirm-actions .accessibility-button { margin: 0; }
+
+/* Notifications in Settings. */
+.settings-notifications { grid-column: 1 / -1; padding-top: 12px; border-top: 1px solid var(--line); }
+.settings-notifications > .settings-switch-description { margin: -3px 0 9px; }
+.settings-notifications .segments .lucide { width: 15px; height: 15px; }
+.notification-sound-row { margin-top: 13px; }
+.notification-sound-choice { display: flex; align-items: center; gap: 10px; margin-top: 9px; padding-inline-start: 23px; }
+.notification-sound-choice .segments { flex: 1; max-width: 330px; }

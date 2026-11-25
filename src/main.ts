@@ -1,15 +1,16 @@
 import "./style.css";
 import {
-  Activity, AppWindow, ArrowLeft, ArrowRight, Bell, Bot, Box, Brain, Calendar, CalendarClock, CalendarDays, Check, ChevronDown, ChevronRight, CircleCheck, CircleHelp, CircleMinus, CircleStop, CircleX, Clock, Cloud, Code, Coffee, Contrast, Copy,
-  Cpu, createIcons, Database, Download, ExternalLink, Eye, EyeOff, File as FileIcon, FileImage, FileText, Folder, FolderKey, FolderOpen, FolderPlus, Globe, HardDrive, Hand, Hash, Hourglass, House, Infinity as InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LoaderCircle, LockKeyhole, LockKeyholeOpen,
+  Activity, AppWindow, ArrowLeft, ArrowRight, Bell, BellOff, Bot, Box, Brain, Calendar, CalendarClock, CalendarDays, Check, ChevronDown, ChevronRight, CircleCheck, CircleHelp, CircleMinus, CircleStop, CircleX, Clock, Cloud, Code, Coffee, Contrast, Copy,
+  Cpu, createIcons, Database, Download, ExternalLink, Eye, EyeOff, File as FileIcon, FileImage, FileText, Folder, FolderKey, FolderOpen, FolderPlus, Globe, HardDrive, Hand, Hash, Hourglass, House, Inbox, Infinity as InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LoaderCircle, LockKeyhole, LockKeyholeOpen,
   Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, MonitorUp, Moon, MousePointer2, Network, Pencil, Pin, PinOff, Play, PlugZap, Plus, Power, Radio, RefreshCw, Repeat, Rocket, RotateCcw, ScrollText, Search, Server, Settings,
-  Shield, ShieldCheck, ShieldOff, Sparkles, Square, SquareArrowOutUpRight, SquareTerminal, Sun, Sunrise, Sunset, Tag, Terminal, Timer, Trash2, TriangleAlert, Upload, UserMinus, UserRound, X, Zap,
+  Shield, ShieldCheck, ShieldOff, Sparkles, Square, SquareArrowOutUpRight, SquareTerminal, Sun, Sunrise, Sunset, Tag, Terminal, Timer, Trash2, TriangleAlert, Upload, UserMinus, UserRound, Volume2, X, Zap,
 } from "lucide";
+import { BELL_AGE_WIDTH, mountBell } from "./bell";
 import { mountCaffeinateForm } from "./caffeinate-form";
 import { mountDevices } from "./devices";
 import {
   defaults, desktop, offStatus, type ActivityAccessibility, type LidMode, type LidStatus, type CaffeinateSettings, type Duration, type Preferences,
-  type ProxySettings, type Statuses, type Theme,
+  type NotificationMode, type ProxySettings, type SoundName, type Statuses, type Theme,
 } from "./desktop";
 import { messages, type Language, type Message } from "./messages";
 import { mountTools, tools, updateQuickStartMode, updateToolStatus, type ToolId } from "./modules";
@@ -36,6 +37,7 @@ if (remote) {
   for (const node of document.querySelectorAll<HTMLElement>("[data-local-only]")) node.hidden = true;
 }
 document.documentElement.style.setProperty("--session-width", `${SESSION_WIDTH}ch`);
+document.documentElement.style.setProperty("--bell-age-width", `${BELL_AGE_WIDTH}ch`);
 const updateToolOrder = mountTools(pinned => updatePreference("tools", {
   key: "pinned",
   apply: current => ({ ...current, pinned }),
@@ -43,10 +45,10 @@ const updateToolOrder = mountTools(pinned => updatePreference("tools", {
 function renderIcons(): void {
   createIcons({
     icons: {
-      Activity, AppWindow, ArrowLeft, ArrowRight, Bell, Bot, Box, Brain, Calendar, CalendarClock, CalendarDays, Check, ChevronDown, ChevronRight, CircleCheck, CircleHelp, CircleMinus, CircleStop, CircleX, Clock, Cloud, Code, Coffee, Contrast, Copy,
-      Cpu, Database, Download, ExternalLink, Eye, EyeOff, File: FileIcon, FileImage, FileText, Folder, FolderKey, FolderOpen, FolderPlus, Globe, HardDrive, Hand, Hash, Hourglass, House, Infinity: InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LoaderCircle, LockKeyhole, LockKeyholeOpen,
+      Activity, AppWindow, ArrowLeft, ArrowRight, Bell, BellOff, Bot, Box, Brain, Calendar, CalendarClock, CalendarDays, Check, ChevronDown, ChevronRight, CircleCheck, CircleHelp, CircleMinus, CircleStop, CircleX, Clock, Cloud, Code, Coffee, Contrast, Copy,
+      Cpu, Database, Download, ExternalLink, Eye, EyeOff, File: FileIcon, FileImage, FileText, Folder, FolderKey, FolderOpen, FolderPlus, Globe, HardDrive, Hand, Hash, Hourglass, House, Inbox, Infinity: InfinityIcon, Info, KeyRound, Laptop, LaptopMinimal, LayoutGrid, Link, List, LoaderCircle, LockKeyhole, LockKeyholeOpen,
       Maximize2, Megaphone, MessageSquare, Monitor, MonitorSmartphone, MonitorUp, Moon, MousePointer2, Network, Pencil, Pin, PinOff, Play, PlugZap, Plus, Power, Radio, RefreshCw, Repeat, Rocket, RotateCcw, ScrollText, Search, Server,
-      Settings, Shield, ShieldCheck, ShieldOff, Sparkles, Square, SquareArrowOutUpRight, SquareTerminal, Sun, Sunrise, Sunset, Tag, Terminal, Timer, Trash2, TriangleAlert, Upload, UserMinus, UserRound, X, Zap,
+      Settings, Shield, ShieldCheck, ShieldOff, Sparkles, Square, SquareArrowOutUpRight, SquareTerminal, Sun, Sunrise, Sunset, Tag, Terminal, Timer, Trash2, TriangleAlert, Upload, UserMinus, UserRound, Volume2, X, Zap,
     },
     attrs: { "aria-hidden": "true", "stroke-width": 1.75 },
   });
@@ -87,6 +89,12 @@ const quickStartHints = document.querySelectorAll<HTMLElement>("[data-quick-star
 const durationButtons = document.querySelectorAll<HTMLButtonElement>("[data-duration]");
 const languageButtons = document.querySelectorAll<HTMLButtonElement>("[data-language]");
 const themeButtons = document.querySelectorAll<HTMLButtonElement>("[data-theme-choice]");
+const notificationModeButtons = document.querySelectorAll<HTMLButtonElement>("[data-notification-mode]");
+const soundNameButtons = document.querySelectorAll<HTMLButtonElement>("[data-sound-name]");
+const notificationSound = element<HTMLInputElement>("notification-sound");
+const notificationSoundSection = element("notification-sound-section");
+const notificationSoundChoice = element("notification-sound-choice");
+const notificationSoundPlay = element<HTMLButtonElement>("notification-sound-play");
 const translated = document.querySelectorAll<HTMLElement>("[data-text]");
 const accessibleLabels = document.querySelectorAll<HTMLElement>("[data-label]");
 const translatedTips = document.querySelectorAll<HTMLElement>("[data-tip-text]");
@@ -124,7 +132,7 @@ element("login-launch-setting").hidden = !desktop.macApp;
 type ActivityMode = "duration" | "schedule";
 type FeedbackTarget = ToolId | "tools" | "settings" | "devices";
 type FeedbackLine = { message: Message; tool?: ToolId };
-type PreferenceChoice = "duration" | "language" | "theme" | "hideWhileSharing" | "startToolsOnLaunch" | "seenVersion";
+type PreferenceChoice = "duration" | "language" | "theme" | "hideWhileSharing" | "startToolsOnLaunch" | "seenVersion" | "notifications";
 type PreferenceChange = {
   key: PreferenceChoice | ToolId | "proxySettings" | "pinned";
   apply: (current: Preferences) => Preferences;
@@ -222,6 +230,12 @@ function needsAccessibility(): boolean {
   return desktop.macApp && (accessibility === "required" || accessibility === "unavailable");
 }
 
+/** Opens or closes a `.collapse`. A closed one takes no focus. */
+function setCollapseOpen(region: HTMLElement, open: boolean): void {
+  region.toggleAttribute("data-open", open);
+  region.inert = !open;
+}
+
 function setNoticeOpen(region: HTMLElement, open: boolean): void {
   region.toggleAttribute("data-open", open);
   region.toggleAttribute("inert", !open);
@@ -293,6 +307,20 @@ lidModes.addEventListener("input", event => {
   void chooseLid((event.target as HTMLInputElement).value as LidMode);
 });
 const changelog = mountChangelog({ translate, language: preferredLanguage, onClose: markVersionSeen });
+/** Opens a place of the panel that a notification names. Only the views of this panel are known. */
+function openRoute(route: string): void {
+  if (!/^[a-z]+$/.test(route)) return;
+  document.querySelector<HTMLButtonElement>(`.sidebar [data-view="${route}"]`)?.click();
+}
+const bell = remote ? undefined : mountBell({ translate, language: preferredLanguage, refreshIcons: renderIcons, navigate: openRoute });
+if (bell) {
+  void desktop.onNotificationOpen(route => {
+    if (route === "bell") bell.open();
+    else openRoute(route);
+  });
+}
+/** The problem of each view that the bell already has, so a notice that stays open is listed once. */
+const recordedFeedback: Partial<Record<FeedbackTarget, string>> = {};
 element("changelog-open").addEventListener("click", event => changelog.open(undefined, event.currentTarget as HTMLElement));
 let runningVersion: string | undefined;
 /** Records that the user saw the setup or the changes of the running version. */
@@ -391,7 +419,12 @@ function renderFeedback(): void {
     setText(noticeDescription, description);
     setText(noticeAnnouncement, `${titleText}. ${description}`);
     visibleNotice = { target, key };
+    if (bell && !informational && recordedFeedback[target] !== key) {
+      recordedFeedback[target] = key;
+      void desktop.recordNotification("error", title, { detail: lines[0].message }, target).catch(() => {});
+    }
   } else {
+    if (lines.length === 0) delete recordedFeedback[target];
     if (noticeRegion.contains(document.activeElement)) view.querySelector("h1")?.focus();
     setText(noticeAnnouncement, "");
     visibleNotice = undefined;
@@ -617,7 +650,8 @@ function renderControls(): void {
   renderActivityControls(unavailable, pending);
   startToolsOnLaunch.checked = preferences.startToolsOnLaunch;
   setDisabled(startToolsOnLaunch, !loaded);
-  for (const button of [...languageButtons, ...themeButtons]) setDisabled(button, !loaded);
+  for (const button of [...languageButtons, ...themeButtons, ...notificationModeButtons, ...soundNameButtons]) setDisabled(button, !loaded);
+  setDisabled(notificationSound, !loaded);
   caffeinate.setDisabled(unavailable || !statuses.caffeinate.supported);
   renderBlocks();
 }
@@ -652,6 +686,18 @@ function renderPreferences(previous?: Preferences): void {
       setAttribute(button, "aria-pressed", String(button.dataset.duration === preferences.duration));
     }
   }
+  if (JSON.stringify(previous?.notifications) !== JSON.stringify(preferences.notifications)) {
+    const { mode, sound, soundName } = preferences.notifications;
+    for (const button of notificationModeButtons) {
+      setAttribute(button, "aria-pressed", String(button.dataset.notificationMode === mode));
+    }
+    for (const button of soundNameButtons) {
+      setAttribute(button, "aria-pressed", String(button.dataset.soundName === soundName));
+    }
+    notificationSound.checked = sound;
+    setCollapseOpen(notificationSoundSection, mode !== "off");
+    setCollapseOpen(notificationSoundChoice, sound);
+  }
   if (previous?.language !== preferences.language) {
     for (const button of languageButtons) {
       setAttribute(button, "aria-pressed", String(button.dataset.language === preferences.language));
@@ -678,6 +724,7 @@ function renderPreferences(previous?: Preferences): void {
     if (remote) banner.render();
     onboarding.render();
     changelog.render();
+    bell?.render();
     renderLid();
     renderStatus();
   } else {
@@ -840,6 +887,7 @@ async function save(next: Preferences): Promise<void> {
     choice("hideWhileSharing", desktop.saveHideWhileSharing),
     choice("pinned", desktop.savePinnedTools),
     choice("seenVersion", desktop.saveSeenVersion),
+    choice("notifications", desktop.saveNotifications),
     proxyPart("role", desktop.saveProxyRole),
     proxyPart("port", desktop.saveProxyPort),
     proxyPart("server", desktop.saveProxyServer),
@@ -1126,6 +1174,25 @@ languageButtons.forEach(button => button.addEventListener("click", () => {
 themeButtons.forEach(button => button.addEventListener("click", () => {
   updateChoice("settings", "theme", button.dataset.themeChoice as Theme);
 }));
+function updateNotifications(change: Partial<Preferences["notifications"]>): void {
+  updatePreference("settings", {
+    key: "notifications",
+    apply: current => ({ ...current, notifications: { ...current.notifications, ...change } }),
+  });
+}
+notificationModeButtons.forEach(button => button.addEventListener("click", () => {
+  const mode = button.dataset.notificationMode as NotificationMode;
+  if (preferences.notifications.mode !== mode) updateNotifications({ mode });
+}));
+soundNameButtons.forEach(button => button.addEventListener("click", () => {
+  const soundName = button.dataset.soundName as SoundName;
+  void desktop.playNotificationSound(soundName).catch(() => {});
+  if (preferences.notifications.soundName !== soundName) updateNotifications({ soundName });
+}));
+notificationSound.addEventListener("change", () => updateNotifications({ sound: notificationSound.checked }));
+notificationSoundPlay.addEventListener("click", () => {
+  void desktop.playNotificationSound(preferences.notifications.soundName).catch(() => {});
+});
 loginLaunch.addEventListener("change", () => {
   clearFeedback("settings");
   renderFeedback();

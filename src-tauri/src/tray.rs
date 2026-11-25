@@ -1,8 +1,4 @@
-use crate::{
-    panel,
-    preferences::{system_language, Language},
-    Controller, ToolId,
-};
+use crate::{panel, preferences::speaks_spanish, Controller, ToolId};
 use objc2::{define_class, msg_send, rc::Retained, MainThreadMarker};
 use objc2_app_kit::{
     NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
@@ -23,6 +19,7 @@ use tauri::{
 
 const TRAY_ID: &str = "lazy-worker";
 const CONTROLLED: &str = "tray-controlled";
+const NOTIFICATIONS: &str = "tray-notifications";
 const OPEN: &str = "tray-open";
 const START_SELECTED: &str = "tray-start-selected";
 const ACTIVITY: &str = "tray-activity";
@@ -42,6 +39,8 @@ struct MenuState {
     spanish: bool,
     /// The names of the devices that have an open connection to control this one.
     controlled_by: Vec<String>,
+    /// The notifications of the bell that are not read yet.
+    unread: usize,
     can_start_selected: bool,
     update_available: bool,
     activity: ToolState,
@@ -71,11 +70,10 @@ impl MenuState {
             failed: statuses.proxy.error.is_some(),
         };
         Some(Self {
-            spanish: match preferences.language {
-                Language::System => matches!(system_language(), Language::Es),
-                Language::Es => true,
-                Language::En => false,
-            },
+            spanish: speaks_spanish(preferences.language),
+            unread: app
+                .try_state::<crate::inbox::Inbox>()
+                .map_or(0, |inbox| inbox.unread()),
             can_start_selected: (preferences.quick_start.activity
                 && activity.supported
                 && !activity.active)
@@ -143,8 +141,16 @@ impl MenuState {
             (all, true) => format!("Controlado por {} dispositivos", all.len()),
             (all, false) => format!("Controlled by {} devices", all.len()),
         };
+        let notifications = match (self.unread, self.spanish) {
+            (0, _) => String::new(),
+            (1, true) => "1 notificación nueva".into(),
+            (1, false) => "1 new notification".into(),
+            (count, true) => format!("{count} notificaciones nuevas"),
+            (count, false) => format!("{count} new notifications"),
+        };
         Labels {
             controlled,
+            notifications,
             open: match (self.spanish, self.update_available) {
                 (true, true) => "Abrir panel (actualización disponible)",
                 (false, true) => "Open Panel (Update Available)",
@@ -161,6 +167,7 @@ impl MenuState {
 
 struct Labels {
     controlled: String,
+    notifications: String,
     open: &'static str,
     start_selected: &'static str,
     quit: &'static str,
@@ -174,6 +181,8 @@ struct Controls {
     /// A disabled line and its separator, first in the menu while a device controls this one.
     controlled: MenuItem<tauri::Wry>,
     controlled_separator: PredefinedMenuItem<tauri::Wry>,
+    /// A line that opens the bell, before "Open Panel" while some notifications are not read.
+    notifications: MenuItem<tauri::Wry>,
     open: MenuItem<tauri::Wry>,
     start_selected: MenuItem<tauri::Wry>,
     activity: MenuItem<tauri::Wry>,
@@ -202,6 +211,25 @@ impl Controls {
                 self.menu.remove(&self.controlled)?;
                 self.menu.remove(&self.controlled_separator)?;
             }
+        }
+        if rendered.unread != state.unread || rendered.spanish != state.spanish {
+            let (was, is) = (rendered.unread > 0, state.unread > 0);
+            if is {
+                self.notifications.set_text(&labels.notifications)?;
+            }
+            // The controlled lines, when shown, stay first.
+            let position = if state.controlled_by.is_empty() { 0 } else { 2 };
+            if is && !was {
+                self.menu.insert(&self.notifications, position)?;
+            } else if was && !is {
+                self.menu.remove(&self.notifications)?;
+            }
+        }
+        if (rendered.unread > 0) != (state.unread > 0) {
+            let tray = app
+                .tray_by_id(TRAY_ID)
+                .ok_or_else(|| io::Error::other("Missing status item"))?;
+            set_unread_dot(&tray, state.unread > 0)?;
         }
         if rendered.spanish != state.spanish || rendered.update_available != state.update_available {
             self.open.set_text(labels.open)?;
@@ -237,6 +265,7 @@ pub fn install(app: &App) -> tauri::Result<()> {
         menu: Menu::new(app)?,
         controlled: item(CONTROLLED, &labels.controlled, false)?,
         controlled_separator: PredefinedMenuItem::separator(app)?,
+        notifications: item(NOTIFICATIONS, &labels.notifications, true)?,
         open: item(OPEN, labels.open, true)?,
         start_selected: item(
             START_SELECTED,
@@ -253,6 +282,9 @@ pub fn install(app: &App) -> tauri::Result<()> {
     if !state.controlled_by.is_empty() {
         menu.append(&controls.controlled)?;
         menu.append(&controls.controlled_separator)?;
+    }
+    if state.unread > 0 {
+        menu.append(&controls.notifications)?;
     }
     menu.append_items(&[
         &controls.open,
@@ -272,6 +304,7 @@ pub fn install(app: &App) -> tauri::Result<()> {
         .on_menu_event(handle_menu_event)
         .build(app)?;
     set_activity_dot(&tray, state.has_active_tool())?;
+    set_unread_dot(&tray, state.unread > 0)?;
     app.manage(controls);
     Ok(())
 }
@@ -320,6 +353,10 @@ fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
         }
         QUIT => {
             app.exit(0);
+            return;
+        }
+        NOTIFICATIONS => {
+            crate::notifications::open(app, None, "bell");
             return;
         }
         START_SELECTED => Action::StartSelected,
@@ -426,26 +463,7 @@ define_class!(
     impl ActivityDot {
         #[unsafe(method(drawRect:))]
         fn draw_dot(&self, _dirty_rect: NSRect) {
-            // SAFETY: These are constant AppKit appearance names.
-            let (light, dark) = unsafe { (NSAppearanceNameAqua, NSAppearanceNameDarkAqua) };
-            let appearances = NSArray::from_slice(&[light, dark]);
-            let uses_dark_palette = self
-                .effectiveAppearance()
-                .bestMatchFromAppearancesWithNames(&appearances)
-                .is_some_and(|name| name.isEqualToString(dark));
-            let (red, green, blue) = if uses_dark_palette {
-                (0xE4, 0x97, 0x84)
-            } else {
-                (0xA3, 0x4F, 0x44)
-            };
-            NSColor::colorWithSRGBRed_green_blue_alpha(
-                f64::from(red) / 255.0,
-                f64::from(green) / 255.0,
-                f64::from(blue) / 255.0,
-                1.0,
-            )
-            .setFill();
-
+            set_badge_fill(self);
             let center = self.bounds().size;
             // The template reserves space right of the glyph, 12pt from its canvas center.
             let origin = NSPoint::new(center.width / 2.0 + 9.0, center.height / 2.0 - 3.0);
@@ -467,6 +485,95 @@ define_class!(
         }
     }
 );
+
+/// Sets the fill of a badge in the menu bar to the terracotta of the current appearance.
+fn set_badge_fill(view: &NSView) {
+    // SAFETY: These are constant AppKit appearance names.
+    let (light, dark) = unsafe { (NSAppearanceNameAqua, NSAppearanceNameDarkAqua) };
+    let appearances = NSArray::from_slice(&[light, dark]);
+    let uses_dark_palette = view
+        .effectiveAppearance()
+        .bestMatchFromAppearancesWithNames(&appearances)
+        .is_some_and(|name| name.isEqualToString(dark));
+    let (red, green, blue) = if uses_dark_palette {
+        (0xE4, 0x97, 0x84)
+    } else {
+        (0xA3, 0x4F, 0x44)
+    };
+    NSColor::colorWithSRGBRed_green_blue_alpha(
+        f64::from(red) / 255.0,
+        f64::from(green) / 255.0,
+        f64::from(blue) / 255.0,
+        1.0,
+    )
+    .setFill();
+}
+
+fn set_unread_dot(tray: &TrayIcon, unread: bool) -> tauri::Result<()> {
+    tray.with_inner_tray_icon(move |tray| {
+        let mtm = MainThreadMarker::new().expect("Status item update must run on the main thread");
+        let button = tray
+            .ns_status_item()
+            .and_then(|item| item.button(mtm))
+            .ok_or_else(|| io::Error::other("Missing status item button"))?;
+        if let Some(dot) = button
+            .subviews()
+            .iter()
+            .find_map(|view| view.downcast::<UnreadDot>().ok())
+        {
+            dot.setHidden(!unread);
+        } else {
+            let dot = UnreadDot::new(mtm, button.bounds());
+            dot.setHidden(!unread);
+            button.addSubview(&dot);
+        }
+        Ok(())
+    })?
+}
+
+define_class!(
+    // SAFETY: The view uses AppKit's main-thread model and draws inside its bounds.
+    #[unsafe(super(NSView))]
+    #[name = "LazyWorkerUnreadDot"]
+    struct UnreadDot;
+
+    impl UnreadDot {
+        /// A smaller dot above the activity dot, in the same reserved space right of the glyph.
+        #[unsafe(method(drawRect:))]
+        fn draw_dot(&self, _dirty_rect: NSRect) {
+            set_badge_fill(self);
+            let center = self.bounds().size;
+            let origin = NSPoint::new(center.width / 2.0 + 9.5, center.height / 2.0 + 4.0);
+            NSBezierPath::bezierPathWithOvalInRect(NSRect::new(origin, NSSize::new(5.0, 5.0)))
+                .fill();
+        }
+
+        #[unsafe(method(viewDidChangeEffectiveAppearance))]
+        fn appearance_changed(&self) {
+            // SAFETY: Forward AppKit's appearance callback to NSView first.
+            let _: () = unsafe { msg_send![super(self), viewDidChangeEffectiveAppearance] };
+            self.setNeedsDisplay(true);
+        }
+
+        #[unsafe(method(hitTest:))]
+        fn hit_test(&self, _point: NSPoint) -> *mut NSView {
+            std::ptr::null_mut()
+        }
+    }
+);
+
+impl UnreadDot {
+    fn new(mtm: MainThreadMarker, frame: NSRect) -> Retained<Self> {
+        // SAFETY: Initialize the view on the main thread with the status button's bounds.
+        let view: Retained<Self> =
+            unsafe { msg_send![super(mtm.alloc().set_ivars(())), initWithFrame: frame] };
+        view.setAutoresizingMask(
+            NSAutoresizingMaskOptions::ViewWidthSizable
+                | NSAutoresizingMaskOptions::ViewHeightSizable,
+        );
+        view
+    }
+}
 
 impl ActivityDot {
     fn new(mtm: MainThreadMarker, frame: NSRect) -> Retained<Self> {
@@ -497,6 +604,20 @@ mod tests {
         assert_eq!(state.labels().controlled, "Controlado por 2 dispositivos");
         state.controlled_by.pop();
         assert_eq!(state.labels().controlled, "Controlado por Studio");
+    }
+
+    #[test]
+    fn the_menu_counts_unread_notifications_in_both_languages() {
+        let mut state = MenuState::default();
+        assert_eq!(state.labels().notifications, "");
+        state.unread = 1;
+        assert_eq!(state.labels().notifications, "1 new notification");
+        state.unread = 3;
+        assert_eq!(state.labels().notifications, "3 new notifications");
+        state.spanish = true;
+        assert_eq!(state.labels().notifications, "3 notificaciones nuevas");
+        state.unread = 1;
+        assert_eq!(state.labels().notifications, "1 notificación nueva");
     }
 
     #[test]

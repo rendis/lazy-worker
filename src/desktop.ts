@@ -59,6 +59,20 @@ export type LidStatus = { supported: boolean; external: boolean };
 /** `checked` is the time of the last check that got an answer, in seconds since the Unix epoch. */
 export type UpdateStatus = { version: string | null; checked: number | null };
 export type ProxyInstalls = { claudeCode: boolean; claudeApp: boolean; codexCode: boolean; codexApp: boolean };
+export type NotificationMode = "off" | "app" | "system";
+export type SoundName = "tink" | "pop" | "glass";
+export type NotificationSettings = { mode: NotificationMode; sound: boolean; soundName: SoundName };
+/** One notification of the bell. `key` and `params.detail` are message keys. Other params fill them and are text only. */
+export type AppNotification = {
+  id: string;
+  /** Seconds since the Unix epoch. */
+  at: number;
+  kind: "message" | "error" | "update" | "info";
+  key: string;
+  params: Record<string, string>;
+  route: string | null;
+  read: boolean;
+};
 export type Preferences = {
   language: Language | "system";
   theme: Theme;
@@ -75,6 +89,8 @@ export type Preferences = {
   pinned: ToolId[];
   /** The version whose changes the user has seen. `null` until the setup or What’s new closes. */
   seenVersion: string | null;
+  /** Where the app tells the person about something new. */
+  notifications: NotificationSettings;
 };
 export type Status = {
   mode: "off" | "manual" | "scheduled";
@@ -222,6 +238,7 @@ export const defaults: Preferences = {
   lidAwake: "sleep",
   pinned: [],
   seenVersion: null,
+  notifications: { mode: "system", sound: true, soundName: "pop" },
   caffeinate: {
     mode: "untilStopped",
     flags: { i: false, d: false, m: false, s: true, u: false },
@@ -280,6 +297,7 @@ function loadPreviewPreferences(): Preferences {
     ...defaults,
     ...saved,
     quickStart: { ...defaults.quickStart, ...saved.quickStart },
+    notifications: { ...defaults.notifications, ...saved.notifications },
     proxy: {
       ...defaults.proxy,
       ...saved.proxy,
@@ -773,6 +791,19 @@ function previewRemoteStatuses(id: string): Statuses {
   return { activity: status("activity"), caffeinate: status("caffeinate"), proxy: status("proxy") };
 }
 
+/** The bell of a browser preview: a sample of each kind, some read. `?bell-empty` starts it empty. */
+const previewNow = Math.floor(Date.now() / 1000);
+let previewNotifications: AppNotification[] = previewQuery.has("bell-empty") ? [] : [
+  { id: "p1", at: previewNow - 10, kind: "update", key: "notifyUpdate", params: { version: "0.7.1", detail: "restartToUpdate" }, route: "settings", read: false },
+  { id: "p2", at: previewNow - 480, kind: "error", key: "caffeinate", params: { detail: "workerUnavailable" }, route: "caffeinate", read: false },
+  { id: "p3", at: previewNow - 3600, kind: "info", key: "settings", params: { detail: "saveFailed" }, route: "settings", read: true },
+  { id: "p4", at: previewNow - 3 * 86400, kind: "error", key: "devices", params: { detail: "remoteChangeFailed" }, route: "devices", read: true },
+];
+const notificationListeners = new Set<() => void>();
+function previewNotificationsChanged(): void {
+  for (const listener of notificationListeners) listener();
+}
+
 export const desktop = {
   /** The device that this window controls, or `null` in the panel. */
   remote: remoteId === null ? null : { id: remoteId },
@@ -979,6 +1010,46 @@ export const desktop = {
   async saveHideWhileSharing(enabled: boolean): Promise<void> {
     if (native) return call("setHideWhileSharing", { enabled });
     savePreview(current => ({ ...current, hideWhileSharing: enabled }));
+  },
+  async saveNotifications(settings: NotificationSettings): Promise<void> {
+    if (native) return call("setNotificationPreferences", settings);
+    savePreview(current => ({ ...current, notifications: { ...settings } }));
+  },
+  /** Plays a notification sound. A browser preview has none. */
+  async playNotificationSound(soundName: SoundName): Promise<void> {
+    if (macApp) await call("playNotificationSound", { soundName });
+  },
+  /** The notifications of the bell, newest first. */
+  async listNotifications(): Promise<AppNotification[]> {
+    if (native) return call("listNotifications");
+    return previewNotifications.map(entry => ({ ...entry, params: { ...entry.params } }));
+  },
+  /** Marks the named notifications read, or all of them without names. */
+  async markNotificationsRead(ids?: string[]): Promise<void> {
+    if (native) return call("markNotificationsRead", { ids: ids ?? null });
+    previewNotifications = previewNotifications.map(entry => (!ids || ids.includes(entry.id) ? { ...entry, read: true } : entry));
+    previewNotificationsChanged();
+  },
+  async clearNotifications(): Promise<void> {
+    if (native) return call("clearNotifications");
+    previewNotifications = [];
+    previewNotificationsChanged();
+  },
+  /** Adds a problem that the panel showed to the bell. */
+  async recordNotification(kind: "error" | "info", key: string, params: Record<string, string>, route: string | null): Promise<void> {
+    if (native) return call("recordNotification", { kind, key, params, route });
+    const at = Math.floor(Date.now() / 1000);
+    previewNotifications = [{ id: `p${at}-${previewNotifications.length}`, at, kind, key, params, route, read: false }, ...previewNotifications].slice(0, 100);
+    previewNotificationsChanged();
+  },
+  /** Calls `refresh` when the list of the bell changes. */
+  async onNotificationsChanged(refresh: () => void): Promise<void> {
+    if (native) await listen("notifications-changed", refresh);
+    else notificationListeners.add(refresh);
+  },
+  /** Calls `open` with the place that a click on a macOS banner or the menu bar asks for. */
+  async onNotificationOpen(open: (route: string) => void): Promise<void> {
+    if (native) await listen<string>("notification-open", event => open(event.payload));
   },
   async savePinnedTools(tools: ToolId[]): Promise<void> {
     if (native) return call("setPinnedTools", { tools });

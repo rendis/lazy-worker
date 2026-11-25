@@ -34,6 +34,68 @@ fn preferred_language(tags: impl IntoIterator<Item = impl AsRef<str>>) -> Langua
         .unwrap_or(Language::En)
 }
 
+/// True when the app speaks Spanish: chosen, or the system's first known language.
+#[cfg(target_os = "macos")]
+pub fn speaks_spanish(language: Language) -> bool {
+    match language {
+        Language::System => matches!(system_language(), Language::Es),
+        Language::Es => true,
+        Language::En => false,
+    }
+}
+
+/// Where the app tells the person about something new.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NotificationMode {
+    /// Only the bell lists it.
+    Off,
+    /// The bell, and a sound.
+    App,
+    /// The bell, a sound, and a macOS banner.
+    #[default]
+    System,
+}
+
+/// The sounds of macOS that the app offers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SoundName {
+    Tink,
+    #[default]
+    Pop,
+    Glass,
+}
+
+impl SoundName {
+    /// The name of the system sound.
+    pub fn system_name(self) -> &'static str {
+        match self {
+            Self::Tink => "Tink",
+            Self::Pop => "Pop",
+            Self::Glass => "Glass",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct NotificationSettings {
+    pub mode: NotificationMode,
+    pub sound: bool,
+    pub sound_name: SoundName,
+}
+
+impl Default for NotificationSettings {
+    fn default() -> Self {
+        Self {
+            mode: NotificationMode::default(),
+            sound: true,
+            sound_name: SoundName::default(),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Theme {
@@ -132,6 +194,8 @@ pub struct Preferences {
     pub pinned: Vec<String>,
     /// The version whose changes the user has seen.
     pub seen_version: Option<String>,
+    /// Where the app tells the person about something new.
+    pub notifications: NotificationSettings,
 }
 
 impl Default for Preferences {
@@ -149,6 +213,7 @@ impl Default for Preferences {
             lid_awake: crate::lid::LidMode::default(),
             pinned: Vec::new(),
             seen_version: None,
+            notifications: NotificationSettings::default(),
         }
     }
 }
@@ -231,6 +296,22 @@ mod tests {
         assert!(!preferences.quick_start.proxy);
         assert!(!preferences.start_tools_on_launch);
         assert_eq!(preferences.caffeinate.seconds, 1800);
+    }
+
+    #[test]
+    fn existing_preferences_load_with_notifications_on() {
+        let preferences: Preferences = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(preferences.notifications, NotificationSettings::default());
+        assert_eq!(preferences.notifications.mode, NotificationMode::System);
+        assert!(preferences.notifications.sound);
+        assert_eq!(preferences.notifications.sound_name, SoundName::Pop);
+
+        let partial: Preferences =
+            serde_json::from_str(r#"{"notifications":{"mode":"app"}}"#).unwrap();
+        assert_eq!(partial.notifications.mode, NotificationMode::App);
+        assert!(partial.notifications.sound);
+        let saved = serde_json::to_string(&partial).unwrap();
+        assert!(saved.contains(r#""soundName":"pop""#));
     }
 
     #[test]

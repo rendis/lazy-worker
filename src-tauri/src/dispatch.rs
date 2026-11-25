@@ -10,7 +10,11 @@ use crate::{
     devices::{FilesMode, FilesScope},
     lid,
     lid::LidMode,
-    preferences::{Language, ManualDuration, Preferences, Schedule, Theme},
+    inbox,
+    preferences::{
+        Language, ManualDuration, NotificationMode, NotificationSettings, Preferences, Schedule,
+        SoundName, Theme,
+    },
     proxy,
     proxy::{ProxyApp, Role},
     Controller, FirstRun, ToolId,
@@ -303,6 +307,29 @@ pub enum Request {
     CheckDevice { id: String },
     /// Sends one of a few requests to a paired device, for the Devices view.
     RemoteCall { id: String, request: Value },
+    /// The notifications of the bell, newest first.
+    ListNotifications,
+    /// Marks the named notifications read, or all of them without names.
+    MarkNotificationsRead { ids: Option<Vec<String>> },
+    ClearNotifications,
+    /// Adds a problem that the panel showed. Only errors and notes come from the webview.
+    RecordNotification {
+        kind: WebNotificationKind,
+        key: String,
+        #[serde(default)]
+        params: std::collections::BTreeMap<String, String>,
+        route: Option<String>,
+    },
+    SetNotificationPreferences { mode: NotificationMode, sound: bool, sound_name: SoundName },
+    PlayNotificationSound { sound_name: SoundName },
+}
+
+/// The kinds of notification that the webview may add.
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WebNotificationKind {
+    Error,
+    Info,
 }
 
 impl Request {
@@ -439,6 +466,13 @@ impl Request {
             | Self::GetTransfers
             | Self::StopTransfer { .. }
             | Self::ClearTransfers
+            // The bell belongs to the person at this device.
+            | Self::ListNotifications
+            | Self::MarkNotificationsRead { .. }
+            | Self::ClearNotifications
+            | Self::RecordNotification { .. }
+            | Self::SetNotificationPreferences { .. }
+            | Self::PlayNotificationSound { .. }
             | Self::RequestActivityAccessibility => Access::LocalOnly,
         }
     }
@@ -477,7 +511,8 @@ impl Request {
             | Self::ListFiles { .. }
             | Self::StatFile { .. }
             | Self::ReadFileChunk { .. }
-            | Self::GetTransfers => true,
+            | Self::GetTransfers
+            | Self::ListNotifications => true,
             Self::CheckForUpdate
             | Self::RestartToUpdate
             | Self::SetLanguage { .. }
@@ -551,7 +586,12 @@ impl Request {
             | Self::OpenRemoteFile { .. }
             | Self::StopTransfer { .. }
             | Self::ClearTransfers
-            | Self::RemoteCall { .. } => false,
+            | Self::RemoteCall { .. }
+            | Self::MarkNotificationsRead { .. }
+            | Self::ClearNotifications
+            | Self::RecordNotification { .. }
+            | Self::SetNotificationPreferences { .. }
+            | Self::PlayNotificationSound { .. } => false,
         }
     }
 
@@ -665,7 +705,14 @@ impl Request {
             | Self::GetTransfers
             | Self::StopTransfer { .. }
             | Self::ClearTransfers
-            | Self::RemoteCall { .. } => false,
+            | Self::RemoteCall { .. }
+            // The bell is hidden in a window that controls a device, and a device never reads another's bell.
+            | Self::ListNotifications
+            | Self::MarkNotificationsRead { .. }
+            | Self::ClearNotifications
+            | Self::RecordNotification { .. }
+            | Self::SetNotificationPreferences { .. }
+            | Self::PlayNotificationSound { .. } => false,
         }
     }
 
@@ -1283,6 +1330,51 @@ async fn run(
             }
         }
         Request::CopyText { text } => crate::clipboard::write(&text).map(|()| Value::Null),
+        Request::ListNotifications => json(app.state::<inbox::Inbox>().list()),
+        Request::MarkNotificationsRead { ids } => {
+            if let Some(ids) = &ids {
+                inbox::validate_ids(ids)?;
+            }
+            if app.state::<inbox::Inbox>().mark_read(ids.as_deref())? {
+                inbox::changed(app);
+            }
+            Ok(Value::Null)
+        }
+        Request::ClearNotifications => {
+            if app.state::<inbox::Inbox>().clear()? {
+                inbox::changed(app);
+            }
+            Ok(Value::Null)
+        }
+        Request::RecordNotification { kind, key, params, route } => {
+            let entry = inbox::validate(inbox::NewEntry {
+                kind: match kind {
+                    WebNotificationKind::Error => inbox::Kind::Error,
+                    WebNotificationKind::Info => inbox::Kind::Info,
+                },
+                key,
+                params,
+                route,
+            })?;
+            // The panel already shows it, so it neither sounds nor shows a banner.
+            inbox::record(app, entry, inbox::Alert::No, inbox::Repeat::Allow);
+            Ok(Value::Null)
+        }
+        Request::SetNotificationPreferences { mode, sound, sound_name } => update(app, controller, |p| {
+            p.notifications = NotificationSettings { mode, sound, sound_name };
+        }),
+        Request::PlayNotificationSound { sound_name } => {
+            #[cfg(target_os = "macos")]
+            {
+                crate::notifications::play(app, sound_name);
+                return Ok(Value::Null);
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = sound_name;
+                Err("unsupported")
+            }
+        }
         Request::CheckDevice { id } => {
             #[cfg(unix)]
             return tauri::async_runtime::spawn_blocking({
@@ -1937,6 +2029,35 @@ mod tests {
         assert_eq!(allowed(CONTROL, &devices, &preferences), Err("localOnly"));
         assert_eq!(allowed(ACTIONS, &devices, &preferences), Err("localOnly"));
         assert_eq!(allowed(Origin::Local, &devices, &preferences), Ok(()));
+    }
+
+    #[test]
+    fn the_bell_and_its_settings_are_local_only() {
+        let preferences = Preferences::default();
+        for value in [
+            json!({"command": "listNotifications"}),
+            json!({"command": "markNotificationsRead", "args": {"ids": null}}),
+            json!({"command": "clearNotifications"}),
+            json!({"command": "recordNotification", "args": {"kind": "error", "key": "caffeinate", "route": "caffeinate"}}),
+            json!({"command": "setNotificationPreferences", "args": {"mode": "app", "sound": true, "soundName": "glass"}}),
+            json!({"command": "playNotificationSound", "args": {"soundName": "tink"}}),
+        ] {
+            let request = request(value);
+            assert_eq!(allowed(CONTROL, &request, &preferences), Err("localOnly"));
+            assert_eq!(allowed(Origin::Local, &request, &preferences), Ok(()));
+            assert!(!request.runs_on_viewer());
+            assert!(!request.is_controller_side());
+        }
+        assert!(request(json!({"command": "listNotifications"})).is_read());
+        assert!(!request(json!({"command": "clearNotifications"})).is_read());
+    }
+
+    #[test]
+    fn the_webview_may_add_only_errors_and_notes() {
+        for kind in ["message", "update"] {
+            let value = json!({"command": "recordNotification", "args": {"kind": kind, "key": "x", "route": null}});
+            assert!(serde_json::from_value::<Request>(value).is_err());
+        }
     }
 
     #[test]
