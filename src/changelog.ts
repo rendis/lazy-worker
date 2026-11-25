@@ -10,6 +10,26 @@ export type Release = { version: string; date: string; changes: readonly Change[
 
 export const releases: readonly Release[] = [
   {
+    version: "0.7.0",
+    date: "2026-11-24",
+    changes: [
+      { en: "New Devices view: control Lazy Worker on your other devices, on your network or through a VPN.",
+        es: "Nueva vista Dispositivos: controla Lazy Worker en tus otros dispositivos, en tu red o a través de una VPN." },
+      { en: "Turn on remote access with one button. Only paired devices can log in, never with a password.",
+        es: "Activa el acceso remoto con un botón. Solo entran los dispositivos emparejados, nunca con contraseña." },
+      { en: "Pair a device with a 6-digit code, and choose on each device what the others may do.",
+        es: "Empareja un dispositivo con un código de 6 dígitos, y elige en cada dispositivo qué pueden hacer los demás." },
+      { en: "From another device, turn tools on and off, open applications, and run or schedule your saved actions.",
+        es: "Desde otro dispositivo, enciende y apaga herramientas, abre aplicaciones, y ejecuta o programa tus acciones guardadas." },
+      { en: "Open a device's own window to manage it as if you were there.",
+        es: "Abre la ventana de un dispositivo para gestionarlo como si estuvieras allí." },
+      { en: "Connect opens a terminal, macOS Screen Sharing, or the shared folders of another device, with a time limit you set on that device.",
+        es: "Conectar abre una terminal, Compartir pantalla de macOS o las carpetas compartidas de otro dispositivo, con el tiempo que elijas en ese dispositivo." },
+      { en: "Every remote action is recorded in the device's log, and Cut all access ends them at once.",
+        es: "Cada acción remota queda en el registro del dispositivo, y Cortar todo el acceso las termina de una vez." },
+    ],
+  },
+  {
     version: "0.6.9",
     date: "2026-11-23",
     changes: [
