@@ -10,6 +10,18 @@ export type Release = { version: string; date: string; changes: readonly Change[
 
 export const releases: readonly Release[] = [
   {
+    version: "0.8.1",
+    date: "2026-11-25",
+    changes: [
+      { en: "Add device lists first the devices that are ready to pair. Other Macs on the network wait behind a count, for information only.",
+        es: "Agregar dispositivo muestra primero los dispositivos listos para emparejar. Las demás Macs de la red quedan detrás de un contador, solo como información." },
+      { en: "A device ready to pair shows it on the same line, so every row keeps its height.",
+        es: "Un dispositivo listo para emparejar lo indica en la misma línea, así todas las filas tienen la misma altura." },
+      { en: "The update notice waits until you finish the setup guide.",
+        es: "El aviso de actualización espera a que termines la guía de configuración." },
+    ],
+  },
+  {
     version: "0.8.0",
     date: "2026-11-25",
     changes: [
