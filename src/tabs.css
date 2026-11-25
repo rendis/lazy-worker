@@ -1,0 +1,31 @@
+/* A tab bar is the app's segmented choice on one line, and its panels all have one height (`--tab-panel-height`),
+   so a change of tab only fades. `mountTabs` in tabs.ts gives the bar its behavior. */
+.tab-segments { display: grid; width: 100%; margin-block-end: 4px; --segment-count: 2; }
+.tab-segments button { min-height: 34px; padding-inline: 8px; }
+.tab-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tab-summary {
+  flex: none;
+  min-width: 1.6em;
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 640;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+  opacity: .8;
+}
+.tab-summary:empty:not([data-dot]), .tab-segments:not([data-summaries]) .tab-summary { display: none; }
+/* A dot says that a way in is on, or, in the color of the sidebar's Settings dot, that something waits for the person.
+   Its word stays for assistive technology only. */
+.tab-summary[data-dot] { min-width: 0; padding: 0; border: 0; font-size: 0; opacity: 1; }
+.tab-summary[data-dot]::before { content: ""; display: block; width: 7px; height: 7px; border-radius: 50%; background: var(--online); }
+.tab-summary[data-pending]::before { background: #edb78a; }
+.tab-segments button[aria-selected="true"] .tab-summary[data-dot]::before { box-shadow: 0 0 0 1.5px var(--choice-ink); }
+.tab-segments button[aria-selected="false"]:hover:enabled { color: var(--text); }
+.tab-segments button[aria-selected="true"] { color: var(--choice-ink); }
+.tab-segments button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.tab-panels { position: relative; height: var(--tab-panel-height); }
+.tab-panel[hidden] { display: none; }
+/* The panel that leaves lies over the one that enters, and both have the same box. */
+.tab-panel.tab-leaving { position: absolute; inset: 0; pointer-events: none; }

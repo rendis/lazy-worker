@@ -15,6 +15,7 @@ import { messages, type Language, type Message } from "./messages";
 import { tools } from "./modules";
 import { h, icon, type Child } from "./proxy";
 import { enterNode, fadeText, only, setHidden } from "./motion";
+import { mountTabs } from "./tabs";
 import { isLinkError, isRefusal, refusal, type Session } from "./remote";
 import { age, formatClock, formatCountdown, formatMoment, formatSession, type AgeUnit } from "./time";
 
@@ -27,8 +28,6 @@ const logPoll = 3000;
 /** The spinner of the Refresh button shows at least this long, so the check can be seen. */
 const refreshShown = 500;
 /** How long a change of tab takes: the panels crossfade while the height moves. */
-const tabOutMs = 110;
-const tabInMs = 180;
 /** How many applications a device can have pinned, and so how many rows its section shows. */
 const pinLimit = 3;
 /** The applications that the tab of a device lists before the rest go behind the count: the pinned ones, then the latest used. */
@@ -551,115 +550,37 @@ export function mountDevices(host: Host) {
 
   /**
    * The tabs of a device: a bar that looks like the app's segmented choices, and one visible panel under it.
-   * Every panel has the same height, so a change of tab only fades the panels over each other. The choice is kept for the device.
-   * The panels keep their elements, so a row inside a hidden panel keeps updating.
+   * The choice is kept for the device. `mountTabs` gives the bar its behavior.
    */
   function tabset(key: string, label: string, specs: readonly TabSpec[], summaries: boolean, onSelect: (id: string) => void) {
-    const ids = specs.map(spec => spec.id);
     const base = `device-tabs-${++sequence}`;
-    let current = tabOf(key, ids);
-    const bar = h("div", {
-      class: "segments tab-segments", role: "tablist", "aria-label": label, "data-selection": current,
-    });
-    bar.style.setProperty("--segment-count", String(specs.length));
+    const bar = h("div", { class: "segments tab-segments", role: "tablist", "aria-label": label });
     bar.toggleAttribute("data-summaries", summaries);
     const container = h("div", { class: "tab-panels" });
-    const entries = specs.map(spec => {
-      const title = h("span", { class: "tab-title" }, t(spec.title));
-      const summary = h("span", { class: "tab-summary" });
-      const button = h("button", {
-        type: "button", role: "tab", id: `${base}-${spec.id}-tab`, "aria-controls": `${base}-${spec.id}`,
-        "aria-selected": "false", tabindex: "-1",
-      }, title, summary);
+    for (const spec of specs) {
       spec.panel.classList.add("tab-panel");
       spec.panel.setAttribute("role", "tabpanel");
       spec.panel.id = `${base}-${spec.id}`;
-      spec.panel.setAttribute("aria-labelledby", button.id);
+      spec.panel.setAttribute("aria-labelledby", `${base}-${spec.id}-tab`);
       container.append(spec.panel);
-      return { spec, button, summary };
-    });
-    bar.append(...entries.map(entry => entry.button), h("span", { class: "segment-indicator", "aria-hidden": "true" }));
-    let token = 0;
-
-    const paint = (id: string): void => {
-      entries.forEach(({ spec, button }, index) => {
-        const selected = spec.id === id;
-        setAttribute(button, "aria-selected", String(selected));
-        setAttribute(button, "tabindex", selected ? "0" : "-1");
-        if (selected) bar.style.setProperty("--segment-position", String(index));
-      });
-      bar.dataset.selection = id;
-    };
-
-    /** Shows `to` and hides `from`. The panels have one height, so they only fade over each other. */
-    const swap = (from: HTMLElement, to: HTMLElement): void => {
-      const mine = ++token;
-      const animate = !reducedMotion.matches && typeof to.animate === "function" && container.isConnected
-        && container.offsetHeight > 0 && !container.closest("[hidden]");
-      for (const panel of entries.map(entry => entry.spec.panel)) {
-        for (const animation of panel.getAnimations()) animation.cancel();
-        panel.classList.remove("tab-leaving");
-        if (panel !== from && panel !== to) panel.hidden = true;
-      }
-      if (!animate) {
-        from.hidden = true;
-        to.hidden = false;
-        return;
-      }
-      from.classList.add("tab-leaving");
-      to.hidden = false;
-      const easing = "cubic-bezier(.22, .7, .36, 1)";
-      const out = from.animate([{ opacity: 1 }, { opacity: 0 }], { duration: tabOutMs, easing: "ease-in", fill: "forwards" });
-      to.animate([{ opacity: 0 }, { opacity: 1 }], { duration: tabInMs, delay: tabOutMs / 2, easing, fill: "backwards" });
-      const end = (): void => {
-        if (mine !== token) return;
-        from.hidden = true;
-        from.classList.remove("tab-leaving");
-        out.cancel();
-      };
-      // A timer also ends it, because a hidden window can pause animations.
-      void out.finished.then(end, end);
-      window.setTimeout(end, tabOutMs + tabInMs);
-    };
-
-    const select = (id: string, focus = false): void => {
-      const entry = entries.find(item => item.spec.id === id);
-      if (!entry) return;
-      if (id !== current) {
-        const from = entries.find(item => item.spec.id === current)!.spec.panel;
-        current = id;
+      bar.append(h("button", {
+        type: "button", role: "tab", id: `${base}-${spec.id}-tab`, "aria-controls": spec.panel.id, "data-tab": spec.id,
+        "aria-selected": "false", tabindex: "-1",
+      }, h("span", { class: "tab-title" }, t(spec.title)), h("span", { class: "tab-summary" })));
+    }
+    bar.append(h("span", { class: "segment-indicator", "aria-hidden": "true" }));
+    const tabs = mountTabs(bar, specs.map(spec => spec.panel), {
+      initial: tabOf(key, specs.map(spec => spec.id)),
+      onSelect: id => {
         tabChoices = { ...tabChoices, [key]: id };
         persist();
-        paint(id);
-        swap(from, entry.spec.panel);
         onSelect(id);
-      }
-      if (focus) entry.button.focus();
-    };
-
-    paint(current);
-    for (const { spec } of entries) spec.panel.hidden = spec.id !== current;
-    for (const { spec, button } of entries) button.addEventListener("click", () => select(spec.id));
-    bar.addEventListener("keydown", event => {
-      const index = ids.indexOf(current);
-      const target = event.key === "ArrowRight" ? (index + 1) % ids.length
-        : event.key === "ArrowLeft" ? (index - 1 + ids.length) % ids.length
-        : event.key === "Home" ? 0 : event.key === "End" ? ids.length - 1 : -1;
-      if (target < 0) return;
-      event.preventDefault();
-      select(ids[target], true);
+      },
     });
-
     return {
       root: h("div", { class: "device-tabs", "data-device": key === "this" ? "this" : "other" }, bar, container),
-      selected: () => current,
-      /** The small badge after the name of a tab. An empty text hides it. `dot` adds a dot before the text, for a state that is on. */
-      summary(id: string, text: string, dot = false): void {
-        const entry = entries.find(item => item.spec.id === id);
-        if (!entry) return;
-        entry.summary.toggleAttribute("data-dot", dot);
-        fadeText(entry.summary, text);
-      },
+      selected: tabs.selected,
+      summary: tabs.summary,
     };
   }
 

@@ -8,13 +8,15 @@ const ageMessages: Record<Exclude<AgeUnit, "seconds">, Message> = {
   minutes: "minutesAgo", hours: "hoursAgo", days: "daysAgo",
 };
 
-export function mountUpdateNotice({ translate, setNoticeOpen, beforeRestart, moveFocus, held }: {
+export function mountUpdateNotice({ translate, setNoticeOpen, beforeRestart, moveFocus, held, showWaiting }: {
   translate: (message: Message) => string;
   /** True while the notice must wait, such as during the setup guide. */
   held: () => boolean;
   setNoticeOpen: (notice: HTMLElement, open: boolean) => void;
   beforeRestart: () => Promise<void>;
   moveFocus: () => void;
+  /** Marks the place of the Settings section, which shows while an update waits. */
+  showWaiting: (waiting: boolean) => void;
 }) {
   const notice = document.getElementById("update-notice")!;
   const settings = document.getElementById("settings-update")!;
@@ -66,6 +68,7 @@ export function mountUpdateNotice({ translate, setNoticeOpen, beforeRestart, mov
     // The section opens and closes over a short time, like every other part of the panel.
     settings.toggleAttribute("data-open", version !== null);
     settings.inert = version === null;
+    showWaiting(version !== null);
     for (const node of [description, settingsDescription]) node.textContent = status;
     for (const button of [restart, settingsRestart, later]) {
       button.setAttribute("aria-disabled", String(installing));

@@ -20,6 +20,7 @@ import { mountChangelog, releasesSince } from "./changelog";
 import { mountOnboarding } from "./onboarding";
 import { mountProxy } from "./proxy";
 import { mountRemoteBanner } from "./remote-banner";
+import { mountTabs } from "./tabs";
 import { isLinkError, refusal, type Reason, type Session } from "./remote";
 import { formatSession, SESSION_WIDTH } from "./time";
 import { mountUpdateNotice } from "./update-notice";
@@ -134,6 +135,24 @@ const activityWarning = document.querySelector<HTMLButtonElement>('[data-permiss
 const sharingWarning = document.querySelector<HTMLButtonElement>('[data-permission-warning="hideWhileSharing"]')!;
 element("settings-presentation").hidden = !desktop.showPresentationPrivacy;
 element("login-launch-setting").hidden = !desktop.macApp;
+const settingsTabKey = "lazy-worker-settings-tab";
+/** The tabs of Settings. The last tab chosen shows again, and a tab whose content waits for the person carries a dot. */
+const settingsTabs = mountTabs(element("settings-tabs"), [...document.querySelectorAll<HTMLElement>(".settings-panel")], {
+  initial: (() => {
+    try {
+      return localStorage.getItem(settingsTabKey) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  })(),
+  onSelect: id => {
+    try {
+      localStorage.setItem(settingsTabKey, id);
+    } catch {
+      // Without storage Settings opens on its first tab next time.
+    }
+  },
+});
 
 type ActivityMode = "duration" | "schedule";
 type FeedbackTarget = ToolId | "tools" | "settings" | "devices";
@@ -335,6 +354,8 @@ function openRoute(route: string): void {
     return;
   }
   if (!/^[a-z]+$/.test(route)) return;
+  // Only an update sends people to Settings, and its section is under About.
+  if (route === "settings") settingsTabs.select("about");
   document.querySelector<HTMLButtonElement>(`.sidebar [data-view="${route}"]`)?.click();
 }
 const bell = remote ? undefined : mountBell({ translate, language: preferredLanguage, refreshIcons: renderIcons, navigate: openRoute });
@@ -361,6 +382,7 @@ const updates = mountUpdateNotice({
   },
   moveFocus: () => activeView().querySelector("h1")?.focus({ preventScroll: true }),
   held: () => onboarding.isOpen(),
+  showWaiting: waiting => settingsTabs.summary("about", waiting ? translate("updates") : "", waiting && "pending"),
 });
 
 function quickStartHint(): string {
@@ -409,6 +431,7 @@ function renderFeedback(): void {
   settingsPreferences.toggleAttribute("data-permission-pending", permissionPending);
   settingsPreferences.toggleAttribute("data-permission-granted", accessibility === "granted");
   settingsPermissionDot.hidden = !permissionPending;
+  settingsTabs.summary("privacy", permissionPending ? translate("accessibilityPending") : "", permissionPending && "pending");
   settingsPermissionState.hidden = !permissionPending;
   permissionFeatures.hidden = !permissionPending;
   if (permissionPending) setAttribute(settingsButton, "aria-describedby", settingsPermissionState.id);

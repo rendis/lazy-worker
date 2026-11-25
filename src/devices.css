@@ -480,34 +480,7 @@ select.field { padding-inline: 4px 2px; }
 .device-tabs { --tab-panel-height: 258px; padding-block: 10px 0; }
 /* This device's Who controls it tab holds three controller rows of 77px, which is its fullest panel. */
 .device-tabs[data-device="this"] { --tab-panel-height: 240px; }
-.tab-segments { display: grid; width: 100%; margin-block-end: 4px; --segment-count: 2; }
-.tab-segments button { min-height: 34px; padding-inline: 8px; }
-.tab-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.tab-summary {
-  flex: none;
-  min-width: 1.6em;
-  padding: 0 6px;
-  border: 1px solid currentColor;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 640;
-  line-height: 1.45;
-  font-variant-numeric: tabular-nums;
-  opacity: .8;
-}
-.tab-summary:empty:not([data-dot]), .tab-segments:not([data-summaries]) .tab-summary { display: none; }
-/* A dot says that a way in is on. Its word stays for assistive technology only. */
-.tab-summary[data-dot] { min-width: 0; padding: 0; border: 0; font-size: 0; opacity: 1; }
-.tab-summary[data-dot]::before { content: ""; display: block; width: 7px; height: 7px; border-radius: 50%; background: var(--online); }
-.tab-segments button[aria-selected="true"] .tab-summary[data-dot]::before { box-shadow: 0 0 0 1.5px var(--choice-ink); }
-.tab-segments button[aria-selected="false"]:hover:enabled { color: var(--text); }
-.tab-segments button[aria-selected="true"] { color: var(--choice-ink); }
-.tab-segments button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.tab-panels { position: relative; height: var(--tab-panel-height); }
-.tab-panel[hidden] { display: none; }
 .tab-column { display: flex; flex-direction: column; height: 100%; }
-/* The panel that leaves lies over the one that enters, and both have the same box. */
-.tab-panel.tab-leaving { position: absolute; inset: 0; pointer-events: none; }
 .tab-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 46px; padding: 0 2px; border-bottom: 1px solid var(--hairline); }
 .tab-head .section-summary { margin-inline-start: 0; white-space: nowrap; }
 .tab-search { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; }

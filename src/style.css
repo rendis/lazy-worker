@@ -793,13 +793,20 @@ h1:focus { outline: none; }
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
+/* Settings is one card with a tab bar on its first line. Every panel has the height of the fullest one:
+   Notifications while it shows its permission note, 240px in English and Spanish. */
 .settings-preferences {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 15px 20px;
+  --tab-panel-height: 240px;
   max-width: 720px;
   margin-top: 22px;
-  padding: 17px 20px 20px;
+  padding: 14px 20px 20px;
+}
+.settings-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 15px 20px;
+  padding-top: 14px;
 }
 .settings-group .lucide { width: 16px; height: 16px; }
 .settings-group .control-label { display: flex; align-items: center; gap: 7px; transition: color var(--theme-ink-motion, 0s); }
@@ -809,8 +816,9 @@ h1:focus { outline: none; }
   transition: background-color var(--theme-motion, 0s), border-color var(--theme-motion, 0s),
     box-shadow var(--theme-motion, 0s), color var(--theme-ink-motion, 0s);
 }
-.settings-startup, .settings-presentation {
-  grid-column: 1 / -1;
+.settings-startup, .settings-presentation, .settings-permissions { grid-column: 1 / -1; }
+/* A line parts a section from the visible one above it. The first section of a panel sits right under the tabs. */
+.settings-panel > :not([hidden]) ~ :is(.settings-startup, .settings-presentation, .settings-permissions) {
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
@@ -852,18 +860,10 @@ h1:focus { outline: none; }
   font-size: 13px;
   line-height: 1.4;
 }
-.settings-permissions {
-  grid-column: 1 / -1;
-  margin-top: 2px;
-  padding-top: 15px;
-  border-top: 1px solid var(--line);
-}
-/* The update section and the version line share one grid row, so a closed section leaves no gap. */
-.settings-footer { grid-column: 1 / -1; }
-/* Tight enough that the card fits the panel while an update waits. */
+/* The update section is the last row of About, so a closed section leaves no gap. */
+#settings-update { grid-column: 1 / -1; }
 .settings-update {
-  margin-bottom: 12px;
-  padding-top: 9px;
+  padding-top: 12px;
   border-top: 1px solid var(--line);
 }
 .settings-update h2 { font-size: 14px; font-weight: 700; }
@@ -973,7 +973,7 @@ h1:focus { outline: none; }
 .permission-features .lucide { width: 13px; height: 13px; color: var(--pending-color); }
 
 @media (min-width: 800px) {
-  .settings-preferences { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .settings-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .settings-permissions {
     position: relative;
     display: grid;
@@ -2036,7 +2036,7 @@ h1:focus { outline: none; }
 .bell-confirm-actions .accessibility-button { margin: 0; }
 
 /* Notifications in Settings. */
-.settings-notifications { grid-column: 1 / -1; padding-top: 12px; border-top: 1px solid var(--line); }
+.settings-notifications { grid-column: 1 / -1; }
 .settings-notifications > .settings-switch-description { margin: -3px 0 9px; }
 .settings-notifications .segments .lucide { width: 15px; height: 15px; }
 /* The sound on one line: its name, the sounds, a play button, and the switch at the end. */

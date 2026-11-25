@@ -416,13 +416,22 @@
         <div data-module-view="settings" hidden>
           <h1 data-text="settings" tabindex="-1">Settings</h1>
           <div class="settings-preferences" id="settings-preferences">
-            <div class="settings-group" data-local-only>
-              <p class="control-label" id="language-label"><i data-lucide="globe"></i><span data-text="language">Language</span></p>
-              <div class="segments" role="group" aria-labelledby="language-label">
-                <button type="button" data-language="en" lang="en" aria-pressed="false">English</button>
-                <button type="button" data-language="system" data-text="system" aria-pressed="true">System</button>
-                <button type="button" data-language="es" lang="es" aria-pressed="false">Español</button>
-                <span class="segment-indicator" aria-hidden="true"></span>
+            <div class="segments tab-segments" role="tablist" id="settings-tabs" data-label="settings" aria-label="Settings" data-summaries>
+              <button type="button" role="tab" id="settings-tab-general" data-tab="general" aria-controls="settings-panel-general" aria-selected="true" tabindex="0"><span class="tab-title" data-text="settingsGeneral">General</span><span class="tab-summary"></span></button>
+              <button type="button" role="tab" id="settings-tab-notifications" data-tab="notifications" aria-controls="settings-panel-notifications" aria-selected="false" tabindex="-1" data-local-only><span class="tab-title" data-text="notifications">Notifications</span><span class="tab-summary"></span></button>
+              <button type="button" role="tab" id="settings-tab-privacy" data-tab="privacy" aria-controls="settings-panel-privacy" aria-selected="false" tabindex="-1"><span class="tab-title" data-text="settingsPrivacy">Privacy</span><span class="tab-summary"></span></button>
+              <button type="button" role="tab" id="settings-tab-about" data-tab="about" aria-controls="settings-panel-about" aria-selected="false" tabindex="-1"><span class="tab-title" data-text="settingsAbout">About</span><span class="tab-summary"></span></button>
+              <span class="segment-indicator" aria-hidden="true"></span>
+            </div>
+            <div class="tab-panels">
+              <div class="tab-panel settings-panel" role="tabpanel" id="settings-panel-general" aria-labelledby="settings-tab-general">
+                <div class="settings-group" data-local-only>
+                  <p class="control-label" id="language-label"><i data-lucide="globe"></i><span data-text="language">Language</span></p>
+                  <div class="segments" role="group" aria-labelledby="language-label">
+                    <button type="button" data-language="en" lang="en" aria-pressed="false">English</button>
+                    <button type="button" data-language="system" data-text="system" aria-pressed="true">System</button>
+                    <button type="button" data-language="es" lang="es" aria-pressed="false">Español</button>
+                    <span class="segment-indicator" aria-hidden="true"></span>
               </div>
             </div>
             <div class="settings-group" data-local-only>
@@ -460,125 +469,131 @@
                 <p class="settings-switch-description" id="start-tools-on-launch-description" data-text="startToolsOnLaunchDescription">Starts the tools marked for Quick start with their saved settings.</p>
               </div>
             </div>
-            <div class="settings-group settings-notifications" data-local-only>
-              <p class="control-label" id="notifications-label"><i data-lucide="bell"></i><span data-text="notifications">Notifications</span></p>
-              <p class="settings-switch-description" id="notifications-description" data-text="notificationsDescription">Where the app tells you about messages, problems and updates.</p>
-              <div class="segments" role="group" aria-labelledby="notifications-label" aria-describedby="notifications-description">
-                <button type="button" data-notification-mode="off" aria-pressed="false"><i data-lucide="bell-off"></i><span data-text="notificationsOff">Off</span></button>
-                <button type="button" data-notification-mode="app" aria-pressed="false"><i data-lucide="app-window"></i><span data-text="notificationsApp">In the app</span></button>
-                <button type="button" data-notification-mode="system" aria-pressed="true"><i data-lucide="bell"></i><span data-text="notificationsSystem">App and macOS</span></button>
-                <span class="segment-indicator" aria-hidden="true"></span>
               </div>
-              <div class="collapse" id="notification-permission" inert>
-                <div>
-                  <div class="notification-permission" id="notification-permission-box" role="status">
-                    <i data-lucide="triangle-alert"></i>
-                    <span id="notification-permission-text"></span>
-                    <button type="button" class="accessibility-button" id="notification-permission-action"></button>
+              <div class="tab-panel settings-panel" role="tabpanel" id="settings-panel-notifications" aria-labelledby="settings-tab-notifications" data-local-only>
+                <div class="settings-group settings-notifications" data-local-only>
+                  <p class="control-label" id="notifications-label"><i data-lucide="bell"></i><span data-text="notifications">Notifications</span></p>
+                  <p class="settings-switch-description" id="notifications-description" data-text="notificationsDescription">Where the app tells you about messages, problems and updates.</p>
+                  <div class="segments" role="group" aria-labelledby="notifications-label" aria-describedby="notifications-description">
+                    <button type="button" data-notification-mode="off" aria-pressed="false"><i data-lucide="bell-off"></i><span data-text="notificationsOff">Off</span></button>
+                    <button type="button" data-notification-mode="app" aria-pressed="false"><i data-lucide="app-window"></i><span data-text="notificationsApp">In the app</span></button>
+                    <button type="button" data-notification-mode="system" aria-pressed="true"><i data-lucide="bell"></i><span data-text="notificationsSystem">App and macOS</span></button>
+                    <span class="segment-indicator" aria-hidden="true"></span>
                   </div>
-                </div>
-              </div>
-              <div class="collapse" id="notification-sound-section" data-open>
-                <div>
-                  <div class="notification-sound-row">
-                    <label for="notification-sound"><i data-lucide="volume-2"></i><span data-text="notificationSound">Sound</span></label>
-                    <div class="segments" role="group" data-label="notificationSoundName" aria-label="Notification sound">
-                      <button type="button" data-sound-name="tink" aria-pressed="false">Tink</button>
-                      <button type="button" data-sound-name="pop" aria-pressed="true">Pop</button>
-                      <button type="button" data-sound-name="glass" aria-pressed="false">Glass</button>
-                      <span class="segment-indicator" aria-hidden="true"></span>
-                    </div>
-                    <span class="tip" data-tip-text="notificationSoundPlay">
-                      <button type="button" class="icon-button notification-sound-play" id="notification-sound-play" data-label="notificationSoundPlay" aria-label="Play"><i data-lucide="play"></i></button>
-                    </span>
-                    <span class="switch">
-                      <input id="notification-sound" type="checkbox" switch role="switch" aria-describedby="notification-sound-description" disabled />
-                      <span aria-hidden="true"></span>
-                    </span>
-                  </div>
-                  <p class="settings-switch-description" id="notification-sound-description" data-text="notificationSoundDescription">A soft sound when something arrives.</p>
-                </div>
-              </div>
-            </div>
-            <div class="settings-presentation" id="settings-presentation" hidden>
-              <div class="settings-switch-row">
-                <div class="permission-heading-title">
-                  <label for="hide-while-sharing">
-                    <i data-lucide="eye-off"></i><span data-text="hideWhileSharing">Hide Lazy Worker while sharing</span>
-                  </label>
-                  <button class="permission-warning" type="button" data-permission-warning="hideWhileSharing" data-label="showPermissionWarning"
-                    aria-label="Show Accessibility warning" aria-controls="permission-notice" aria-expanded="false" hidden>
-                    <i data-lucide="triangle-alert"></i>
-                  </button>
-                </div>
-                <span class="switch">
-                  <input id="hide-while-sharing" type="checkbox" switch role="switch" aria-describedby="sharing-description accessibility-status" disabled />
-                  <span aria-hidden="true"></span>
-                </span>
-              </div>
-              <p class="settings-switch-description" id="sharing-description" data-text="sharingPrivacyDescription">Hides the panel and menu bar icon during detected screen shares. Requires Accessibility permission.</p>
-            </div>
-            <section class="settings-permissions" aria-labelledby="permissions-heading">
-              <div class="permissions-heading">
-                <span class="permission-symbol" aria-hidden="true"><i data-lucide="lock-keyhole"></i><i data-lucide="lock-keyhole-open"></i></span>
-                <div>
-                  <div class="permission-heading-title">
-                    <h2 id="permissions-heading" data-text="accessibility">Accessibility</h2>
-                    <span class="permission-status-badge" id="settings-permission-state" data-text="accessibilityPending" hidden>Permission pending</span>
+                  <div class="collapse" id="notification-permission" inert>
                     <div>
-                      <button class="help-button permission-help-button" type="button" data-help-button data-label="accessibilityHelp"
-                        aria-label="Help with Accessibility" aria-expanded="false" aria-controls="accessibility-help">
-                        <i data-lucide="info" aria-hidden="true"></i>
-                      </button>
-                      <div id="accessibility-help" class="help-panel permission-guide" aria-hidden="true" inert>
-                        <ol>
-                          <li data-text="accessibilityHelpOpen">Select “Open Accessibility” to go to Privacy & Security → Accessibility.</li>
-                          <li>
-                            <p data-text="accessibilityHelpEnable">Turn on Lazy Worker. If it’s already on and Activity still fails, select the Lazy Worker entry in the list and click −. If it’s missing or you just removed it, click +, choose /Applications/Lazy Worker.app, and turn it on.</p>
-                            <div class="permission-example" role="img" data-label="accessibilityHelpExample"
-                              aria-label="Example showing Accessibility enabled for Lazy Worker">
-                              <img src="/src/assets/logo.png" width="23" height="23" alt="" />
-                              <strong>Lazy Worker</strong>
-                              <span data-text="accessibilityHelpOn">On</span>
-                              <span class="permission-example-switch"></span>
-                            </div>
-                            <p data-text="accessibilityHelpMonterey">On macOS 12, open Security & Privacy → Privacy → Accessibility, unlock the pane and select the checkbox.</p>
-                          </li>
-                          <li data-text="accessibilityHelpRetry">Return here and start Activity again.</li>
-                        </ol>
+                      <div class="notification-permission" id="notification-permission-box" role="status">
+                        <i data-lucide="triangle-alert"></i>
+                        <span id="notification-permission-text"></span>
+                        <button type="button" class="accessibility-button" id="notification-permission-action"></button>
                       </div>
                     </div>
                   </div>
-                  <p id="accessibility-status" role="status"></p>
-                  <ul id="permission-features" class="permission-features" hidden>
-                    <li><i data-lucide="activity"></i><span data-text="activity">Activity</span></li>
-                    <li><i data-lucide="eye-off"></i><span data-text="hideWhileSharingShort">Hide while sharing</span></li>
-                  </ul>
-                </div>
+                  <div class="collapse" id="notification-sound-section" data-open>
+                    <div>
+                      <div class="notification-sound-row">
+                        <label for="notification-sound"><i data-lucide="volume-2"></i><span data-text="notificationSound">Sound</span></label>
+                        <div class="segments" role="group" data-label="notificationSoundName" aria-label="Notification sound">
+                          <button type="button" data-sound-name="tink" aria-pressed="false">Tink</button>
+                          <button type="button" data-sound-name="pop" aria-pressed="true">Pop</button>
+                          <button type="button" data-sound-name="glass" aria-pressed="false">Glass</button>
+                          <span class="segment-indicator" aria-hidden="true"></span>
+                        </div>
+                        <span class="tip" data-tip-text="notificationSoundPlay">
+                          <button type="button" class="icon-button notification-sound-play" id="notification-sound-play" data-label="notificationSoundPlay" aria-label="Play"><i data-lucide="play"></i></button>
+                        </span>
+                        <span class="switch">
+                          <input id="notification-sound" type="checkbox" switch role="switch" aria-describedby="notification-sound-description" disabled />
+                          <span aria-hidden="true"></span>
+                        </span>
+                      </div>
+                      <p class="settings-switch-description" id="notification-sound-description" data-text="notificationSoundDescription">A soft sound when something arrives.</p>
+                    </div>
               </div>
-              <button class="accessibility-button" id="settings-accessibility" type="button" disabled>
-                <i data-lucide="external-link" aria-hidden="true"></i><span data-text="openAccessibility">Open Accessibility settings</span>
-              </button>
-            </section>
-            <div class="settings-footer">
-              <div class="collapse" id="settings-update" inert>
-              <div>
-                <section class="settings-update" aria-labelledby="settings-update-title">
-                  <h2 id="settings-update-title" data-text="updates">Updates</h2>
-                  <p id="settings-update-description" class="notice-description"></p>
-                  <button class="accessibility-button" id="settings-update-restart" type="button" data-text="restartToUpdate" aria-describedby="settings-update-description">Restart to update</button>
+            </div>
+              </div>
+              <div class="tab-panel settings-panel" role="tabpanel" id="settings-panel-privacy" aria-labelledby="settings-tab-privacy">
+                <div class="settings-presentation" id="settings-presentation" hidden>
+                  <div class="settings-switch-row">
+                    <div class="permission-heading-title">
+                      <label for="hide-while-sharing">
+                        <i data-lucide="eye-off"></i><span data-text="hideWhileSharing">Hide Lazy Worker while sharing</span>
+                      </label>
+                      <button class="permission-warning" type="button" data-permission-warning="hideWhileSharing" data-label="showPermissionWarning"
+                        aria-label="Show Accessibility warning" aria-controls="permission-notice" aria-expanded="false" hidden>
+                        <i data-lucide="triangle-alert"></i>
+                      </button>
+                    </div>
+                    <span class="switch">
+                      <input id="hide-while-sharing" type="checkbox" switch role="switch" aria-describedby="sharing-description accessibility-status" disabled />
+                      <span aria-hidden="true"></span>
+                    </span>
+                  </div>
+                  <p class="settings-switch-description" id="sharing-description" data-text="sharingPrivacyDescription">Hides the panel and menu bar icon during detected screen shares. Requires Accessibility permission.</p>
+                </div>
+                <section class="settings-permissions" aria-labelledby="permissions-heading">
+                  <div class="permissions-heading">
+                    <span class="permission-symbol" aria-hidden="true"><i data-lucide="lock-keyhole"></i><i data-lucide="lock-keyhole-open"></i></span>
+                    <div>
+                      <div class="permission-heading-title">
+                        <h2 id="permissions-heading" data-text="accessibility">Accessibility</h2>
+                        <span class="permission-status-badge" id="settings-permission-state" data-text="accessibilityPending" hidden>Permission pending</span>
+                        <div>
+                          <button class="help-button permission-help-button" type="button" data-help-button data-label="accessibilityHelp"
+                            aria-label="Help with Accessibility" aria-expanded="false" aria-controls="accessibility-help">
+                            <i data-lucide="info" aria-hidden="true"></i>
+                          </button>
+                          <div id="accessibility-help" class="help-panel permission-guide" aria-hidden="true" inert>
+                            <ol>
+                              <li data-text="accessibilityHelpOpen">Select “Open Accessibility” to go to Privacy & Security → Accessibility.</li>
+                              <li>
+                                <p data-text="accessibilityHelpEnable">Turn on Lazy Worker. If it’s already on and Activity still fails, select the Lazy Worker entry in the list and click −. If it’s missing or you just removed it, click +, choose /Applications/Lazy Worker.app, and turn it on.</p>
+                                <div class="permission-example" role="img" data-label="accessibilityHelpExample"
+                                  aria-label="Example showing Accessibility enabled for Lazy Worker">
+                                  <img src="/src/assets/logo.png" width="23" height="23" alt="" />
+                                  <strong>Lazy Worker</strong>
+                                  <span data-text="accessibilityHelpOn">On</span>
+                                  <span class="permission-example-switch"></span>
+                                </div>
+                                <p data-text="accessibilityHelpMonterey">On macOS 12, open Security & Privacy → Privacy → Accessibility, unlock the pane and select the checkbox.</p>
+                              </li>
+                              <li data-text="accessibilityHelpRetry">Return here and start Activity again.</li>
+                            </ol>
+                          </div>
+                        </div>
+                      </div>
+                      <p id="accessibility-status" role="status"></p>
+                      <ul id="permission-features" class="permission-features" hidden>
+                        <li><i data-lucide="activity"></i><span data-text="activity">Activity</span></li>
+                        <li><i data-lucide="eye-off"></i><span data-text="hideWhileSharingShort">Hide while sharing</span></li>
+                      </ul>
+                    </div>
+                  </div>
+                  <button class="accessibility-button" id="settings-accessibility" type="button" disabled>
+                    <i data-lucide="external-link" aria-hidden="true"></i><span data-text="openAccessibility">Open Accessibility settings</span>
+                  </button>
                 </section>
               </div>
-            </div>
-            <div class="settings-version" id="settings-version" hidden>
-              <p>
-                <span data-text="appVersion">Version</span> <span id="app-version"></span><span id="update-check-status" role="status"></span>
-              </p>
-              <span class="settings-version-actions" data-local-only>
-                <button class="text-link" id="changelog-open" type="button" data-text="whatsNew">What’s new</button>
-                <button class="text-link" id="update-check" type="button" data-text="checkForUpdates" hidden>Check for updates</button>
-              </span>
-            </div>
+              <div class="tab-panel settings-panel" role="tabpanel" id="settings-panel-about" aria-labelledby="settings-tab-about">
+                <div class="settings-version" id="settings-version" hidden>
+                  <p>
+                    <span data-text="appVersion">Version</span> <span id="app-version"></span><span id="update-check-status" role="status"></span>
+                  </p>
+                  <span class="settings-version-actions" data-local-only>
+                    <button class="text-link" id="changelog-open" type="button" data-text="whatsNew">What’s new</button>
+                    <button class="text-link" id="update-check" type="button" data-text="checkForUpdates" hidden>Check for updates</button>
+                  </span>
+                </div>
+                <div class="collapse" id="settings-update" inert>
+                  <div>
+                    <section class="settings-update" aria-labelledby="settings-update-title">
+                      <h2 id="settings-update-title" data-text="updates">Updates</h2>
+                      <p id="settings-update-description" class="notice-description"></p>
+                      <button class="accessibility-button" id="settings-update-restart" type="button" data-text="restartToUpdate" aria-describedby="settings-update-description">Restart to update</button>
+                    </section>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
