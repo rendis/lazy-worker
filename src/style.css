@@ -793,11 +793,10 @@ h1:focus { outline: none; }
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
-/* Settings is one card with a tab bar on its first line. Every panel has the height of the fullest one:
-   Notifications while it shows its permission note, 240px in English and Spanish. */
+/* Settings is one card with a tab bar on its first line. On the desktop the card fills the view down to the bottom.
+   Its panels never get shorter than the fullest one: Notifications while it shows its permission note, 240px in English and Spanish. */
 .settings-preferences {
   --tab-panel-height: 240px;
-  max-width: 720px;
   margin-top: 22px;
   padding: 14px 20px 20px;
 }
@@ -818,7 +817,7 @@ h1:focus { outline: none; }
 }
 .settings-startup, .settings-presentation, .settings-permissions { grid-column: 1 / -1; }
 /* A line parts a section from the visible one above it. The first section of a panel sits right under the tabs. */
-.settings-panel > :not([hidden]) ~ :is(.settings-startup, .settings-presentation, .settings-permissions) {
+.settings-panel > :not([hidden]) ~ :is(.settings-startup, .settings-presentation, .settings-permissions, .settings-about-row) {
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
@@ -860,28 +859,28 @@ h1:focus { outline: none; }
   font-size: 13px;
   line-height: 1.4;
 }
-/* The update section is the last row of About, so a closed section leaves no gap. */
-#settings-update { grid-column: 1 / -1; }
+/* About: the app and its version, then one row for updates and one for the changes. The waiting update opens inside the Updates row. */
+.settings-about-app { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; }
+.settings-about-app img { flex: none; border-radius: 11px; }
+.settings-about-app strong { font-size: 17px; font-weight: 750; }
+.settings-about-app p { margin-top: 1px; color: var(--secondary); font-size: 13px; font-variant-numeric: tabular-nums; }
+.settings-about-row { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 10px; }
+.settings-about-row > .lucide { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--secondary); }
+.settings-about-text { flex: 1; min-width: 0; }
+.settings-about-text strong { font-size: 14px; font-weight: 700; }
+.settings-about-text > p { margin-top: 2px; color: var(--secondary); font-size: 13px; line-height: 1.4; }
+#update-check-status:not(:empty) + .update-automatic { display: none; }
+.settings-about-row .accessibility-button { flex: none; margin-top: 0; }
+.settings-about-row .accessibility-button[aria-disabled="true"] { opacity: .5; cursor: default; }
 .settings-update {
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
+  margin-top: 10px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--glass);
 }
-.settings-update h2 { font-size: 14px; font-weight: 700; }
+.settings-update h2 { font-size: 13px; font-weight: 700; }
 .settings-update .accessibility-button { margin-top: 6px; }
-.settings-version {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  color: var(--secondary);
-  font-size: 12px;
-  transition: color var(--theme-ink-motion, 0s);
-}
-.settings-version p { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.settings-version .text-link { font-size: 12px; transition: opacity .16s ease; }
-.settings-version .text-link[aria-disabled="true"] { opacity: .5; cursor: default; }
-#update-check-status:not(:empty)::before { content: " · "; }
 /* The icon lines up with the title and the first line of the status. */
 .permissions-heading { display: flex; align-items: flex-start; gap: 10px; }
 .permissions-heading h2 { font-size: 14px; font-weight: 700; }
@@ -972,6 +971,12 @@ h1:focus { outline: none; }
 .permission-features li { display: flex; align-items: center; gap: 6px; }
 .permission-features .lucide { width: 13px; height: 13px; color: var(--pending-color); }
 
+/* On the desktop the main view has a fixed height, so the Settings card can reach its bottom. */
+@media (min-width: 581px) {
+  [data-module-view="settings"]:not([hidden]) { display: flex; flex-direction: column; min-height: 100%; }
+  .settings-preferences { display: flex; flex: 1; flex-direction: column; }
+  .settings-preferences > .tab-panels { flex: 1; height: auto; min-height: var(--tab-panel-height); }
+}
 @media (min-width: 800px) {
   .settings-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .settings-permissions {
@@ -1710,7 +1715,6 @@ h1:focus { outline: none; }
 .onboarding-tool .setting-note { margin-top: 2px; }
 .onboarding[data-step="tools"] .onboarding-mark { display: none; }
 
-.settings-version-actions { display: flex; flex: none; gap: 14px; }
 .changelog-window { grid-template-rows: auto minmax(0, 1fr); width: min(560px, 100%); }
 .changelog { min-height: 0; padding: 4px 6px 4px 2px; overflow: hidden auto; border-top: 1px solid var(--hairline); }
 .changelog section { padding: 12px 0; border-bottom: 1px solid var(--hairline); }
