@@ -10,6 +10,16 @@ export type Release = { version: string; date: string; changes: readonly Change[
 
 export const releases: readonly Release[] = [
   {
+    version: "0.8.2",
+    date: "2026-11-25",
+    changes: [
+      { en: "Settings is now split into tabs: General, Notifications, Privacy, and About.",
+        es: "Ajustes ahora está dividido en pestañas: General, Notificaciones, Privacidad y Acerca de." },
+      { en: "A dot on Privacy says a permission is missing, and a dot on About says an update is waiting.",
+        es: "Un punto en Privacidad indica que falta un permiso, y un punto en Acerca de indica que hay una actualización esperando." },
+    ],
+  },
+  {
     version: "0.8.1",
     date: "2026-11-25",
     changes: [
